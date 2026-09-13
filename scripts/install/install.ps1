@@ -79,14 +79,14 @@ function Get-ReleaseBaseUrl {
     }
 
     if ($RequestedVersion -eq 'latest') {
-        return 'https://github.com/uvwt/agentdock/releases/latest/download'
+        return 'https://github.com/Serialeo/agentdock/releases/latest/download'
     }
 
     $normalizedVersion = $RequestedVersion
     if (-not $normalizedVersion.StartsWith('v')) {
         $normalizedVersion = "v$normalizedVersion"
     }
-    return "https://github.com/uvwt/agentdock/releases/download/$normalizedVersion"
+    return "https://github.com/Serialeo/agentdock/releases/download/$normalizedVersion"
 }
 
 function Get-CloudflaredReleaseBaseUrl {

@@ -455,7 +455,7 @@ jobs:
           # 文档直接引用仓库 main 或对应 git tag 上的源文件。
           installer_entry = Path("dist/install.sh")
           installer_text = installer_entry.read_text()
-          default_base = "https://github.com/uvwt/agentdock/releases/latest/download"
+          default_base = "https://github.com/Serialeo/agentdock/releases/latest/download"
           release_base = f"https://github.com/{repository}/releases/download/{tag}"
           if default_base not in installer_text:
               raise SystemExit("install.sh default release base was not found")

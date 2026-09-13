@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 MIN_GO_VERSION="1.22"
 DEFAULT_GO_VERSION="${AGENTDOCK_GO_VERSION:-1.22.12}"
-DEFAULT_REPO_URL="${AGENTDOCK_REPO_URL:-https://github.com/uvwt/agentdock.git}"
+DEFAULT_REPO_URL="${AGENTDOCK_REPO_URL:-https://github.com/Serialeo/agentdock.git}"
 DEFAULT_BRANCH="${AGENTDOCK_BRANCH:-main}"
 DEFAULT_SOURCE_DIR="${AGENTDOCK_SOURCE_DIR:-/opt/agentdock}"
 DEFAULT_DATA_DIR="${AGENTDOCK_DATA_DIR:-}"
@@ -59,12 +59,12 @@ usage() {
 AgentDock Linux 问答式一键部署脚本。
 
 用法：
-  curl -fsSL https://github.com/uvwt/agentdock/releases/latest/download/install.sh -o /tmp/agentdock-install.sh
+  curl -fsSL https://github.com/Serialeo/agentdock/releases/latest/download/install.sh -o /tmp/agentdock-install.sh
   sh /tmp/agentdock-install.sh
 
 Alpine/极简系统如果没有 curl/bash：
   apk add --no-cache bash curl
-  curl -fsSL https://github.com/uvwt/agentdock/releases/latest/download/install.sh -o /tmp/agentdock-install.sh
+  curl -fsSL https://github.com/Serialeo/agentdock/releases/latest/download/install.sh -o /tmp/agentdock-install.sh
   sh /tmp/agentdock-install.sh
 
 环境变量可覆盖默认值：

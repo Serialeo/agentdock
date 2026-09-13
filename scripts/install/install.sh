@@ -3,7 +3,7 @@ set -eu
 
 umask 077
 
-DEFAULT_BASE_URL="https://github.com/uvwt/agentdock/releases/latest/download"
+DEFAULT_BASE_URL="https://github.com/Serialeo/agentdock/releases/latest/download"
 BASE_URL="${AGENTDOCK_INSTALLER_BASE_URL:-$DEFAULT_BASE_URL}"
 TMP_ROOT=""
 CLEAR_PUBLIC_URL=false

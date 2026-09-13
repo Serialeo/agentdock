@@ -75,7 +75,7 @@ usage() {
 AgentDock macOS 预编译版本安装脚本。
 
 用法：
-  curl -fsSL https://github.com/uvwt/agentdock/releases/latest/download/install.sh -o /tmp/agentdock-install.sh
+  curl -fsSL https://github.com/Serialeo/agentdock/releases/latest/download/install.sh -o /tmp/agentdock-install.sh
   sh /tmp/agentdock-install.sh [选项]
 
 选项：
@@ -390,13 +390,13 @@ release_url() {
   fi
 
   if [[ "$RELEASE_VERSION" == "latest" ]]; then
-    print -r -- "https://github.com/uvwt/agentdock/releases/latest/download"
+    print -r -- "https://github.com/Serialeo/agentdock/releases/latest/download"
     return
   fi
 
   local normalized="$RELEASE_VERSION"
   [[ "$normalized" == v* ]] || normalized="v$normalized"
-  print -r -- "https://github.com/uvwt/agentdock/releases/download/$normalized"
+  print -r -- "https://github.com/Serialeo/agentdock/releases/download/$normalized"
 }
 
 next_backup_path() {
