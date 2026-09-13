@@ -98,7 +98,7 @@ jobs:
           installer_tmp="$RUNNER_TEMP/installer"
           install_dir="$RUNNER_TEMP/agentdock-install"
           data_dir="$RUNNER_TEMP/agentdock-data"
-          env_file="$RUNNER_TEMP/agentdock.env"
+          env_file="$RUNNER_TEMP/agentdock-config/agentdock.env"
 
           mkdir -p "$installer_tmp"
           curl -fL "$release_base/install.sh" -o "$installer"
@@ -162,23 +162,12 @@ jobs:
           release_dir="$RUNNER_TEMP/release-assets"
           mkdir -p "$release_dir"
           gh release download "$tag" --repo "${{ github.repository }}" --dir "$release_dir"
-          release_port="$(python3 - <<'PY'
-          import socket
-          with socket.socket() as sock:
-              sock.bind(('127.0.0.1', 0))
-              print(sock.getsockname()[1])
-          PY
+          release_base="$(python3 - "$release_dir" <<'PYURI'
+          import sys
+          from pathlib import Path
+          print(Path(sys.argv[1]).resolve().as_uri())
+          PYURI
           )"
-          python3 -m http.server "$release_port" --bind 127.0.0.1 --directory "$release_dir" >"$RUNNER_TEMP/release-http.log" 2>&1 &
-          release_server_pid=$!
-          trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
-          release_base="http://127.0.0.1:$release_port"
-          if ! curl --fail --silent --show-error --max-time 2 \
-            --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 30 \
-            "$release_base/" -o /dev/null; then
-            cat "$RUNNER_TEMP/release-http.log"
-            exit 1
-          fi
           installer="$RUNNER_TEMP/install.sh"
           uninstaller="$RUNNER_TEMP/uninstall-macos.sh"
           dmg="$RUNNER_TEMP/AgentDock-macos-arm64.dmg"
@@ -261,6 +250,7 @@ jobs:
           zsh -n "$uninstaller"
           HOME="$RUNNER_TEMP/home" \
           AGENTDOCK_INSTALLER_BASE_URL="$release_base" \
+          AGENTDOCK_RELEASE_BASE_URL="$release_base" \
           AGENTDOCK_INSTALL_DIR="$RUNNER_TEMP/bin" \
             sh "$installer" --version "$tag"
           "$RUNNER_TEMP/bin/agentdock" --help >/dev/null 2>&1
