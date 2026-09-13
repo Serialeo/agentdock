@@ -190,6 +190,8 @@ AgentDock 可以选择作为 ACP Client 原生托管本地 Coding Agent adapter�
 - 最终审查与完成验证
 - 可复用工作流模板
 
+命令会话支持结果持久化及显式 `request_id` 提交去重；重启行为与保留上限见[命令结果日志](docs/command-outcome-journal.md)。配对的 NexusDock 可通过专用 MCP App 提供用户主动开启的 WorkSession 续接。
+
 ### Recall 与 NexusDock 集成
 
 AgentDock 可以选择与 NexusDock 配对，将它作为多设备汇总入口：

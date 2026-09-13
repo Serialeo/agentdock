@@ -24,11 +24,11 @@ type commandSkillContext struct {
 	envSkill string
 }
 
-func (invocation commandInvocation) start(ctx context.Context, timeout time.Duration, tty bool, prepare session.PrepareFunc) (*session.Session, session.PreparationStatus, error) {
+func (invocation commandInvocation) start(ctx context.Context, timeout time.Duration, tty bool, prepare session.PrepareFunc, options ...session.StartOptions) (*session.Session, session.PreparationStatus, error) {
 	if invocation.build != nil {
-		return session.StartCommandWithTTY(ctx, invocation.build, timeout, tty, prepare)
+		return session.StartCommandWithTTY(ctx, invocation.build, timeout, tty, prepare, options...)
 	}
-	return session.StartWithTTY(ctx, invocation.command, invocation.workdir, invocation.env, timeout, tty, prepare)
+	return session.StartWithTTY(ctx, invocation.command, invocation.workdir, invocation.env, timeout, tty, prepare, options...)
 }
 
 func (svc *Service) prepareCommandInvocation(ctx context.Context, request ExecRequest) (commandInvocation, error) {
@@ -62,6 +62,8 @@ func (svc *Service) newHostCommandInvocation(ctx context.Context, request ExecRe
 		executionContext.ProjectID = execution.Target.ProjectID
 		executionContext.DeploymentID = execution.Target.DeploymentID
 		executionContext.NodeID = execution.Deployment.NodeID
+		executionContext.DeploymentRevision = execution.Target.DeploymentRevision
+		executionContext.ContextRevision = execution.Target.ContextRevision
 	}
 	return commandInvocation{
 		command:   request.Cmd,

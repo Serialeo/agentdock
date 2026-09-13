@@ -20,10 +20,15 @@ type Service struct {
 	sessions       *session.Store
 	resolveSkill   SkillResolver
 	commandContext CommandContext
+	journal        *Journal
 }
 
-func New(configProvider ConfigProvider, ws *workspace.Workspace, envs *envstore.Store, resolveSkill SkillResolver, commandContext CommandContext) *Service {
-	return &Service{
+func New(configProvider ConfigProvider, ws *workspace.Workspace, envs *envstore.Store, resolveSkill SkillResolver, commandContext CommandContext, journals ...*Journal) *Service {
+	var journal *Journal
+	if len(journals) > 0 {
+		journal = journals[0]
+	}
+	return &Service{journal: journal,
 		config: configProvider, ws: ws, envs: envs, sessions: session.NewStore(),
 		resolveSkill: resolveSkill, commandContext: commandContext,
 	}

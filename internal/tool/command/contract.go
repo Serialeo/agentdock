@@ -17,6 +17,7 @@ func InputSchema(name string) (map[string]any, bool) {
 
 	switch name {
 	case ToolExecCommand:
+		props["request_id"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "description": "Stable idempotency key for this command within the Project Target. Reuse with the same execution arguments to recover the original result after a lost response; conflicting reuse is rejected. Does not imply exactly-once external side effects."}
 		props["cmd"] = stringProp("Command to run.")
 		props["workdir"] = stringProp("Host working directory. Relative paths resolve from ~/AgentDock.")
 		props["skill"] = stringProp("Optional active Skill context. When workdir is omitted, the command runs from the active installed Skill root and loads that Skill isolated environment.")

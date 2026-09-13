@@ -34,6 +34,24 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 	if request.Cmd == "" {
 		return nil, toolError("INVALID_ARGUMENT", "cmd is required", "validation")
 	}
+	if err := validateCommandRequestID(request.RequestID); err != nil {
+		return nil, err
+	}
+	digest, err := commandDigest(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if svc.journal != nil && request.RequestID != "" {
+		record, exists, lookupErr := svc.journal.lookup(commandIdentity(ctx), request.RequestID, digest)
+		if lookupErr != nil {
+			return nil, durableFailure(lookupErr)
+		}
+		if exists {
+			result := record.result(commandOutputLimit(request.MaxOutputBytes))
+			result["replayed"] = true
+			return result, nil
+		}
+	}
 	invocation, err := svc.prepareCommandInvocation(ctx, request)
 	if err != nil {
 		return nil, err
@@ -74,6 +92,27 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 		}
 	}()
 
+	options := session.StartOptions{Execution: invocation.execution}
+	var durableRecord commandRecord
+	if svc.journal != nil {
+		var exists bool
+		durableRecord, exists, err = svc.journal.begin(invocation.execution, request.RequestID, digest)
+		if err != nil {
+			svc.sessions.FinishStart()
+			return nil, durableFailure(err)
+		}
+		if exists {
+			svc.sessions.FinishStart()
+			result := durableRecord.result(maxBytes)
+			result["replayed"] = true
+			return result, nil
+		}
+		options.ID = durableRecord.ID
+		options.StartedAt = durableRecord.StartedAt
+		options.OnOutput = func(stderr bool, data []byte) error { return svc.journal.output(durableRecord.ID, stderr, data) }
+		options.OnRunning = func() error { return svc.journal.running(durableRecord.ID) }
+		options.OnComplete = func(completion session.Completion) error { return svc.journal.finish(durableRecord.ID, completion) }
+	}
 	// 这里故意不用请求 ctx 派生子进程生命周期。
 	// 背景：exec_command 可能先返回 running，让模型后续通过 session_observe action=status 继续取结果；
 	// 如果子进程绑定到单次 MCP 请求 ctx，请求结束时 git push / npm install 等长任务会被杀掉。
@@ -81,14 +120,23 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 	s, sandboxStatus, err := invocation.start(commandCtx, timeout, tty, func(command *exec.Cmd) (func(), session.PreparationStatus) {
 		// AgentDock 不额外过滤命令，实际权限边界由 Host OS 用户决定。
 		return func() {}, session.PreparationStatus{Enabled: false, Mode: "none", Policy: "no_command_content_filtering", Warnings: []string{"exec_command runs with the AgentDock process OS user privileges", "use Docker volumes, service users, file permissions, and network policy as the security boundary"}}
-	})
+	}, options)
 	// 只有 invocation.start 完整返回后，runner、平台进程控制器以及 cmdCtx 取消监听才都已经建立。
 	// Runtime.Close 会等待这个启动窗口排空，再取消 commandCtx，避免在半启动状态抢占进程。
 	svc.sessions.FinishStart()
 	if err != nil {
+		if svc.journal != nil {
+			if persistErr := svc.journal.startFailed(durableRecord.ID, err); persistErr != nil {
+				return nil, durableFailure(persistErr)
+			}
+			var startError *session.StartError
+			if errors.As(err, &startError) && startError.ProcessStarted {
+				return nil, toolErrorDetails("COMMAND_OUTCOME_UNKNOWN", "command startup control failed after process creation; inspect the durable outcome before any retry", "runtime", map[string]any{"session_id": durableRecord.ID, "reason": err.Error()})
+			}
+			return nil, toolErrorDetails("COMMAND_START_FAILED", "command process could not be started", "runtime", map[string]any{"session_id": durableRecord.ID, "reason": err.Error()})
+		}
 		return nil, err
 	}
-	s.SetExecutionContext(invocation.execution)
 	if request.Stdin != "" {
 		if err := s.Write(request.Stdin); err != nil {
 			s.Kill()
@@ -109,6 +157,12 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 		reservationActive = false
 		result := snapshotResult(s.Snapshot("running", maxBytes))
 		result["sandbox"] = preparationStatusResult(sandboxStatus)
+		if svc.journal != nil {
+			result["event_id"] = durableRecord.EventID
+			if request.RequestID != "" {
+				result["request_id"] = request.RequestID
+			}
+		}
 		result["session_reason"] = reason
 		result["observe_after_ms"] = 1000
 		return result
@@ -137,6 +191,14 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 
 	err = s.WaitError()
 	s.Cancel()
+	if svc.journal != nil {
+		result, durableErr := svc.durableSessionResult(ctx, s.ID, maxBytes)
+		if durableErr != nil {
+			return nil, durableErr
+		}
+		result["sandbox"] = preparationStatusResult(sandboxStatus)
+		return result, nil
+	}
 	result := snapshotResult(s.Snapshot("exited", maxBytes))
 	result["sandbox"] = preparationStatusResult(sandboxStatus)
 	if s.TimedOut {
@@ -200,6 +262,9 @@ func snapshotResult(snapshot session.Snapshot) Result {
 		"stdout_output_lines": snapshot.StdoutOutputLines, "stderr_output_lines": snapshot.StderrOutputLines,
 		"stdout_truncated": snapshot.StdoutTruncated, "stderr_truncated": snapshot.StderrTruncated,
 	}
+	if snapshot.PersistenceError != "" {
+		result["persistence_error"] = snapshot.PersistenceError
+	}
 	if snapshot.Completed {
 		result["exit_code"] = snapshot.ExitCode
 		result["command_ok"] = snapshot.CommandOK
@@ -234,7 +299,7 @@ func preparationStatusResult(status session.PreparationStatus) map[string]any {
 func (svc *Service) writeStdin(ctx context.Context, request SessionActRequest) (Result, error) {
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
-		return nil, toolError("SESSION_NOT_FOUND", "session not found", "not_found")
+		return svc.durableSessionResult(ctx, request.SessionID, commandOutputLimit(request.MaxOutputBytes))
 	}
 	execution, err := requireSessionOwner(ctx, s)
 	if err != nil {
@@ -246,6 +311,9 @@ func (svc *Service) writeStdin(ctx context.Context, request SessionActRequest) (
 	maxBytes := commandOutputLimit(request.MaxOutputBytes)
 	select {
 	case <-s.Done:
+		if svc.journal != nil {
+			return svc.durableSessionResult(ctx, s.ID, maxBytes)
+		}
 		return svc.consumeCompletedSession(s, maxBytes), nil
 	default:
 	}
@@ -288,7 +356,7 @@ func (svc *Service) killSession(ctx context.Context, request SessionActRequest) 
 	started := time.Now()
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
-		return nil, toolError("SESSION_NOT_FOUND", "session not found", "not_found")
+		return svc.durableSessionResult(ctx, request.SessionID, commandOutputLimit(request.MaxOutputBytes))
 	}
 	if _, err := requireSessionOwner(ctx, s); err != nil {
 		return nil, err
@@ -412,7 +480,7 @@ func waitForSessionsCompletion(sessions []*session.Session, timeout time.Duratio
 func (svc *Service) sessionStatus(ctx context.Context, request SessionObserveRequest) (Result, error) {
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
-		return nil, toolError("SESSION_NOT_FOUND", "session not found", "not_found")
+		return svc.durableSessionResult(ctx, request.SessionID, commandOutputLimit(request.MaxOutputBytes))
 	}
 	if _, err := requireSessionOwner(ctx, s); err != nil {
 		return nil, err
@@ -420,6 +488,9 @@ func (svc *Service) sessionStatus(ctx context.Context, request SessionObserveReq
 	maxBytes := commandOutputLimit(request.MaxOutputBytes)
 	select {
 	case <-s.Done:
+		if svc.journal != nil {
+			return svc.durableSessionResult(ctx, s.ID, maxBytes)
+		}
 		return svc.consumeCompletedSession(s, maxBytes), nil
 	default:
 		return snapshotResult(s.Snapshot("running", maxBytes)), nil
@@ -455,6 +526,26 @@ func (svc *Service) listSessions(ctx context.Context) (Result, error) {
 			item["node_id"] = summary.NodeID
 		}
 		items = append(items, item)
+	}
+	if svc.journal != nil {
+		records, err := svc.journal.list()
+		if err != nil {
+			return nil, durableFailure(err)
+		}
+		seen := make(map[string]bool, len(items))
+		for _, item := range items {
+			seen[item["session_id"].(string)] = true
+		}
+		for index := len(records) - 1; index >= 0 && len(items) < maxRetainedCommandSessions; index-- {
+			record := records[index]
+			if seen[record.ID] || (scoped && !sessionOwnedByExecution(execution, record.Execution)) {
+				continue
+			}
+			result := record.result(1)
+			delete(result, "stdout")
+			delete(result, "stderr")
+			items = append(items, result)
+		}
 	}
 	return Result{"sessions": items, "count": len(items)}, nil
 }

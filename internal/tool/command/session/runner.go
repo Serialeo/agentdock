@@ -8,6 +8,16 @@ import (
 	processcontrol "github.com/uvwt/agentdock/internal/process"
 )
 
+// StartError distinguishes a failure before spawn from the uncertainty window
+// after the OS has created the process but before supervision is established.
+type StartError struct {
+	Cause          error
+	ProcessStarted bool
+}
+
+func (e *StartError) Error() string { return e.Cause.Error() }
+func (e *StartError) Unwrap() error { return e.Cause }
+
 type commandRunner interface {
 	Stdin() io.WriteCloser
 	Wait() (int, error)
@@ -21,6 +31,10 @@ type standardRunner struct {
 }
 
 func startStandardRunner(cmd *exec.Cmd, stdout, stderr io.Writer) (*standardRunner, error) {
+	return startStandardRunnerWithController(cmd, stdout, stderr, processcontrol.Attach)
+}
+
+func startStandardRunnerWithController(cmd *exec.Cmd, stdout, stderr io.Writer, attach func(*exec.Cmd) (*processcontrol.Controller, error)) (*standardRunner, error) {
 	processcontrol.Configure(cmd)
 	// command runner 统一拥有进程树取消权。CommandContext 默认只杀直接子进程，
 	// 会和这里的进程组/Job Object 终止并发竞争；保留 ctx 的启动前检查，
@@ -37,12 +51,12 @@ func startStandardRunner(cmd *exec.Cmd, stdout, stderr io.Writer) (*standardRunn
 		_ = stdin.Close()
 		return nil, err
 	}
-	controller, err := processcontrol.Attach(cmd)
+	controller, err := attach(cmd)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		_ = stdin.Close()
-		return nil, err
+		return nil, &StartError{Cause: err, ProcessStarted: true}
 	}
 	return &standardRunner{cmd: cmd, stdin: stdin, controller: controller}, nil
 }

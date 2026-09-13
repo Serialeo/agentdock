@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -27,26 +28,53 @@ type PrepareFunc func(*exec.Cmd) (func(), PreparationStatus)
 
 type CommandFactory func(context.Context) *exec.Cmd
 
+// StartOptions fixes durable identity and hooks before cmd.Start or any output.
+type StartOptions struct {
+	ID         string
+	StartedAt  time.Time
+	Execution  ExecutionContext
+	OnOutput   func(bool, []byte) error
+	OnRunning  func() error
+	OnComplete func(Completion) error
+}
+
+type Completion struct {
+	ExitCode         int
+	Error            error
+	Stdout           string
+	Stderr           string
+	StdoutTotalBytes int
+	StderrTotalBytes int
+	FinishedAt       time.Time
+	TimedOut         bool
+	Cancelled        bool
+}
+
 type ExecutionContext struct {
-	Workdir       string
-	WorkSessionID string
-	TargetID      string
-	ProjectID     string
-	DeploymentID  string
-	NodeID        string
+	Workdir            string
+	WorkSessionID      string
+	TargetID           string
+	ProjectID          string
+	DeploymentID       string
+	NodeID             string
+	DeploymentRevision string
+	ContextRevision    string
 }
 
 type Session struct {
-	ID         string
-	Command    *exec.Cmd
-	Cancel     context.CancelFunc
-	Stdin      io.WriteCloser
-	StartedAt  time.Time
-	FinishedAt time.Time
-	Done       chan struct{}
-	TimedOut   bool
-	Terminal   string
-	execution  ExecutionContext
+	ID             string
+	Command        *exec.Cmd
+	Cancel         context.CancelFunc
+	Stdin          io.WriteCloser
+	StartedAt      time.Time
+	FinishedAt     time.Time
+	Done           chan struct{}
+	TimedOut       bool
+	Terminal       string
+	execution      ExecutionContext
+	options        StartOptions
+	persistenceErr error
+	killRequested  bool
 
 	runner   commandRunner
 	killOnce sync.Once
@@ -67,6 +95,7 @@ type Session struct {
 }
 
 type Snapshot struct {
+	PersistenceError   string
 	SessionID          string
 	Status             string
 	Stdout             string
@@ -387,25 +416,37 @@ func Start(ctx context.Context, command, workdir string, env []string, timeout t
 	return StartWithTTY(ctx, command, workdir, env, timeout, false, prepare)
 }
 
-func StartWithTTY(ctx context.Context, command, workdir string, env []string, timeout time.Duration, tty bool, prepare PrepareFunc) (*Session, PreparationStatus, error) {
+func StartWithTTY(ctx context.Context, command, workdir string, env []string, timeout time.Duration, tty bool, prepare PrepareFunc, options ...StartOptions) (*Session, PreparationStatus, error) {
 	return StartCommandWithTTY(ctx, func(cmdCtx context.Context) *exec.Cmd {
 		cmd := shellCommand(cmdCtx, command)
 		cmd.Dir = workdir
 		cmd.Env = env
 		return cmd
-	}, timeout, tty, prepare)
+	}, timeout, tty, prepare, options...)
 }
 
-func StartCommandWithTTY(ctx context.Context, build CommandFactory, timeout time.Duration, tty bool, prepare PrepareFunc) (*Session, PreparationStatus, error) {
+func StartCommandWithTTY(ctx context.Context, build CommandFactory, timeout time.Duration, tty bool, prepare PrepareFunc, options ...StartOptions) (*Session, PreparationStatus, error) {
 	if timeout <= 0 {
 		return nil, PreparationStatus{}, fmt.Errorf("timeout must be positive")
 	}
 	if build == nil {
 		return nil, PreparationStatus{}, fmt.Errorf("command factory is required")
 	}
-	id, err := newID()
-	if err != nil {
-		return nil, PreparationStatus{}, fmt.Errorf("generate session id: %w", err)
+	var opt StartOptions
+	if len(options) > 0 {
+		opt = options[0]
+	}
+	id := opt.ID
+	var err error
+	if id == "" {
+		id, err = newID()
+		if err != nil {
+			return nil, PreparationStatus{}, fmt.Errorf("generate session id: %w", err)
+		}
+	}
+	startedAt := opt.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	cmd := build(cmdCtx)
@@ -424,7 +465,8 @@ func StartCommandWithTTY(ctx context.Context, build CommandFactory, timeout time
 
 	s := &Session{
 		ID: id, Command: cmd, Cancel: cancel,
-		StartedAt: time.Now(), Done: make(chan struct{}), exitCode: -1,
+		StartedAt: startedAt, Done: make(chan struct{}), exitCode: -1,
+		execution: opt.Execution, options: opt,
 		Terminal: "pipes",
 	}
 	stdout := sessionOutputWriter{session: s}
@@ -449,6 +491,13 @@ func StartCommandWithTTY(ctx context.Context, build CommandFactory, timeout time
 	s.runner = runner
 	s.Stdin = runner.Stdin()
 	cleanup()
+	if opt.OnRunning != nil {
+		if err := opt.OnRunning(); err != nil {
+			s.mu.Lock()
+			s.persistenceErr = err
+			s.mu.Unlock()
+		}
+	}
 
 	// 运行期取消统一交给 runner：标准 runner 关闭了 os/exec 的直接子进程 Cancel，
 	// 避免它与进程组 / Job Object 的整棵进程树终止并发竞争。
@@ -464,12 +513,20 @@ func StartCommandWithTTY(ctx context.Context, build CommandFactory, timeout time
 		exitCode, waitErr := runner.Wait()
 		s.mu.Lock()
 		s.waitErr = waitErr
-		s.completed = true
 		s.FinishedAt = time.Now()
 		s.exitCode = exitCode
 		if cmdCtx.Err() == context.DeadlineExceeded {
 			s.TimedOut = true
 		}
+		completion := Completion{ExitCode: exitCode, Error: waitErr, Stdout: s.stdout.String(), Stderr: s.stderr.String(), StdoutTotalBytes: s.stdoutTotalBytes, StderrTotalBytes: s.stderrTotalBytes, FinishedAt: s.FinishedAt, TimedOut: s.TimedOut, Cancelled: s.killRequested || cmdCtx.Err() == context.Canceled}
+		s.mu.Unlock()
+		var persistErr error
+		if opt.OnComplete != nil {
+			persistErr = opt.OnComplete(completion)
+		}
+		s.mu.Lock()
+		s.persistenceErr = persistErr
+		s.completed = true
 		s.mu.Unlock()
 		close(s.Done)
 	}()
@@ -498,7 +555,7 @@ func (s *Session) CloseStdin() error { return s.Stdin.Close() }
 func (s *Session) WaitError() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.waitErr
+	return errors.Join(s.waitErr, s.persistenceErr)
 }
 
 func (s *Session) Kill() (bool, error) {
@@ -508,6 +565,9 @@ func (s *Session) Kill() (bool, error) {
 		return false, nil
 	}
 	runner := s.runner
+	if runner != nil {
+		s.killRequested = true
+	}
 	s.mu.Unlock()
 	if runner == nil {
 		return false, nil
@@ -548,7 +608,11 @@ func (s *Session) snapshot(status string, maxBytes int, advance bool) Snapshot {
 	}
 	stdout := trim(stdoutSegment, maxBytes)
 	stderr := trim(stderrSegment, maxBytes)
-	return Snapshot{
+	persistenceError := ""
+	if s.persistenceErr != nil {
+		persistenceError = s.persistenceErr.Error()
+	}
+	return Snapshot{PersistenceError: persistenceError,
 		SessionID: s.ID, Status: status, Stdout: stdout, Stderr: stderr,
 		ElapsedMS: time.Since(s.StartedAt).Milliseconds(), TimedOut: s.TimedOut, Terminal: s.Terminal,
 		StdoutOutputBytes: len([]byte(stdout)), StderrOutputBytes: len([]byte(stderr)),
@@ -558,7 +622,7 @@ func (s *Session) snapshot(status string, maxBytes int, advance bool) Snapshot {
 		StdoutOutputLines: countLines(stdout), StderrOutputLines: countLines(stderr),
 		StdoutTruncated: maxBytes > 0 && len([]byte(stdoutSegment)) > maxBytes,
 		StderrTruncated: maxBytes > 0 && len([]byte(stderrSegment)) > maxBytes,
-		Completed:       s.completed, ExitCode: s.exitCode, CommandOK: s.exitCode == 0 && !s.TimedOut,
+		Completed:       s.completed, ExitCode: s.exitCode, CommandOK: s.exitCode == 0 && !s.TimedOut && s.persistenceErr == nil,
 		Workdir:       s.execution.Workdir,
 		WorkSessionID: s.execution.WorkSessionID,
 		TargetID:      s.execution.TargetID,
@@ -593,6 +657,11 @@ func (w sessionOutputWriter) Write(data []byte) (int, error) {
 		dropped := trimBuffer(dst, 4*1024*1024)
 		s.stdoutDroppedBytes += dropped
 		s.stdoutCursor = adjustCursorAfterDrop(s.stdoutCursor, dropped)
+	}
+	if s.options.OnOutput != nil {
+		if persistErr := s.options.OnOutput(w.stderr, data[:n]); persistErr != nil {
+			s.persistenceErr = persistErr
+		}
 	}
 	return n, err
 }

@@ -54,5 +54,8 @@ func (s *Service) Close() error {
 	if _, err := s.killAll(context.Background()); err != nil {
 		closeErrors = append(closeErrors, fmt.Errorf("stop command sessions: %w", err))
 	}
+	if s.journal != nil {
+		closeErrors = append(closeErrors, s.journal.Close())
+	}
 	return errors.Join(closeErrors...)
 }

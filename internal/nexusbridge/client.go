@@ -50,6 +50,12 @@ type NodeAPI interface {
 	ReadAppResource(string) (map[string]any, error)
 }
 
+// Optional extension: older/fake nodes need not implement durable outcomes.
+type commandOutcomeAPI interface {
+	ReadCommandOutcomes(context.Context, protocol.CommandOutcomesReadRequest) (protocol.CommandOutcomesReadResult, error)
+	AckCommandOutcomes(context.Context, protocol.CommandOutcomesAckRequest) (protocol.CommandOutcomesAckResult, error)
+}
+
 type Client struct {
 	identity  Identity
 	node      NodeAPI
@@ -133,9 +139,13 @@ func (c *Client) connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	hello := bridgeHello(c.identity, tools, descriptors, c.node.UIResources(), c.node.ToolContractHash())
+	if _, supported := c.node.(commandOutcomeAPI); supported {
+		hello.BridgeCapabilities = append(hello.BridgeCapabilities, protocol.CommandOutcomesCapability)
+	}
 	if err := c.write(socket, protocol.Message{
 		Type: protocol.MessageNodeHello, ProtocolVersion: protocol.ConnectionProtocolVersion,
-		Hello: bridgeHello(c.identity, tools, descriptors, c.node.UIResources(), c.node.ToolContractHash()),
+		Hello: hello,
 	}); err != nil {
 		return err
 	}
@@ -216,6 +226,8 @@ func (c *Client) invoke(parent context.Context, socket *websocket.Conn, incoming
 	var result map[string]any
 	var err error
 	switch incoming.Operation {
+	case protocol.OperationCommandOutcomesRead, protocol.OperationCommandOutcomesAck:
+		result, err = c.commandOutcomes(ctx, incoming.Operation, incoming.Arguments)
 	case protocol.OperationRuntimeRequest:
 		var request runtimeapi.Request
 		if decodeErr := json.Unmarshal(incoming.Arguments, &request); decodeErr != nil {

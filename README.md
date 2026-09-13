@@ -185,6 +185,8 @@ AgentDock can optionally act as a native ACP client and host a local coding-agen
 - Perform final review and evidence-based completion checks
 - Reuse workflow templates
 
+Command sessions now retain durable outcomes and support an explicit `request_id` for submission deduplication. See [the command outcome journal](docs/command-outcome-journal.md) for restart behavior and retention limits. Paired NexusDock provides opt-in WorkSession continuation through a dedicated MCP App.
+
 ### Recall and NexusDock integration
 
 AgentDock can optionally pair with NexusDock as a multi-device aggregation entrypoint:

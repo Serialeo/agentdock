@@ -99,7 +99,13 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 		commandCtx: commandCtx, commandCancel: commandCancel,
 		browserOwners: make(map[string]browserSessionOwner),
 	}
-	runtime.command = toolcommand.New(func() config.Config { return runtime.cfg }, ws, envs, skills.ResolveActive, runtime.commandExecutionContext)
+	journal, err := toolcommand.NewJournal(cfg.AgentDockHome)
+	if err != nil {
+		commandCancel()
+		_ = mcpClients.Close()
+		return nil, fmt.Errorf("initialize durable command journal: %w", err)
+	}
+	runtime.command = toolcommand.New(func() config.Config { return runtime.cfg }, ws, envs, skills.ResolveActive, runtime.commandExecutionContext, journal)
 	runtime.files = toolfile.New(ws, skills.ResolveResource, runtime.command.CommandEnv)
 	runtime.dynamicMCP = toolmcp.New(mcpClients, envs)
 	runtime.media = toolmedia.New(cfg, ws, runtime.command.InternalCommandEnv)

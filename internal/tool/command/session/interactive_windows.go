@@ -47,7 +47,7 @@ func startInteractiveRunner(ctx context.Context, cmd *exec.Cmd, stdout, _ io.Wri
 	controller, err := processcontrol.AttachPID(pty.Pid())
 	if err != nil {
 		_ = pty.Close()
-		return nil, true, err
+		return nil, true, &StartError{Cause: err, ProcessStarted: true}
 	}
 	runner := &conPTYRunner{
 		ctx:        ctx,

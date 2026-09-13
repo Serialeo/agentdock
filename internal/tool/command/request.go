@@ -3,6 +3,7 @@ package command
 // ExecRequest 是 exec_command 进入命令核心后的稳定输入契约。
 // 可选整数使用指针保留“未提供”和“显式提供 0”的区别，例如 yield_time_ms=0。
 type ExecRequest struct {
+	RequestID      string            `json:"request_id,omitempty"`
 	Cmd            string            `json:"cmd"`
 	Workdir        string            `json:"workdir,omitempty"`
 	Skill          string            `json:"skill,omitempty"`
