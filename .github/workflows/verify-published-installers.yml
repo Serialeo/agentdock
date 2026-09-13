@@ -134,6 +134,7 @@ jobs:
           systemd_dir="$RUNNER_TEMP/systemd"
           openrc_dir="$RUNNER_TEMP/openrc"
           mkdir -p "$systemd_dir" "$openrc_dir"
+          touch "$data_dir/user-owned.txt"
           AGENTDOCK_INSTALLER_BASE_URL="$release_base" \
           AGENTDOCK_SOURCE_DIR="$install_dir" \
           AGENTDOCK_DATA_DIR="$data_dir" \
@@ -143,7 +144,9 @@ jobs:
             sh "$installer" --uninstall --purge-data
 
           test ! -e "$install_dir"
-          test ! -e "$data_dir"
+          test ! -e "$data_dir/.agentdock"
+          test ! -e "$data_dir/AgentDock"
+          test -f "$data_dir/user-owned.txt"
           test ! -e "$env_file"
 
   verify-macos-release:
