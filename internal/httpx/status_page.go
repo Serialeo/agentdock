@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	agentDockRepositoryURL = "https://github.com/uvwt/agentdock"
+	agentDockRepositoryURL = "https://github.com/Serialeo/agentdock"
 	agentDockDocsURL       = "https://uvwt.github.io/agentdock-docs/"
 	agentDockQQGroup       = "1081337019"
 	agentDockQQGroupURL    = "https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info"
@@ -88,7 +88,7 @@ var statusPageEnglish = statusPageText{
 	EndpointHint:      "Use this endpoint to connect AgentDock with an MCP client.",
 	Resources:         "Resources",
 	Repository:        "GitHub Repository",
-	RepositoryDesc:    "Source code, releases and issue tracking.",
+	RepositoryDesc:    "Source code and issue tracking for this fork.",
 	Documentation:     "Documentation",
 	DocumentationDesc: "Installation, configuration and usage guides.",
 	QQGroup:           "QQ Group",
@@ -123,7 +123,7 @@ var statusPageChinese = statusPageText{
 	EndpointHint:      "使用此端点将 AgentDock 连接到 MCP 客户端。",
 	Resources:         "资源",
 	Repository:        "GitHub 仓库",
-	RepositoryDesc:    "源代码、版本发布与问题反馈。",
+	RepositoryDesc:    "当前 fork 的源代码与问题反馈。",
 	Documentation:     "文档",
 	DocumentationDesc: "安装、配置与使用指南。",
 	QQGroup:           "QQ 群",

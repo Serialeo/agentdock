@@ -14,8 +14,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      PRIVATE_GO_READ_TOKEN: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -69,8 +67,6 @@ jobs:
           build-args: |
             BUILD_COMMIT=${{ github.sha }}
             BUILD_DATE=${{ steps.candidate.outputs.build_date }}
-          secret-envs: |
-            github_token=PRIVATE_GO_READ_TOKEN
           cache-from: type=gha,scope=candidate-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=candidate-${{ matrix.variant }},ignore-error=true
 

@@ -31,11 +31,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure private Go module access
-        uses: ./.github/actions/setup-private-go
-        with:
-          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:

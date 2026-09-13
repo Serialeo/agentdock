@@ -26,12 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Configure private Go module access
-        uses: ./.github/actions/setup-private-go
-        with:
-          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+          ref: ${{ github.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -77,12 +72,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Configure private Go module access
-        uses: ./.github/actions/setup-private-go
-        with:
-          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+          ref: ${{ github.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -125,12 +115,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Configure private Go module access
-        uses: ./.github/actions/setup-private-go
-        with:
-          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+          ref: ${{ github.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -212,12 +197,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Configure private Go module access
-        uses: ./.github/actions/setup-private-go
-        with:
-          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+          ref: ${{ github.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -254,17 +234,21 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & .\scripts\test\test-install-windows.ps1 -InstallerPath $env:DOWNLOADED_INSTALLER
 
-      - name: Require Authenticode configuration
+      - name: Detect Authenticode configuration
+        id: signing
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
           WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
-            throw 'WINDOWS_SIGNING_CERT_BASE64 is required for a formal release.'
+          $hasCert = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)
+          if ($hasCert -ne $hasPassword) {
+            throw 'Windows signing configuration is incomplete; provide both certificate and password or neither.'
           }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)) {
-            throw 'WINDOWS_SIGNING_CERT_PASSWORD is required for a formal release.'
+          "enabled=$($hasCert.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding ascii -Append
+          if (-not $hasCert) {
+            Write-Warning 'Windows signing secrets are not configured; release assets will be unsigned.'
           }
 
       - name: Build
@@ -297,6 +281,7 @@ jobs:
             -BinaryPath .\dist\agentdock.exe
 
       - name: Authenticode sign and verify
+        if: steps.signing.outputs.enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
@@ -331,7 +316,7 @@ jobs:
           if-no-files-found: error
 
   build-windows-setup:
-    name: Build signed Windows offline Setup amd64
+    name: Build Windows offline Setup amd64
     needs: build-windows
     runs-on: windows-latest
     strategy:
@@ -342,7 +327,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
 
       - name: Download Windows payload
         uses: actions/download-artifact@v4
@@ -350,17 +335,21 @@ jobs:
           name: agentdock-windows-${{ matrix.goarch }}
           path: payload
 
-      - name: Require Authenticode configuration
+      - name: Detect Authenticode configuration
+        id: signing
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
           WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)) {
-            throw 'WINDOWS_SIGNING_CERT_BASE64 is required for a formal release.'
+          $hasCert = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)
+          if ($hasCert -ne $hasPassword) {
+            throw 'Windows signing configuration is incomplete; provide both certificate and password or neither.'
           }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)) {
-            throw 'WINDOWS_SIGNING_CERT_PASSWORD is required for a formal release.'
+          "enabled=$($hasCert.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding ascii -Append
+          if (-not $hasCert) {
+            Write-Warning 'Windows signing secrets are not configured; release assets will be unsigned.'
           }
 
       - name: Download and verify cloudflared compatibility payload
@@ -377,7 +366,7 @@ jobs:
             throw "cloudflared Authenticode signature is invalid: $($signature.StatusMessage)"
           }
 
-      - name: Build and sign offline Setup
+      - name: Build offline Setup
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
@@ -387,14 +376,18 @@ jobs:
           $tag = '${{ github.event.inputs.tag || github.ref_name }}'
           $version = $tag.TrimStart('v')
           $outputDir = Join-Path $PWD 'dist'
-          & .\packaging\windows\build-windows-offline-setup.ps1 `
-            -Version $version `
-            -Architecture '${{ matrix.goarch }}' `
-            -AgentDockArchive '.\payload\agentdock_windows_${{ matrix.goarch }}.zip' `
-            -AgentDockChecksumFile '.\payload\agentdock_windows_${{ matrix.goarch }}.zip.sha256' `
-            -CloudflaredBinary '.\payload\cloudflared.exe' `
-            -OutputDirectory $outputDir `
-            -SignedBuild
+          $parameters = @{
+            Version = $version
+            Architecture = '${{ matrix.goarch }}'
+            AgentDockArchive = '.\payload\agentdock_windows_${{ matrix.goarch }}.zip'
+            AgentDockChecksumFile = '.\payload\agentdock_windows_${{ matrix.goarch }}.zip.sha256'
+            CloudflaredBinary = '.\payload\cloudflared.exe'
+            OutputDirectory = $outputDir
+          }
+          if ('${{ steps.signing.outputs.enabled }}' -eq 'true') {
+            $parameters.SignedBuild = $true
+          }
+          & .\packaging\windows\build-windows-offline-setup.ps1 @parameters
 
       - name: Upload Setup artifact
         uses: actions/upload-artifact@v4
@@ -413,7 +406,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -487,9 +480,11 @@ jobs:
           (cd dist && shasum -a 256 -c AgentDock-macos-arm64.zip.sha256)
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
@@ -512,8 +507,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    env:
-      PRIVATE_GO_READ_TOKEN: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
     strategy:
       fail-fast: false
       # 三个多架构镜像并发推送会触发 GHCR secondary rate limit，发布阶段串行执行。
@@ -536,7 +529,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -578,8 +571,6 @@ jobs:
           build-args: |
             BUILD_COMMIT=${{ steps.build.outputs.commit }}
             BUILD_DATE=${{ steps.build.outputs.date }}
-          secret-envs: |
-            github_token=PRIVATE_GO_READ_TOKEN
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }},ignore-error=true
 
@@ -787,7 +778,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
 
       - name: Download published installer
         shell: powershell
@@ -825,13 +816,22 @@ jobs:
             }
           }
 
-      - name: Verify published Setup signature
+      - name: Verify published Setup signature when configured
         shell: pwsh
         env:
           WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
           WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
         run: |
-          .\packaging\windows\sign-windows.ps1 -Path $env:PUBLISHED_SETUP -VerifyOnly
+          $hasCert = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)
+          if ($hasCert -ne $hasPassword) {
+            throw 'Windows signing configuration is incomplete; provide both certificate and password or neither.'
+          }
+          if ($hasCert) {
+            .\packaging\windows\sign-windows.ps1 -Path $env:PUBLISHED_SETUP -VerifyOnly
+          } else {
+            Write-Warning 'Published Windows Setup is intentionally unsigned because signing secrets are not configured.'
+          }
 
       - name: Install and uninstall published Setup
         shell: powershell
@@ -860,26 +860,21 @@ jobs:
           }
 
   verify-container:
-    name: Verify published containers
+    name: Verify public container pulls
     needs: publish-container
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ensure GHCR verification is anonymous
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
 
-      - name: Run published GHCR images
+      - name: Pull and run published GHCR images without credentials
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
           AGENTDOCK_TEST_BUILD: "false"

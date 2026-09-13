@@ -74,12 +74,7 @@ if [[ -z "$pull_images" ]]; then
 fi
 
 if [[ "$build_images" == "true" ]]; then
-  if [[ -z "${PRIVATE_GO_READ_TOKEN:-}" ]]; then
-    printf 'PRIVATE_GO_READ_TOKEN is required to build images with private Go modules\n' >&2
-    exit 1
-  fi
   docker_build_args=(
-    --secret "id=github_token,env=PRIVATE_GO_READ_TOKEN"
     --build-arg "BUILD_COMMIT=$build_commit"
     --build-arg "BUILD_DATE=$build_date"
   )
