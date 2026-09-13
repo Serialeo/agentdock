@@ -41,8 +41,12 @@ func TestBrowseDirIsShallowBoundedAndPaginates(t *testing.T) {
 	if len(entries) != MaxBrowseLimit || first["truncated"] != true || first["next_offset"] != MaxBrowseLimit {
 		t.Fatalf("first page = %#v", first)
 	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, entry := range entries {
-		if filepath.Dir(entry["path"].(string)) != root {
+		if filepath.Dir(entry["path"].(string)) != realRoot {
 			t.Fatalf("browse descended below root: %#v", entry)
 		}
 	}
@@ -79,11 +83,15 @@ func TestBrowseDirHiddenAndCanonicalNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["path"] != root || result["parent_path"] != filepath.Dir(root) {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["path"] != realRoot || result["parent_path"] != filepath.Dir(realRoot) {
 		t.Fatalf("navigation paths = %#v", result)
 	}
 	entries := result["entries"].([]map[string]any)
-	if len(entries) != 1 || entries[0]["name"] != "visible" || entries[0]["path"] != visible || entries[0]["type"] != "directory" {
+	if len(entries) != 1 || entries[0]["name"] != "visible" || entries[0]["path"] != filepath.Join(realRoot, "visible") || entries[0]["type"] != "directory" {
 		t.Fatalf("default entries = %#v", entries)
 	}
 

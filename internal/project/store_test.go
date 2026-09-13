@@ -29,7 +29,7 @@ func TestAppliedDeploymentsPersistButTargetBindingsDoNot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if binding.CWDRel != "src" || binding.CWDAbs != filepath.Join(working, "src") {
+	if binding.CWDRel != "src" || binding.CWDAbs != canonicalTestPath(t, filepath.Join(working, "src")) {
 		t.Fatalf("binding = %#v", binding)
 	}
 
@@ -66,7 +66,7 @@ func TestResolveExecutionUsesAppliedDeploymentPermissionsAndBoundTarget(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if execution.CWD != filepath.Join(working, "backend") {
+	if execution.CWD != canonicalTestPath(t, filepath.Join(working, "backend")) {
 		t.Fatalf("execution cwd = %q", execution.CWD)
 	}
 	if execution.Permissions.Files != protocol.FileCapabilityReadWrite || !execution.Permissions.Shell {
@@ -105,8 +105,9 @@ func TestFolderlessDeploymentUsesNodeDefaultCWDAndKeepsFullAccess(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if execution.CWD != filepath.Join(defaultCWD, "src") {
-		t.Fatalf("folderless execution cwd = %q, want %q", execution.CWD, filepath.Join(defaultCWD, "src"))
+	wantCWD := canonicalTestPath(t, filepath.Join(defaultCWD, "src"))
+	if execution.CWD != wantCWD {
+		t.Fatalf("folderless execution cwd = %q, want %q", execution.CWD, wantCWD)
 	}
 	if !execution.Permissions.FullAccess {
 		t.Fatalf("folderless Full Access lost: %#v", execution.Permissions)
@@ -221,6 +222,17 @@ func TestTargetBindingIsIdempotentButCannotBeReusedForAnotherSession(t *testing.
 	request.WorkSessionID = "ws-other"
 	_, err = store.BindTarget(request)
 	requireRemoteCode(t, err, protocol.ErrorSessionTargetDenied)
+}
+
+// Temporary directories may contain symlinks on macOS or short names on Windows.
+// Keep the original path as input, but compare resolved results to its canonical form.
+func canonicalTestPath(t *testing.T, path string) string {
+	t.Helper()
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return realPath
 }
 
 func testDeployment(working, revision string, files protocol.FileCapability) protocol.Deployment {

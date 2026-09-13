@@ -612,4 +612,6 @@ foreach ($required in @(
     }
 }
 
+& (Join-Path $PSScriptRoot 'test-uninstall-windows.ps1')
+
 Write-Host 'Windows installer validation passed.'

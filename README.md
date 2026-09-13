@@ -231,7 +231,17 @@ A source Docker build is also credential-free:
 docker build --target runtime -t agentdock:local .
 ```
 
-Do not use the final version tag as the first container test. After source CI passes, manually run **Publish candidate containers** on the exact commit. It publishes only commit-scoped tags such as `sha-abcdef0`, `dev-sha-abcdef0`, and `browser-sha-abcdef0`; it does not update `latest` or create a GitHub Release. Build the matching NexusDock `sha-*` candidate and run the paired-image verification workflow against all four exact images. Only after that paired Bridge/persistence gate passes should the matching final A/N version tags be created; the normal release workflows then publish the final tags and `latest` aliases. The final AgentDock release workflow performs an anonymous GHCR pull; if the package is still private, make the `Serialeo/agentdock` container package Public in GitHub Package settings and rerun the failed verification job.
+The automated build and release flow is:
+
+| Trigger | Result |
+| --- | --- |
+| Pull request | Tests, static checks, cross-platform compilation, and container checks |
+| Push to `main` | The same CI checks, then **Publish candidate containers** builds and verifies `sha-<commit>`, `dev-sha-<commit>`, and `browser-sha-<commit>` on GHCR |
+| Push a `vMAJOR.MINOR.PATCH` tag | Validate the tagged source, build Linux amd64 / macOS arm64 / Windows amd64 packages and desktop installers, verify versioned Docker images, then publish a GitHub Release with checksums and generated notes |
+
+Candidate images use the exact commit that passed CI and do not change `latest`. Stable releases update `latest`, `dev-latest`, and `browser-latest`. SemVer prerelease tags such as `v1.2.3-rc.1` create prereleases without changing those aliases. Before tagging, update `internal/buildinfo/buildinfo.go` so `Version` matches the tag without its leading `v`; `+build` metadata is not supported in release tags. Manual **Release** runs require an existing version tag and build that tag's commit.
+
+Before releasing a paired A/N version, run **Verify paired public images** in NexusDock against the four exact candidate images to verify Bridge compatibility and data persistence. Each repository releases independently; these workflows do not create or move tags or automatically upgrade the protocol dependency. GHCR verification uses anonymous pulls, so the `Serialeo/agentdock` container package must be Public. GitHub Actions uses the built-in `GITHUB_TOKEN` for Releases and GHCR; no extra package token is needed.
 
 User documentation is maintained separately in [`uvwt/agentdock-docs`](https://github.com/uvwt/agentdock-docs). Changes to user-visible behavior, configuration, installation, or tool schemas should update the matching documentation in the same change set.
 

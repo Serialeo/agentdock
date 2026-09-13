@@ -629,8 +629,11 @@ for account_case in default sudo explicit override empty; do
   [ ! -e "$selected_data/.agentdock" ]
   [ ! -e "$selected_data/AgentDock" ]
   [ ! -e "$ACCOUNT_ROOT/forbidden.log" ]
-  ! grep -Fqx "$account_home" "$ACCOUNT_ROOT/rmdir.log"
-  ! grep -Fqx "$selected_data" "$ACCOUNT_ROOT/rmdir.log"
+  if grep -Fqx "$account_home" "$ACCOUNT_ROOT/rmdir.log" ||
+    grep -Fqx "$selected_data" "$ACCOUNT_ROOT/rmdir.log"; then
+    printf 'uninstaller attempted to remove the account home or data root\n' >&2
+    exit 1
+  fi
   for account in installer sudoer chosen; do
     if [ "$account_case" != empty ]; then
       [ -f "$ACCOUNT_ROOT/$account/personal.keep" ]

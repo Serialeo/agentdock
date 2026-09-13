@@ -235,7 +235,17 @@ make check
 docker build --target runtime -t agentdock:local .
 ```
 
-不要把最终版本 tag 当作第一次容器测试。源码 CI 通过后，在精确 commit 上手动运行 **Publish candidate containers**；它只发布 `sha-abcdef0`、`dev-sha-abcdef0`、`browser-sha-abcdef0` 这类 commit 级候选标签，不更新 `latest`，也不创建 GitHub Release。随后构建配套的 NexusDock `sha-*` 候选镜像，并运行配套镜像验证，对四个精确镜像完成 Bridge、配置和数据卷持久化验收。只有配对验收通过后才创建匹配的 A/N 最终版本 tag，再由正常 release workflow 发布最终标签和 `latest` 别名。AgentDock 正式发布 workflow 会在未登录 GHCR 的情况下执行匿名 pull；如果首次发布后的 Package 仍为 Private，需要在 GitHub Package 设置中把 `Serialeo/agentdock` container package 一次性改为 Public，然后重新运行失败的验证 job。
+自动构建与发布流程如下：
+
+| 触发方式 | 自动执行 |
+| --- | --- |
+| Pull Request | 测试、静态检查、跨平台编译和容器检查 |
+| 推送到 `main` | 完成同一套 CI 检查后，自动运行 **Publish candidate containers**，构建并验收 GHCR 的 `sha-<commit>`、`dev-sha-<commit>`、`browser-sha-<commit>` 候选镜像 |
+| 推送 `vMAJOR.MINOR.PATCH` 标签 | 校验标签源码，构建 Linux amd64 / macOS arm64 / Windows amd64 程序包和桌面安装包，验收版本化 Docker 镜像，再创建含校验和及自动说明的 GitHub Release |
+
+候选镜像固定使用通过 CI 的精确提交，不更新 `latest`。稳定版本会更新 `latest`、`dev-latest` 和 `browser-latest`；`v1.2.3-rc.1` 等 SemVer 预发布标签只创建 prerelease，不更新这些别名。打标签前需更新 `internal/buildinfo/buildinfo.go`，使 `Version` 与去掉 `v` 的标签版本一致；发布标签不支持 `+build` 元数据。手动运行 **Release** 时必须填写已有版本标签，构建源码固定为该标签对应的提交。
+
+发布配套 A/N 版本前，应在 NexusDock 中运行 **Verify paired public images**，用四个精确候选镜像完成 Bridge 和数据持久化验收。各仓库独立发布；工作流不会自行创建或移动标签，也不会自动升级协议依赖。GHCR 验收使用匿名拉取，`Serialeo/agentdock` container package 需设为 Public。Release 和 GHCR 发布使用 GitHub Actions 内置的 `GITHUB_TOKEN`，无需额外配置 package token。
 
 用户文档独立维护在 [`uvwt/agentdock-docs`](https://github.com/uvwt/agentdock-docs)。修改用户可见行为、配置参数、安装方式或工具 Schema 时，应同步更新对应文档。
 

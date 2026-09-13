@@ -1,14 +1,29 @@
 name: Publish candidate containers
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: candidate-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Publish candidate (${{ matrix.variant }})
+    # 只发布本仓 main push 已通过 CI 的提交，不能让 PR 的 workflow_run 获得发布权限。
+    if: >-
+      github.repository == 'Serialeo/agentdock' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -16,6 +31,7 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - variant: runtime
@@ -31,6 +47,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -47,8 +65,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          # workflow_run 的 GITHUB_SHA 指向默认分支，镜像必须取实际通过 CI 的源码提交。
+          source_sha="$(git rev-parse HEAD)"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf 'sha=%s\nshort_sha=%s\nbuild_date=%s\n' "$source_sha" "${source_sha:0:7}" "$build_date" >> "$GITHUB_OUTPUT"
 
       - name: Build and push candidate image
         id: push
@@ -62,10 +82,10 @@ jobs:
           tags: ghcr.io/serialeo/agentdock:${{ matrix.tag_prefix }}sha-${{ steps.candidate.outputs.short_sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.candidate.outputs.sha }}
             org.opencontainers.image.version=${{ matrix.tag_prefix }}sha-${{ steps.candidate.outputs.short_sha }}
           build-args: |
-            BUILD_COMMIT=${{ github.sha }}
+            BUILD_COMMIT=${{ steps.candidate.outputs.sha }}
             BUILD_DATE=${{ steps.candidate.outputs.build_date }}
           cache-from: type=gha,scope=candidate-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=candidate-${{ matrix.variant }},ignore-error=true
@@ -83,18 +103,15 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Ensure GHCR verification is anonymous
+        run: docker logout ghcr.io >/dev/null 2>&1 || true
 
       - name: Run candidate image smoke
         shell: bash
@@ -102,7 +119,8 @@ jobs:
           AGENTDOCK_TEST_BUILD: 'false'
         run: |
           set -euo pipefail
-          short_sha="${GITHUB_SHA::7}"
+          source_sha="$(git rev-parse HEAD)"
+          short_sha="${source_sha:0:7}"
           export AGENTDOCK_TEST_RUNTIME_IMAGE="ghcr.io/serialeo/agentdock:sha-${short_sha}"
           export AGENTDOCK_TEST_DEV_IMAGE="ghcr.io/serialeo/agentdock:dev-sha-${short_sha}"
           export AGENTDOCK_TEST_BROWSER_IMAGE="ghcr.io/serialeo/agentdock:browser-sha-${short_sha}"

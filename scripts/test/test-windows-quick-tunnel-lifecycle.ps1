@@ -29,9 +29,6 @@ function Get-FreeTcpPort {
 function Get-ProcessIdsByPath {
     param([string] $ProcessName, [string] $BinaryPath)
 
-    if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
-        return @()
-    }
     $normalizedPath = [IO.Path]::GetFullPath($BinaryPath)
     $processIds = @(Get-CimInstance Win32_Process -Filter "Name = '$ProcessName.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
@@ -61,13 +58,14 @@ function Get-ProcessIdsByPath {
 function Stop-ProcessByPath {
     param([string] $ProcessName, [string] $BinaryPath)
 
-    foreach ($processId in @(Get-ProcessIdsByPath -ProcessName $ProcessName -BinaryPath $BinaryPath)) {
-        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-    }
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
-        if (@(Get-ProcessIdsByPath -ProcessName $ProcessName -BinaryPath $BinaryPath).Count -eq 0) {
+        $remaining = @(Get-ProcessIdsByPath -ProcessName $ProcessName -BinaryPath $BinaryPath)
+        if ($remaining.Count -eq 0) {
             return
+        }
+        foreach ($processId in $remaining) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
         }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -353,8 +351,6 @@ try {
         throw 'Restoring Quick Tunnel mode unexpectedly changed existing credentials.'
     }
 
-    Write-Host "Windows Quick Tunnel lifecycle passed: $firstUrl -> auto-recovery $recoveredUrl -> $secondUrl -> local-only -> $thirdUrl"
-
     & $UninstallerPath `
         -InstallDir $installDir `
         -StartupValueName $startupName `
@@ -363,6 +359,16 @@ try {
     if (Test-Path -LiteralPath $installDir) {
         throw 'Quick Tunnel lifecycle uninstaller did not remove the install directory.'
     }
+    foreach ($processName in @('agentdock-tray', 'agentdock', 'cloudflared')) {
+        $binaryPath = Join-Path $installDir "$processName.exe"
+        if (@(Get-ProcessIdsByPath -ProcessName $processName -BinaryPath $binaryPath).Count -ne 0) {
+            throw "Quick Tunnel lifecycle uninstaller left $processName running."
+        }
+    }
+    if (Test-Path -LiteralPath $supervisorPidPath) {
+        throw 'Quick Tunnel lifecycle uninstaller left the Tunnel supervisor PID file.'
+    }
+    Write-Host "Windows Quick Tunnel lifecycle passed: $firstUrl -> auto-recovery $recoveredUrl -> $secondUrl -> local-only -> $thirdUrl -> uninstalled"
 } catch {
     foreach ($name in @(
         'start-cloudflared.ps1',
@@ -383,8 +389,8 @@ try {
     throw
 } finally {
     Stop-ProcessByPath -ProcessName 'agentdock-tray' -BinaryPath $trayBinary
-    Stop-ProcessByPath -ProcessName 'cloudflared' -BinaryPath $cloudflaredBinary
     Stop-ProcessByPath -ProcessName 'agentdock' -BinaryPath $agentDockBinary
+    Stop-ProcessByPath -ProcessName 'cloudflared' -BinaryPath $cloudflaredBinary
     foreach ($name in @($startupName, $cloudflaredStartupName, $trayStartupName)) {
         Remove-ItemProperty -LiteralPath $runKey -Name $name -ErrorAction SilentlyContinue
     }

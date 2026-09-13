@@ -188,6 +188,10 @@ func TestContextScopedCWDKeepsConcurrentTargetsIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defaultCWD := ws.DefaultCWD()
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ctxA, err := WithCWD(context.Background(), projectA)
 	if err != nil {
@@ -208,7 +212,7 @@ func TestContextScopedCWDKeepsConcurrentTargetsIsolated(t *testing.T) {
 	for _, target := range []struct {
 		ctx  context.Context
 		want string
-	}{{ctx: ctxA, want: projectA}, {ctx: ctxB, want: projectB}} {
+	}{{ctx: ctxA, want: filepath.Join(realRoot, "project-a")}, {ctx: ctxB, want: filepath.Join(realRoot, "project-b")}} {
 		target := target
 		wg.Add(1)
 		go func() {
@@ -260,8 +264,12 @@ func TestContextScopedCWDValidationAndAbsolutePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Abs != file {
-		t.Fatalf("absolute path changed under scoped cwd: got %q want %q", resolved.Abs, file)
+	realFile, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Abs != realFile {
+		t.Fatalf("absolute path changed under scoped cwd: got %q want %q", resolved.Abs, realFile)
 	}
 }
 

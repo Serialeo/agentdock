@@ -107,8 +107,12 @@ func TestACPRelativeDirectoryUsesTargetScopedCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != filepath.Join(target, "auth") {
-		t.Fatalf("ACP relative cwd = %q, want %q", resolved, filepath.Join(target, "auth"))
+	want, err := filepath.EvalSymlinks(filepath.Join(target, "auth"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Fatalf("ACP relative cwd = %q, want %q", resolved, want)
 	}
 	if ws.DefaultCWD() == target {
 		t.Fatal("ACP scoped cwd mutated Workspace default")

@@ -62,21 +62,25 @@ function Stop-ProcessByPath {
         [string] $BinaryPath
     )
 
-    $processIds = @(Get-ProcessIdsByPath -ProcessName $ProcessName -BinaryPath $BinaryPath)
-    foreach ($processId in $processIds) {
-        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-    }
-
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
         $remaining = @(Get-ProcessIdsByPath -ProcessName $ProcessName -BinaryPath $BinaryPath)
         if ($remaining.Count -eq 0) {
             return
         }
+        # A launcher or supervisor may have started another process after the
+        # previous snapshot. Keep stopping only this installation's processes.
+        foreach ($processId in $remaining) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    throw "Process did not stop within 15 seconds: $BinaryPath"
+    $remaining = @(Get-ProcessIdsByPath -ProcessName $ProcessName -BinaryPath $BinaryPath)
+    if ($remaining.Count -eq 0) {
+        return
+    }
+    throw "Process did not stop within 15 seconds: $BinaryPath (remaining PIDs: $($remaining -join ', '))"
 }
 
 function Remove-DirectoryWithRetry {
@@ -150,8 +154,10 @@ if ($StartupValueName -eq 'AgentDock' -and $CloudflaredStartupValueName -eq 'Age
 }
 
 Stop-ProcessByPath -ProcessName 'agentdock-tray' -BinaryPath $trayBinary
-Stop-ProcessByPath -ProcessName 'cloudflared' -BinaryPath $cloudflaredBinary
+# Core and the Tunnel supervisor share agentdock.exe. Stop both before
+# cloudflared so its exit cannot trigger the supervisor to restart Core.
 Stop-ProcessByPath -ProcessName 'agentdock' -BinaryPath $agentDockBinary
+Stop-ProcessByPath -ProcessName 'cloudflared' -BinaryPath $cloudflaredBinary
 
 if (Test-Path -LiteralPath $runKey) {
     Remove-ItemProperty -LiteralPath $runKey -Name $StartupValueName -ErrorAction SilentlyContinue
@@ -178,6 +184,7 @@ foreach ($name in @(
     'cloudflared.out.log',
     'cloudflared.err.log',
     'quick-tunnel-url.txt',
+    'tunnel-supervisor.pid',
     'runtime.json'
 )) {
     Remove-Item -LiteralPath (Join-Path $runtimeDir $name) -Force -ErrorAction SilentlyContinue

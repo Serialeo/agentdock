@@ -34,7 +34,7 @@ func TestInspectSourceProvenanceGitStates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if provenance.Kind != protocol.SourceProvenanceGit || provenance.RepositoryRoot != repo || provenance.Head == "" || provenance.Branch == "" || provenance.Detached || provenance.Unborn || provenance.Dirty {
+		if provenance.Kind != protocol.SourceProvenanceGit || provenance.RepositoryRoot != canonicalTestPath(t, repo) || provenance.Head == "" || provenance.Branch == "" || provenance.Detached || provenance.Unborn || provenance.Dirty {
 			t.Fatalf("clean branch provenance = %#v", provenance)
 		}
 	})
