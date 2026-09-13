@@ -1,0 +1,272 @@
+name: Verify published Unix installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to verify without rebuilding
+        required: true
+        type: string
+      platform:
+        description: Platforms to verify
+        required: true
+        default: all
+        type: choice
+        options: [all, linux, macos]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve and validate release source
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      sha: ${{ steps.source.outputs.sha }}
+      prerelease: ${{ steps.source.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - name: Validate tag and runtime version
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          number = r"(?:0|[1-9][0-9]*)"
+          identifier = r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+          pattern = rf"v{number}\.{number}\.{number}(?:-{identifier}(?:\.{identifier})*)?"
+          if not re.fullmatch(pattern, tag):
+              raise SystemExit("release tag must be vMAJOR.MINOR.PATCH with an optional SemVer prerelease suffix")
+          sha = subprocess.check_output(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], text=True).strip()
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if sha != head:
+              raise SystemExit("release checkout does not match the existing tag")
+          source = Path("internal/buildinfo/buildinfo.go").read_text()
+          version = re.search(r'^\s*const\s+Version\s*=\s*"([^"]+)"', source, re.MULTILINE)
+          if version is None or version.group(1) != tag[1:]:
+              raise SystemExit("release tag must match internal/buildinfo/buildinfo.go Version")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"tag={tag}", file=output)
+              print(f"sha={sha}", file=output)
+              print(f"prerelease={str('-' in tag).lower()}", file=output)
+          PYTHON
+
+  verify-linux-release:
+    if: inputs.platform == 'all' || inputs.platform == 'linux'
+    name: Verify published unified installer on Linux
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and run published installer
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$release_dir"
+          gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --dir "$release_dir"
+          release_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          python3 -m http.server "$release_port" --bind 127.0.0.1 --directory "$release_dir" >"$RUNNER_TEMP/release-http.log" 2>&1 &
+          release_server_pid=$!
+          trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
+          release_base="http://127.0.0.1:$release_port"
+          if ! curl --fail --silent --show-error --max-time 2 \
+            --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 30 \
+            "$release_base/" -o /dev/null; then
+            cat "$RUNNER_TEMP/release-http.log"
+            exit 1
+          fi
+          installer="$RUNNER_TEMP/install.sh"
+          installer_tmp="$RUNNER_TEMP/installer"
+          install_dir="$RUNNER_TEMP/agentdock-install"
+          data_dir="$RUNNER_TEMP/agentdock-data"
+          env_file="$RUNNER_TEMP/agentdock.env"
+
+          mkdir -p "$installer_tmp"
+          curl -fL "$release_base/install.sh" -o "$installer"
+          curl -fL "$release_base/install.sh.sha256" -o "$installer.sha256"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum -c install.sh.sha256
+          )
+
+          TMPDIR="$installer_tmp" \
+          AGENTDOCK_INSTALLER_BASE_URL="$release_base" \
+          AGENTDOCK_NONINTERACTIVE=true \
+          AGENTDOCK_INSTALL_MODE=binary \
+          AGENTDOCK_RELEASE_VERSION="$RELEASE_TAG" \
+          AGENTDOCK_SOURCE_DIR="$install_dir" \
+          AGENTDOCK_DATA_DIR="$data_dir" \
+          AGENTDOCK_ENV_FILE="$env_file" \
+          AGENTDOCK_SERVICE_MANAGER=none \
+          AGENTDOCK_SERVICE_USER="$(id -un)" \
+          AGENTDOCK_AUTH_TOKEN=test-token \
+            sh "$installer"
+
+          "$install_dir/bin/agentdock" --help >/dev/null 2>&1
+
+          test -f "$data_dir/.agentdock/skill-store/bundled-skills.json"
+          for skill in skill-authoring skill-installation skill-vetter-runtime; do
+            state="$data_dir/.agentdock/skill-store/state/$skill.json"
+            version="$(jq -r .active_version "$state")"
+            test -n "$version"
+            test -f "$data_dir/.agentdock/skill-store/installed/$skill/$version/SKILL.md"
+          done
+
+          systemd_dir="$RUNNER_TEMP/systemd"
+          openrc_dir="$RUNNER_TEMP/openrc"
+          mkdir -p "$systemd_dir" "$openrc_dir"
+          AGENTDOCK_INSTALLER_BASE_URL="$release_base" \
+          AGENTDOCK_SOURCE_DIR="$install_dir" \
+          AGENTDOCK_DATA_DIR="$data_dir" \
+          AGENTDOCK_ENV_FILE="$env_file" \
+          AGENTDOCK_SYSTEMD_DIR="$systemd_dir" \
+          AGENTDOCK_OPENRC_DIR="$openrc_dir" \
+            sh "$installer" --uninstall --purge-data
+
+          test ! -e "$install_dir"
+          test ! -e "$data_dir"
+          test ! -e "$env_file"
+
+  verify-macos-release:
+    if: inputs.platform == 'all' || inputs.platform == 'macos'
+    name: Verify published unified installer on macOS
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - name: Download and run published installer
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag='${{ needs.prepare.outputs.tag }}'
+          release_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$release_dir"
+          gh release download "$tag" --repo "${{ github.repository }}" --dir "$release_dir"
+          release_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          python3 -m http.server "$release_port" --bind 127.0.0.1 --directory "$release_dir" >"$RUNNER_TEMP/release-http.log" 2>&1 &
+          release_server_pid=$!
+          trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
+          release_base="http://127.0.0.1:$release_port"
+          if ! curl --fail --silent --show-error --max-time 2 \
+            --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 30 \
+            "$release_base/" -o /dev/null; then
+            cat "$RUNNER_TEMP/release-http.log"
+            exit 1
+          fi
+          installer="$RUNNER_TEMP/install.sh"
+          uninstaller="$RUNNER_TEMP/uninstall-macos.sh"
+          dmg="$RUNNER_TEMP/AgentDock-macos-arm64.dmg"
+          zip="$RUNNER_TEMP/AgentDock-macos-arm64.zip"
+          zip_dir="$RUNNER_TEMP/agentdock-zip"
+          mount_dir="$RUNNER_TEMP/agentdock-dmg"
+          dmg_mounted=false
+          cleanup() {
+            if [[ "$dmg_mounted" == true ]]; then
+              hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          curl -fL "$release_base/AgentDock-macos-arm64.dmg" -o "$dmg"
+          curl -fL "$release_base/AgentDock-macos-arm64.dmg.sha256" -o "$dmg.sha256"
+          curl -fL "$release_base/AgentDock-macos-arm64.zip" -o "$zip"
+          curl -fL "$release_base/AgentDock-macos-arm64.zip.sha256" -o "$zip.sha256"
+          (
+            cd "$RUNNER_TEMP"
+            shasum -a 256 -c AgentDock-macos-arm64.dmg.sha256
+            shasum -a 256 -c AgentDock-macos-arm64.zip.sha256
+          )
+          mkdir -p "$zip_dir"
+          ditto -x -k "$zip" "$zip_dir"
+          test -d "$zip_dir/AgentDock.app"
+          codesign --verify --deep --strict --verbose=2 "$zip_dir/AgentDock.app"
+          hdiutil verify "$dmg" >/dev/null
+          mkdir -p "$mount_dir"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg" >/dev/null
+          dmg_mounted=true
+          mounted_entries="$(find "$mount_dir" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort)"
+          test "$mounted_entries" = $'AgentDock.app\nApplications'
+          test -L "$mount_dir/Applications"
+          test "$(readlink "$mount_dir/Applications")" = "/Applications"
+          codesign --verify --deep --strict --verbose=2 "$mount_dir/AgentDock.app"
+          app_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/MacOS/AgentDock")"
+          helper_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/Helpers/AgentDockLoginHelper")"
+          core_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/Helpers/agentdock")"
+          cloudflared_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/Helpers/cloudflared")"
+          [[ "$app_arches" == "arm64" ]]
+          [[ "$helper_arches" == "arm64" ]]
+          [[ "$core_arches" == "arm64" ]]
+          [[ "$cloudflared_arches" == "arm64" ]]
+          cmp \
+            "$zip_dir/AgentDock.app/Contents/MacOS/AgentDock" \
+            "$mount_dir/AgentDock.app/Contents/MacOS/AgentDock"
+          cmp \
+            "$zip_dir/AgentDock.app/Contents/Helpers/AgentDockLoginHelper" \
+            "$mount_dir/AgentDock.app/Contents/Helpers/AgentDockLoginHelper"
+          cmp \
+            "$zip_dir/AgentDock.app/Contents/Helpers/agentdock" \
+            "$mount_dir/AgentDock.app/Contents/Helpers/agentdock"
+          cmp \
+            "$zip_dir/AgentDock.app/Contents/Helpers/cloudflared" \
+            "$mount_dir/AgentDock.app/Contents/Helpers/cloudflared"
+          test -f "$mount_dir/AgentDock.app/Contents/Resources/core-skills/manifest.json"
+          core_plist="$mount_dir/AgentDock.app/Contents/Library/LaunchAgents/com.uvwt.agentdock.core.plist"
+          tunnel_plist="$mount_dir/AgentDock.app/Contents/Library/LaunchAgents/com.uvwt.agentdock.tunnel.plist"
+          plutil -lint "$core_plist" >/dev/null
+          plutil -lint "$tunnel_plist" >/dev/null
+          test "$(plutil -extract BundleProgram raw -o - "$core_plist")" = "Contents/Helpers/agentdock"
+          test "$(plutil -extract BundleProgram raw -o - "$tunnel_plist")" = "Contents/Helpers/agentdock"
+          codesign --verify --strict --verbose=2 "$mount_dir/AgentDock.app/Contents/Helpers/agentdock"
+          codesign --verify --strict --verbose=2 "$mount_dir/AgentDock.app/Contents/Helpers/cloudflared"
+          mounted_core_version="$("$mount_dir/AgentDock.app/Contents/Helpers/agentdock" --version)"
+          [[ "$mounted_core_version" == *"AgentDock $tag"* ]]
+          "$mount_dir/AgentDock.app/Contents/Helpers/cloudflared" --version >/dev/null
+          hdiutil detach "$mount_dir" >/dev/null
+          dmg_mounted=false
+
+          curl -fL "$release_base/install.sh" -o "$installer"
+          curl -fL "$release_base/install.sh.sha256" -o "$installer.sha256"
+          curl -fL "$release_base/uninstall-macos.sh" -o "$uninstaller"
+          (
+            cd "$RUNNER_TEMP"
+            shasum -a 256 -c install.sh.sha256
+          )
+          sh -n "$installer"
+          zsh -n "$uninstaller"
+          HOME="$RUNNER_TEMP/home" \
+          AGENTDOCK_INSTALLER_BASE_URL="$release_base" \
+          AGENTDOCK_INSTALL_DIR="$RUNNER_TEMP/bin" \
+            sh "$installer" --version "$tag"
+          "$RUNNER_TEMP/bin/agentdock" --help >/dev/null 2>&1
+          test -f "$RUNNER_TEMP/home/.agentdock/skill-store/bundled-skills.json"
+          for skill in skill-authoring skill-installation skill-vetter-runtime; do
+            state="$RUNNER_TEMP/home/.agentdock/skill-store/state/$skill.json"
+            version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["active_version"])' "$state")"
+            test -f "$RUNNER_TEMP/home/.agentdock/skill-store/installed/$skill/$version/SKILL.md"
+          done
