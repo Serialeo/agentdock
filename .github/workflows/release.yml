@@ -468,6 +468,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: agentdock-*
           path: dist
           merge-multiple: true
 
@@ -659,6 +660,12 @@ jobs:
           release_server_pid=$!
           trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
           release_base="http://127.0.0.1:$release_port"
+          if ! curl --fail --silent --show-error --max-time 2 \
+            --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 30 \
+            "$release_base/" -o /dev/null; then
+            cat "$RUNNER_TEMP/release-http.log"
+            exit 1
+          fi
           installer="$RUNNER_TEMP/install.sh"
           installer_tmp="$RUNNER_TEMP/installer"
           install_dir="$RUNNER_TEMP/agentdock-install"
@@ -737,6 +744,12 @@ jobs:
           release_server_pid=$!
           trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
           release_base="http://127.0.0.1:$release_port"
+          if ! curl --fail --silent --show-error --max-time 2 \
+            --retry 20 --retry-connrefused --retry-delay 1 --retry-max-time 30 \
+            "$release_base/" -o /dev/null; then
+            cat "$RUNNER_TEMP/release-http.log"
+            exit 1
+          fi
           installer="$RUNNER_TEMP/install.sh"
           uninstaller="$RUNNER_TEMP/uninstall-macos.sh"
           dmg="$RUNNER_TEMP/AgentDock-macos-arm64.dmg"
