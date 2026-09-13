@@ -23,6 +23,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:

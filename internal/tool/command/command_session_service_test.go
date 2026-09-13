@@ -198,7 +198,7 @@ func TestListSessionsKeepsCompletedResultAvailable(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("command did not complete")
 	}
-	listed, err := runtime.listSessions()
+	listed, err := runtime.listSessions(context.Background())
 	if err != nil {
 		t.Fatalf("listSessions() error = %v", err)
 	}
@@ -271,7 +271,7 @@ func TestKillAllSessionsKeepsCompletedStatus(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("command did not complete")
 	}
-	result, err := runtime.killAll()
+	result, err := runtime.killAll(context.Background())
 	if err != nil {
 		t.Fatalf("killAllSessions() error = %v", err)
 	}
@@ -357,7 +357,7 @@ func TestKillAllSessionsWaitsForEveryProcess(t *testing.T) {
 		sessions = append(sessions, stored)
 	}
 
-	result, err := runtime.killAll()
+	result, err := runtime.killAll(context.Background())
 	if err != nil {
 		t.Fatalf("killAllSessions() error = %v", err)
 	}

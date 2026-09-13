@@ -17,12 +17,12 @@ func (svc *Service) applyPatch(ctx context.Context, request EditRequest) (Result
 	if patch == "" {
 		return nil, toolError("INVALID_ARGUMENT", "patch is required", "validation")
 	}
-	workdir, err := svc.patchWorkdir(request.Workdir)
+	workdir, err := svc.patchWorkdir(ctx, request.Workdir)
 	if err != nil {
 		return nil, err
 	}
 	if strings.HasPrefix(strings.TrimSpace(patch), "*** Begin Patch") {
-		return svc.applyEnvelopePatch(patch, request.DryRun, workdir.Display)
+		return svc.applyEnvelopePatch(ctx, patch, request.DryRun, workdir)
 	}
 	maxDiffBytes := boundedInt(intValue(request.MaxDiffBytes, 65536), 65536, 1, maxTextOutputBytes)
 	preview := textutil.SafeTruncateString(patch, maxDiffBytes)
@@ -56,12 +56,12 @@ func patchDiagnostic(code, path, message, output, reason string) map[string]any 
 	return map[string]any{"code": code, "path": path, "message": message, "output": output, "reason": reason}
 }
 
-func (svc *Service) patchWorkdir(requested string) (workspacepkg.Path, error) {
+func (svc *Service) patchWorkdir(ctx context.Context, requested string) (workspacepkg.Path, error) {
 	raw := requested
 	if raw == "" {
 		raw = "."
 	}
-	workdir, err := svc.ws.ResolveExisting(raw)
+	workdir, err := svc.ws.ResolveExistingContext(ctx, raw)
 	if err != nil {
 		return workspacepkg.Path{}, err
 	}

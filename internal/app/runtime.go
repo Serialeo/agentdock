@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	acpruntime "github.com/uvwt/agentdock/internal/acp"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/envstore"
 	"github.com/uvwt/agentdock/internal/evolution"
+	projectinstructions "github.com/uvwt/agentdock/internal/instructions"
 	mcpclient "github.com/uvwt/agentdock/internal/mcp/client"
+	projectstate "github.com/uvwt/agentdock/internal/project"
 	"github.com/uvwt/agentdock/internal/taskstate"
 	toolacp "github.com/uvwt/agentdock/internal/tool/acp"
 	toolbrowser "github.com/uvwt/agentdock/internal/tool/browser"
@@ -32,26 +36,30 @@ import (
 type Result = toolcore.Result
 
 type Runtime struct {
-	cfg            config.Config
-	toolNames      []string
-	toolValidators map[string]*toolcontract.InputValidator
-	ws             *workspace.Workspace
-	skills         *toolskill.Service
-	command        *toolcommand.Service
-	files          *toolfile.Service
-	dynamicMCP     *toolmcp.Service
-	media          *toolmedia.Service
-	browser        *toolbrowser.Service
-	recall         *toolrecall.Service
-	evolution      *evolution.Service
-	taskTools      *tooltask.Service
-	acp            *toolacp.Service
-	lifecycleMu    sync.RWMutex
-	commandCtx     context.Context
-	commandCancel  context.CancelFunc
-	closing        bool
-	closeOnce      sync.Once
-	closeErr       error
+	cfg                 config.Config
+	toolNames           []string
+	toolValidators      map[string]*toolcontract.InputValidator
+	ws                  *workspace.Workspace
+	projects            *projectstate.Store
+	projectInstructions *projectinstructions.Loader
+	skills              *toolskill.Service
+	command             *toolcommand.Service
+	files               *toolfile.Service
+	dynamicMCP          *toolmcp.Service
+	media               *toolmedia.Service
+	browser             *toolbrowser.Service
+	browserOwnerMu      sync.RWMutex
+	browserOwners       map[string]browserSessionOwner
+	recall              *toolrecall.Service
+	evolution           *evolution.Service
+	taskTools           *tooltask.Service
+	acp                 *toolacp.Service
+	lifecycleMu         sync.RWMutex
+	commandCtx          context.Context
+	commandCancel       context.CancelFunc
+	closing             bool
+	closeOnce           sync.Once
+	closeErr            error
 }
 
 func NewRuntime(cfg config.Config) (*Runtime, error) {
@@ -62,6 +70,10 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 	ws, err := workspace.New(cfg.AgentDockDefaultDir)
 	if err != nil {
 		return nil, err
+	}
+	projects, err := projectstate.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Project execution state: %w", err)
 	}
 	envs, err := envstore.New(cfg.AgentDockHome)
 	if err != nil {
@@ -82,9 +94,10 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 	}
 	commandCtx, commandCancel := context.WithCancel(context.Background())
 	runtime := &Runtime{
-		cfg: cfg, ws: ws, skills: skills,
+		cfg: cfg, ws: ws, projects: projects, projectInstructions: projectinstructions.NewLoader(cfg.AgentDockDefaultDir), skills: skills,
 		toolNames: toolNames, toolValidators: toolValidators,
 		commandCtx: commandCtx, commandCancel: commandCancel,
+		browserOwners: make(map[string]browserSessionOwner),
 	}
 	runtime.command = toolcommand.New(func() config.Config { return runtime.cfg }, ws, envs, skills.ResolveActive, runtime.commandExecutionContext)
 	runtime.files = toolfile.New(ws, skills.ResolveResource, runtime.command.CommandEnv)
@@ -120,13 +133,114 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 			_ = runtime.Close()
 			return nil, fmt.Errorf("initialize ACP runtime: %w", err)
 		}
-		runtime.acp = toolacp.New(manager)
+		runtime.acp = toolacp.New(manager, ws)
 	}
 	return runtime, nil
 }
 
 func (r *Runtime) Config() config.Config           { return r.cfg }
 func (r *Runtime) Workspace() *workspace.Workspace { return r.ws }
+
+func (r *Runtime) ApplyProjectDeployment(deployment protocol.Deployment) (protocol.Deployment, error) {
+	if r == nil || r.projects == nil {
+		return protocol.Deployment{}, errors.New("Project execution state is not initialized")
+	}
+	return r.projects.ApplyDeployment(deployment)
+}
+
+func (r *Runtime) RemoveProjectDeployment(deploymentID string) error {
+	if r == nil || r.projects == nil {
+		return errors.New("Project execution state is not initialized")
+	}
+	return r.projects.RemoveDeployment(deploymentID)
+}
+
+func (r *Runtime) BindProjectTarget(request protocol.ProjectTargetBindRequest) (projectstate.TargetBinding, error) {
+	if r == nil || r.projects == nil || r.projectInstructions == nil {
+		return projectstate.TargetBinding{}, errors.New("Project execution state is not initialized")
+	}
+	deployment, err := r.projectDeploymentForPrompt(request.DeploymentID, request.DeploymentRevision)
+	if err != nil {
+		return projectstate.TargetBinding{}, err
+	}
+	scopes, err := r.validateProjectPromptScopes(deployment, request.CWDRel, request.PromptScopes)
+	if err != nil {
+		return projectstate.TargetBinding{}, err
+	}
+	if err := r.verifyProjectSourceProvenance(deployment, request.SourceProvenance); err != nil {
+		return projectstate.TargetBinding{}, err
+	}
+	request.PromptScopes = scopes
+	return r.projects.BindTarget(request)
+}
+
+func (r *Runtime) RebindProjectTarget(request protocol.ProjectTargetRebindRequest) (projectstate.TargetBinding, error) {
+	if r == nil || r.projects == nil || r.projectInstructions == nil {
+		return projectstate.TargetBinding{}, errors.New("Project execution state is not initialized")
+	}
+	binding, ok := r.projects.Target(request.TargetID)
+	if !ok || binding.WorkSessionID != strings.TrimSpace(request.WorkSessionID) {
+		return projectstate.TargetBinding{}, &protocol.RemoteError{Code: protocol.ErrorSessionTargetDenied, Message: "Target is not bound to this WorkSession", Category: "authorization", Details: map[string]any{"target_id": request.TargetID}}
+	}
+	deployment, err := r.projectDeploymentForPrompt(binding.DeploymentID, binding.DeploymentRevision)
+	if err != nil {
+		return projectstate.TargetBinding{}, err
+	}
+	scopes, err := r.validateProjectPromptScopes(deployment, request.CWDRel, request.PromptScopes)
+	if err != nil {
+		return projectstate.TargetBinding{}, err
+	}
+	if err := r.verifyProjectSourceProvenance(deployment, request.SourceProvenance); err != nil {
+		return projectstate.TargetBinding{}, err
+	}
+	request.PromptScopes = scopes
+	return r.projects.RebindTarget(request)
+}
+
+func (r *Runtime) RevokeProjectTarget(targetID string) {
+	if r != nil && r.projects != nil {
+		r.projects.RevokeTarget(targetID)
+	}
+}
+
+func (r *Runtime) RevokeProjectSession(workSessionID string) {
+	if r != nil && r.projects != nil {
+		r.projects.RevokeSession(workSessionID)
+	}
+}
+
+func (r *Runtime) PrepareProjectExecution(ctx context.Context, executionContext *protocol.ExecutionContext) (context.Context, error) {
+	if r == nil || r.projects == nil || r.ws == nil {
+		return nil, errors.New("Project execution state is not initialized")
+	}
+	execution, err := r.projects.ResolveExecution(executionContext)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.verifyProjectExecutionPrompts(execution); err != nil {
+		return nil, err
+	}
+	if err := r.verifyProjectSourceProvenance(execution.Deployment, execution.Target.SourceProvenance); err != nil {
+		return nil, err
+	}
+	return r.bindPreparedProjectExecution(ctx, execution)
+}
+
+func (r *Runtime) PrepareProjectSessionControlExecution(ctx context.Context, executionContext *protocol.ExecutionContext) (context.Context, error) {
+	if r == nil || r.projects == nil || r.ws == nil {
+		return nil, errors.New("Project execution state is not initialized")
+	}
+	execution, err := r.projects.ResolveSessionControlExecution(executionContext)
+	if err != nil {
+		return nil, err
+	}
+	return r.bindPreparedProjectExecution(ctx, execution)
+}
+
+func (r *Runtime) bindPreparedProjectExecution(ctx context.Context, execution projectstate.Execution) (context.Context, error) {
+	ctx = projectstate.WithExecution(ctx, execution)
+	return workspace.WithCWD(ctx, execution.CWD)
+}
 
 func (r *Runtime) Close() error {
 	if r == nil {
@@ -212,11 +326,42 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 	if err := r.validateToolArguments(name, args); err != nil {
 		return nil, err
 	}
+	var err error
+	ctx, err = r.refreshPreparedProjectExecution(ctx, name)
+	if err != nil {
+		return nil, err
+	}
 	spec, ok := toolSpecByName(name)
 	if !ok || spec.Handler == nil {
 		return nil, toolErrorDetails("UNKNOWN_TOOL", "tool has no handler", "validation", map[string]any{"tool": name})
 	}
+	if err := r.authorizeProjectTool(ctx, name, args); err != nil {
+		return nil, err
+	}
+	if err := r.ensureProjectPromptForTool(ctx, name, args); err != nil {
+		return nil, err
+	}
 	return spec.Handler(ctx, r, args)
+}
+
+func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string) (context.Context, error) {
+	execution, ok := projectstate.ExecutionFromContext(ctx)
+	if !ok || r == nil || r.projects == nil || r.ws == nil {
+		return ctx, nil
+	}
+	executionContext := execution.Context
+	var refreshed projectstate.Execution
+	var err error
+	switch toolName {
+	case "session_observe", "session_act", "acp_session", "acp_prompt", "acp_interaction":
+		refreshed, err = r.projects.ResolveSessionControlExecution(&executionContext)
+	default:
+		refreshed, err = r.projects.ResolveExecution(&executionContext)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r.bindPreparedProjectExecution(ctx, refreshed)
 }
 
 func (r *Runtime) validateToolArguments(name string, args map[string]any) error {

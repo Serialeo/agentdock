@@ -190,7 +190,7 @@ func testTemplateMatchRecommendation(candidates []taskstate.TemplateCandidate) m
 		reason = "top candidate score is strong enough to select by default"
 	} else if bestScore >= 60 {
 		recommended = "consider_template"
-		reason = "top candidate is plausible but should be checked against the user goal"
+		reason = "top candidate score is in the consider_template range"
 	}
 	return map[string]any{
 		"recommended": recommended, "recommendation_reason": reason, "best_candidate_score": bestScore,

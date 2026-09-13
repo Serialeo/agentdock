@@ -74,7 +74,12 @@ if [[ -z "$pull_images" ]]; then
 fi
 
 if [[ "$build_images" == "true" ]]; then
+  if [[ -z "${PRIVATE_GO_READ_TOKEN:-}" ]]; then
+    printf 'PRIVATE_GO_READ_TOKEN is required to build images with private Go modules\n' >&2
+    exit 1
+  fi
   docker_build_args=(
+    --secret "id=github_token,env=PRIVATE_GO_READ_TOKEN"
     --build-arg "BUILD_COMMIT=$build_commit"
     --build-arg "BUILD_DATE=$build_date"
   )
@@ -174,7 +179,7 @@ wait_for_healthy "$runtime_container" runtime
 docker exec "$runtime_container" sh -c 'curl -fsS http://127.0.0.1:8765/healthz >/dev/null'
 docker exec "$runtime_container" sh -c '
   test -f "$HOME/.agentdock/skill-store/bundled-skills.json"
-  for skill in agentdock-user-guide skill-authoring skill-installation; do
+  for skill in agentdock-user-guide skill-authoring skill-installation skill-vetter-runtime; do
     version="$(jq -r .active_version "$HOME/.agentdock/skill-store/state/$skill.json")"
     test -n "$version"
     test -f "$HOME/.agentdock/skill-store/installed/$skill/$version/SKILL.md"

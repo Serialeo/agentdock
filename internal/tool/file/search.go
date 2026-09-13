@@ -50,17 +50,9 @@ var defaultSearchFallbackLimits = searchFallbackLimits{
 var errSearchResourceLimit = errors.New("text search resource limit exceeded")
 
 func (svc *Service) SearchText(ctx context.Context, request SearchRequest) (Result, error) {
-	selection, err := selectFileRuntime(request.RuntimeOptions)
-	if err != nil {
-		return nil, err
-	}
 	if request.Query == "" {
 		return nil, toolError("INVALID_ARGUMENT", "query is required", "validation")
 	}
-	if selection.isWSL() {
-		return svc.searchTextWSL(ctx, request, selection)
-	}
-
 	query := request.Query
 	if query == "" {
 		return nil, toolError("INVALID_ARGUMENT", "query is required", "validation")
@@ -69,7 +61,7 @@ func (svc *Service) SearchText(ctx context.Context, request SearchRequest) (Resu
 	if path == "" {
 		path = "."
 	}
-	p, err := svc.ws.ResolveExisting(path)
+	p, err := svc.ws.ResolveExistingContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -89,10 +81,10 @@ func (svc *Service) SearchText(ctx context.Context, request SearchRequest) (Resu
 		ContextLines:   boundedInt(intValue(request.ContextLines, 0), 0, 0, 20),
 	}
 	if result, available, err := svc.searchTextRG(ctx, p, opts); available {
-		return addFileRuntimeResult(result, selection), err
+		return result, err
 	}
 	result, err := svc.searchTextGo(ctx, p, opts)
-	return addFileRuntimeResult(result, selection), err
+	return result, err
 }
 
 func (svc *Service) searchTextRG(ctx context.Context, p workspace.Path, opts SearchOptions) (Result, bool, error) {

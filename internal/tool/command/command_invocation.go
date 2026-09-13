@@ -3,14 +3,12 @@ package command
 import (
 	"context"
 	"os"
-	"os/exec"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/uvwt/agentdock/internal/envstore"
+	projectstate "github.com/uvwt/agentdock/internal/project"
 	"github.com/uvwt/agentdock/internal/tool/command/session"
-	"github.com/uvwt/agentdock/internal/workspace"
 )
 
 type commandInvocation struct {
@@ -33,12 +31,16 @@ func (invocation commandInvocation) start(ctx context.Context, timeout time.Dura
 	return session.StartWithTTY(ctx, invocation.command, invocation.workdir, invocation.env, timeout, tty, prepare)
 }
 
-func (svc *Service) newHostCommandInvocation(request ExecRequest) (commandInvocation, error) {
+func (svc *Service) prepareCommandInvocation(ctx context.Context, request ExecRequest) (commandInvocation, error) {
+	return svc.newHostCommandInvocation(ctx, request)
+}
+
+func (svc *Service) newHostCommandInvocation(ctx context.Context, request ExecRequest) (commandInvocation, error) {
 	skillContext, err := parseCommandSkillContext(request)
 	if err != nil {
 		return commandInvocation{}, err
 	}
-	workdir, err := svc.resolveHostCommandWorkdir(request.Workdir, skillContext.skill)
+	workdir, err := svc.resolveHostCommandWorkdir(ctx, request.Workdir, skillContext.skill)
 	if err != nil {
 		return commandInvocation{}, err
 	}
@@ -53,7 +55,20 @@ func (svc *Service) newHostCommandInvocation(request ExecRequest) (commandInvoca
 	if err != nil {
 		return commandInvocation{}, err
 	}
-	return commandInvocation{command: request.Cmd, workdir: workdir, env: commandEnv}, nil
+	executionContext := session.ExecutionContext{Workdir: workdir}
+	if execution, ok := projectstate.ExecutionFromContext(ctx); ok {
+		executionContext.WorkSessionID = execution.Target.WorkSessionID
+		executionContext.TargetID = execution.Target.TargetID
+		executionContext.ProjectID = execution.Target.ProjectID
+		executionContext.DeploymentID = execution.Target.DeploymentID
+		executionContext.NodeID = execution.Deployment.NodeID
+	}
+	return commandInvocation{
+		command:   request.Cmd,
+		workdir:   workdir,
+		env:       commandEnv,
+		execution: executionContext,
+	}, nil
 }
 
 func parseCommandSkillContext(request ExecRequest) (commandSkillContext, error) {
@@ -73,7 +88,7 @@ func parseCommandSkillContext(request ExecRequest) (commandSkillContext, error) 
 	return commandSkillContext{skill: skill, envSkill: envSkill}, nil
 }
 
-func (svc *Service) resolveHostCommandWorkdir(requested string, skill string) (string, error) {
+func (svc *Service) resolveHostCommandWorkdir(ctx context.Context, requested string, skill string) (string, error) {
 	skillDir := ""
 	if skill != "" {
 		var err error
@@ -83,7 +98,7 @@ func (svc *Service) resolveHostCommandWorkdir(requested string, skill string) (s
 		}
 	}
 	if raw := strings.TrimSpace(requested); raw != "" {
-		resolved, err := svc.ws.ResolveExisting(raw)
+		resolved, err := svc.ws.ResolveExistingContext(ctx, raw)
 		if err != nil {
 			return "", err
 		}
@@ -92,7 +107,7 @@ func (svc *Service) resolveHostCommandWorkdir(requested string, skill string) (s
 	if skillDir != "" {
 		return skillDir, nil
 	}
-	resolved, err := svc.ws.ResolveExisting(".")
+	resolved, err := svc.ws.ResolveExistingContext(ctx, ".")
 	if err != nil {
 		return "", err
 	}
@@ -147,103 +162,4 @@ func (svc *Service) commandEnvOverrides(skillName string, extra map[string]strin
 		setPlatformCommandEnv(overrides, key, value)
 	}
 	return overrides, nil
-}
-
-func buildWSLCommandArgs(distribution, workdir, command string) []string {
-	args := make([]string, 0, 8)
-	if distribution != "" {
-		args = append(args, "--distribution", distribution)
-	}
-	if workdir != "" {
-		args = append(args, "--cd", workdir)
-	}
-	return append(args, "--exec", "bash", "-lc", command)
-}
-
-// buildWSLProcessEnv 避免把环境变量值暴露在 Windows 命令行中。
-// WSLENV 只携带变量名，wsl.exe 从自身进程环境读取对应值并传入 Linux。
-func buildWSLProcessEnv(base []string, forwarded map[string]string) []string {
-	values := make(map[string]string, len(base)+len(forwarded)+1)
-	names := make(map[string]string, len(base)+len(forwarded)+1)
-	for _, entry := range base {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || key == "" {
-			continue
-		}
-		normalized := strings.ToUpper(key)
-		names[normalized] = key
-		values[normalized] = value
-	}
-
-	wslEnvItems := make([]string, 0, len(forwarded))
-	forwardedNames := map[string]bool{}
-	existingWSLEnv := values["WSLENV"]
-	for key, value := range forwarded {
-		if strings.EqualFold(key, "WSLENV") {
-			existingWSLEnv = value
-			break
-		}
-	}
-	if existingWSLEnv != "" {
-		for _, item := range strings.Split(existingWSLEnv, ":") {
-			item = strings.TrimSpace(item)
-			if item == "" {
-				continue
-			}
-			wslEnvItems = append(wslEnvItems, item)
-			name := strings.SplitN(item, "/", 2)[0]
-			forwardedNames[strings.ToUpper(name)] = true
-		}
-	}
-
-	keys := make([]string, 0, len(forwarded))
-	for key := range forwarded {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		normalized := strings.ToUpper(key)
-		if normalized == "WSLENV" {
-			continue
-		}
-		names[normalized] = key
-		values[normalized] = forwarded[key]
-		if !forwardedNames[normalized] {
-			wslEnvItems = append(wslEnvItems, key)
-			forwardedNames[normalized] = true
-		}
-	}
-	if len(wslEnvItems) > 0 {
-		names["WSLENV"] = "WSLENV"
-		values["WSLENV"] = strings.Join(wslEnvItems, ":")
-	} else {
-		delete(names, "WSLENV")
-		delete(values, "WSLENV")
-	}
-
-	normalizedKeys := make([]string, 0, len(values))
-	for key := range values {
-		normalizedKeys = append(normalizedKeys, key)
-	}
-	sort.Strings(normalizedKeys)
-	result := make([]string, 0, len(normalizedKeys))
-	for _, normalized := range normalizedKeys {
-		result = append(result, names[normalized]+"="+values[normalized])
-	}
-	return result
-}
-
-func windowsPathToWSL(raw string) (string, bool) {
-	return workspace.WindowsPathToWSL(raw)
-}
-
-func newWSLCommandFactory(executable string, args, hostEnv []string, hostWorkdir string) session.CommandFactory {
-	commandArgs := append([]string(nil), args...)
-	commandEnv := append([]string(nil), hostEnv...)
-	return func(ctx context.Context) *exec.Cmd {
-		cmd := exec.CommandContext(ctx, executable, commandArgs...)
-		cmd.Dir = hostWorkdir
-		cmd.Env = commandEnv
-		return cmd
-	}
 }

@@ -30,9 +30,8 @@ func TestTaskManageSchemaHidesNexusExtensionsWithoutNexus(t *testing.T) {
 			t.Fatalf("task_manage output schema should hide %s without Nexus", hidden)
 		}
 	}
-	nextDescription, _ := outputProps["next_required_action"].(map[string]any)["description"].(string)
-	if nextDescription == "" || containsNexusExtensionTerm(nextDescription) {
-		t.Fatalf("task_manage next_required_action description should stay neutral without Nexus: %q", nextDescription)
+	if _, ok := outputProps["next_required_action"]; ok {
+		t.Fatal("task_manage output schema should not expose hidden next_required_action prose")
 	}
 }
 
@@ -49,6 +48,9 @@ func TestTaskManageSchemaKeepsNexusExtensionsWithNexus(t *testing.T) {
 		if _, ok := outputProps[field]; !ok {
 			t.Fatalf("task_manage output schema should expose %s with Nexus", field)
 		}
+	}
+	if _, ok := outputProps["next_required_action"]; ok {
+		t.Fatal("task_manage output schema should not expose hidden next_required_action prose with Nexus")
 	}
 }
 
@@ -80,7 +82,6 @@ func TestInputSchemaPublishesRuntimeBounds(t *testing.T) {
 		{tool: "view_image", property: "max_source_bytes", minimum: 1, maximum: 100 * 1024 * 1024},
 		{tool: "view_image", property: "max_bytes", minimum: 1, maximum: 2 * 1024 * 1024},
 		{tool: "view_image", property: "quality", minimum: 35, maximum: 95},
-		{tool: "file_publish", property: "retention_seconds", minimum: 0, maximum: 7 * 24 * 60 * 60},
 		{tool: "browser_session", property: "timeout_ms", minimum: 1, maximum: 300000},
 		{tool: "browser_act", property: "timeout_ms", minimum: 1, maximum: 300000},
 		{tool: "browser_snapshot", property: "timeout_ms", minimum: 1, maximum: 300000},

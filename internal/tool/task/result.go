@@ -119,7 +119,7 @@ func templateMatchRecommendation(candidates []taskstate.TemplateCandidate) map[s
 		reason = "top candidate score is strong enough to select by default"
 	} else if bestScore >= 60 {
 		recommended = "consider_template"
-		reason = "top candidate is plausible but should be checked against the user goal"
+		reason = "top candidate score is in the consider_template range"
 	}
 	return map[string]any{
 		"recommended":           recommended,
@@ -152,6 +152,10 @@ func compactTemplateSummary(template taskstate.Template) map[string]any {
 }
 
 func taskToolError(err error) error {
+	var queryErr *taskstate.ListQueryError
+	if errors.As(err, &queryErr) {
+		return toolErrorDetails(queryErr.Code, queryErr.Message, "validation", nil)
+	}
 	if errors.Is(err, taskstate.ErrTaskNotFound) {
 		return toolErrorDetails("TASK_NOT_FOUND", err.Error(), "not_found", map[string]any{"retryable": false})
 	}

@@ -54,14 +54,10 @@ func TestAgentDockContextToolReturnsStructuredRuntimeIndex(t *testing.T) {
 	if demo == nil || demo.Description != "Use this Skill for context index tests." || demo.File != "skill://demo-skill/SKILL.md" {
 		t.Fatalf("structured Skill index missing demo-skill: %#v", got.Skills)
 	}
-	if got.CommonSkills == nil || got.CommonSkills.Total != 1 || len(got.CommonSkills.Items) != 1 {
-		t.Fatalf("common Skill index = %#v", got.CommonSkills)
+	if got.CommonSkills == nil || got.CommonSkills.Total != 1 || got.CommonSkills.Effective != 0 || got.CommonSkills.Shadowed != 1 || len(got.CommonSkills.Items) != 0 {
+		t.Fatalf("common Skill shadowing = %#v", got.CommonSkills)
 	}
-	commonDemo := got.CommonSkills.Items[0]
-	if commonDemo.Name != "demo-skill" || commonDemo.Description != "Lower-priority common Skill." || commonDemo.File != filepath.Join(home, ".agents", "skills", "demo-common", "SKILL.md") {
-		t.Fatalf("common Skill index missing duplicate demo-skill: %#v", got.CommonSkills)
-	}
-	if got.DynamicMCP == nil || got.WorkflowTemplates == nil || got.Rules == nil {
+	if got.DynamicMCP == nil || got.WorkflowTemplates == nil {
 		t.Fatalf("required structured context fields must be arrays: %#v", got)
 	}
 	if got.Runtime == nil || got.Runtime.Version == "" || got.Runtime.OS == "" || got.Runtime.Arch == "" || got.Runtime.PathModel != config.PathModel {
@@ -69,17 +65,6 @@ func TestAgentDockContextToolReturnsStructuredRuntimeIndex(t *testing.T) {
 	}
 	if got.Runtime.AgentDockHome != cfg.AgentDockHome || got.Runtime.AgentDockDefaultDir != cfg.AgentDockDefaultDir || got.Runtime.DefaultCWD != "." {
 		t.Fatalf("runtime paths = %#v", got.Runtime)
-	}
-	rules := strings.Join(got.Rules, "\n")
-	for _, want := range []string{"AgentDock 自带工具直接调用", "同名时始终优先 skills", "common_skills.truncated=true", "task_manage checkpoint"} {
-		if !strings.Contains(rules, want) {
-			t.Fatalf("context rules missing %q: %s", want, rules)
-		}
-	}
-	for _, removed := range []string{"skill_read", "skill_run"} {
-		if strings.Contains(rules, removed) {
-			t.Fatalf("context rules still reference removed tool %q: %s", removed, rules)
-		}
 	}
 }
 
@@ -141,12 +126,10 @@ func TestAgentDockContextExposesShortACPOrientationWhenEnabled(t *testing.T) {
 	if enabledContext.ACP == nil || !enabledContext.ACP.Enabled || enabledContext.ACP.Agent != "helper" {
 		t.Fatalf("ACP context = %#v", enabledContext.ACP)
 	}
-	for _, want := range []string{"Agent Client Protocol", "仅当用户明确要求时使用", "独特见解", "编排任务", "不是动态 MCP", "mcp_tool_*"} {
-		if !strings.Contains(enabledContext.ACP.Description, want) {
-			t.Fatalf("ACP description missing %q: %s", want, enabledContext.ACP.Description)
-		}
+	if enabledContext.ACP.Description != "本机 Coding Agent 通道（Agent Client Protocol）。" {
+		t.Fatalf("ACP description should stay factual: %s", enabledContext.ACP.Description)
 	}
-	combined := enabledContext.ACP.Description + "\n" + strings.Join(enabledContext.Rules, "\n")
+	combined := enabledContext.ACP.Description
 	for _, operational := range []string{"acp_session", "acp_prompt", "acp_interaction", "option_id", "always", "JSON-RPC", "wire protocol"} {
 		if strings.Contains(combined, operational) {
 			t.Fatalf("ACP bootstrap should leave %q to tool descriptions: %s", operational, combined)
@@ -188,15 +171,6 @@ func TestNexusUnavailableHidesWorkflowTemplateCapability(t *testing.T) {
 	if len(got.WorkflowTemplates) != 0 || got.Recall != nil {
 		t.Fatalf("Nexus-only context should be absent without Nexus: %#v", got)
 	}
-	rules := strings.Join(got.Rules, "\n")
-	for _, hidden := range []string{"workflow_template_manage", "source_template_ids", "recall_search", "recall_read"} {
-		if strings.Contains(rules, hidden) {
-			t.Fatalf("context rules should hide %q without Nexus: %s", hidden, rules)
-		}
-	}
-	if !strings.Contains(rules, "task_manage") {
-		t.Fatalf("context should keep task_manage without Nexus: %s", rules)
-	}
 }
 
 func TestNexusAvailableExposesWorkflowAndRecallContext(t *testing.T) {
@@ -217,12 +191,6 @@ func TestNexusAvailableExposesWorkflowAndRecallContext(t *testing.T) {
 	}
 	if got.Recall == nil || !got.Recall.Enabled {
 		t.Fatalf("Nexus context should declare Recall enabled: %#v", got.Recall)
-	}
-	rules := strings.Join(got.Rules, "\n")
-	for _, want := range []string{"workflow_template_manage match", "source_template_ids", "recall_search", "recall_read"} {
-		if !strings.Contains(rules, want) {
-			t.Fatalf("context rules missing %q with Nexus: %s", want, rules)
-		}
 	}
 }
 
@@ -266,15 +234,6 @@ func TestAgentDockLocalContextSkipsSharedNexusLookups(t *testing.T) {
 	}
 	if contextResult.Runtime != nil {
 		t.Fatalf("local-only context duplicated Bridge Hello runtime facts: %#v", contextResult.Runtime)
-	}
-	rules := strings.Join(contextResult.Rules, "\n")
-	for _, sharedRule := range []string{"workflow_template_manage", "source_template_ids", "recall_search", "recall_read", "private_note_manage"} {
-		if strings.Contains(rules, sharedRule) {
-			t.Fatalf("local-only context leaked shared rule %q: %s", sharedRule, rules)
-		}
-	}
-	if !strings.Contains(rules, "task_manage checkpoint") {
-		t.Fatalf("local-only context lost device rule: %s", rules)
 	}
 }
 

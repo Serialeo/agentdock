@@ -6,6 +6,9 @@ import (
 	"net/url"
 
 	"github.com/uvwt/agentdock/internal/app"
+	"github.com/uvwt/agentdock/internal/taskstate"
+	toolfile "github.com/uvwt/agentdock/internal/tool/file"
+	toolskill "github.com/uvwt/agentdock/internal/tool/skill"
 )
 
 // Runtime 定义 Runtime API 路由真正需要的应用能力。
@@ -16,7 +19,9 @@ type Runtime interface {
 	RuntimeSkill(skill string) (app.Result, error)
 	RuntimeSkillFiles(skill string) (app.Result, error)
 	RuntimeSkillFile(skill, path string) (app.Result, error)
-	RuntimeTasks(status string, limit int) (app.Result, error)
+	RuntimeSkillManage(context.Context, toolskill.PackageRequest) (app.Result, error)
+	RuntimeBrowseFiles(context.Context, toolfile.BrowseRequest) (app.Result, error)
+	RuntimeTasks(taskstate.ListOptions) (app.Result, error)
 	RuntimeTask(id string) (app.Result, error)
 	RuntimeTaskDelete(id string) (app.Result, error)
 	RuntimeCapabilities(context.Context, bool) (app.Result, error)

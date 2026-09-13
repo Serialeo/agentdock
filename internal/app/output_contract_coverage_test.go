@@ -19,7 +19,7 @@ var outputContractCoverageInventory = map[string]outputContractCoverageEntry{
 	"read_file":                {Variants: []string{"success"}},
 	"list_dir":                 {Variants: []string{"success"}},
 	"search_text":              {Variants: []string{"success"}},
-	"file_edit":                {Variants: []string{"replace", "patch", "add", "move", "delete"}},
+	"file_edit":                {Variants: []string{"replace", "add", "move", "delete"}},
 	"exec_command":             {Variants: []string{"success"}},
 	"session_observe":          {Variants: []string{"list"}},
 	"session_act":              {Variants: []string{"kill_all"}},
@@ -44,7 +44,6 @@ var outputContractCoverageInventory = map[string]outputContractCoverageEntry{
 	"browser_session":  {Variants: []string{"start"}, IntegrationOnly: true},
 	"browser_act":      {Variants: []string{"success"}, IntegrationOnly: true},
 	"browser_snapshot": {Variants: []string{"success"}, IntegrationOnly: true},
-	"file_publish":     {Variants: []string{"success"}},
 }
 
 func TestOutputContractCoverageMatchesPublicTools(t *testing.T) {

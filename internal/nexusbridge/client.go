@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -15,8 +16,8 @@ import (
 	"sync"
 	"time"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/gorilla/websocket"
-	protocol "github.com/uvwt/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/buildinfo"
 	"github.com/uvwt/agentdock/internal/publicartifacts"
@@ -35,6 +36,16 @@ type NodeAPI interface {
 	UIResources() []protocol.UIResourceCapability
 	ToolContractHash() string
 	AgentDockLocalContext(context.Context) (map[string]any, error)
+	PrepareProjectExecution(context.Context, *protocol.ExecutionContext) (context.Context, error)
+	PrepareProjectSessionControlExecution(context.Context, *protocol.ExecutionContext) (context.Context, error)
+	ApplyProjectDeployment(protocol.Deployment) (map[string]any, error)
+	RemoveProjectDeployment(string) (map[string]any, error)
+	LoadProjectPrompt(protocol.ProjectPromptLoadRequest) (map[string]any, error)
+	WriteProjectPrompt(protocol.ProjectPromptWriteRequest) (map[string]any, error)
+	BindProjectTarget(protocol.ProjectTargetBindRequest) (map[string]any, error)
+	RebindProjectTarget(protocol.ProjectTargetRebindRequest) (map[string]any, error)
+	RevokeProjectTarget(string) (map[string]any, error)
+	RevokeProjectSession(string) (map[string]any, error)
 	Invoke(context.Context, string, map[string]any) (map[string]any, error)
 	ReadAppResource(string) (map[string]any, error)
 }
@@ -215,14 +226,82 @@ func (c *Client) invoke(parent context.Context, socket *websocket.Conn, incoming
 	case protocol.OperationContextLocal:
 		result, err = c.node.AgentDockLocalContext(ctx)
 	case protocol.OperationToolCall:
-		var request struct {
-			Tool      string         `json:"tool"`
-			Arguments map[string]any `json:"arguments"`
-		}
-		if decodeErr := json.Unmarshal(incoming.Arguments, &request); decodeErr != nil {
+		var request protocol.ToolCallRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
 			err = fmt.Errorf("解析工具请求: %w", decodeErr)
 		} else {
-			result, err = c.node.Invoke(ctx, request.Tool, request.Arguments)
+			prepare := c.node.PrepareProjectExecution
+			switch request.Tool {
+			case "session_observe", "session_act", "acp_session", "acp_prompt", "acp_interaction":
+				prepare = c.node.PrepareProjectSessionControlExecution
+			case "browser_session":
+				action, _ := request.Arguments["action"].(string)
+				if strings.EqualFold(strings.TrimSpace(action), "close") {
+					prepare = c.node.PrepareProjectSessionControlExecution
+				}
+			}
+			preparedCtx, prepareErr := prepare(ctx, incoming.ExecutionContext)
+			if prepareErr != nil {
+				err = prepareErr
+			} else {
+				result, err = c.node.Invoke(preparedCtx, request.Tool, request.Arguments)
+			}
+		}
+	case protocol.OperationProjectDeploymentApply:
+		var deployment protocol.Deployment
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &deployment); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Deployment 应用请求: %w", decodeErr)
+		} else {
+			result, err = c.node.ApplyProjectDeployment(deployment)
+		}
+	case protocol.OperationProjectDeploymentRemove:
+		var request protocol.ProjectDeploymentRemoveRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Deployment 移除请求: %w", decodeErr)
+		} else {
+			result, err = c.node.RemoveProjectDeployment(request.DeploymentID)
+		}
+	case protocol.OperationProjectPromptLoad:
+		var request protocol.ProjectPromptLoadRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Prompt 加载请求: %w", decodeErr)
+		} else {
+			result, err = c.node.LoadProjectPrompt(request)
+		}
+	case protocol.OperationProjectPromptWrite:
+		var request protocol.ProjectPromptWriteRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Prompt 写入请求: %w", decodeErr)
+		} else {
+			result, err = c.node.WriteProjectPrompt(request)
+		}
+	case protocol.OperationProjectTargetBind:
+		var request protocol.ProjectTargetBindRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Target 绑定请求: %w", decodeErr)
+		} else {
+			result, err = c.node.BindProjectTarget(request)
+		}
+	case protocol.OperationProjectTargetRebind:
+		var request protocol.ProjectTargetRebindRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Target 重绑请求: %w", decodeErr)
+		} else {
+			result, err = c.node.RebindProjectTarget(request)
+		}
+	case protocol.OperationProjectTargetRevoke:
+		var request protocol.ProjectTargetRevokeRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Target 撤销请求: %w", decodeErr)
+		} else {
+			result, err = c.node.RevokeProjectTarget(request.TargetID)
+		}
+	case protocol.OperationProjectSessionRevoke:
+		var request protocol.ProjectSessionRevokeRequest
+		if decodeErr := decodeStrictBridgeArguments(incoming.Arguments, &request); decodeErr != nil {
+			err = fmt.Errorf("解析 Project Session 撤销请求: %w", decodeErr)
+		} else {
+			result, err = c.node.RevokeProjectSession(request.WorkSessionID)
 		}
 	case protocol.OperationResourceRead:
 		var request struct {
@@ -260,11 +339,24 @@ func (c *Client) invoke(parent context.Context, socket *websocket.Conn, incoming
 }
 
 func (c *Client) dispatchRuntimeRequest(ctx context.Context, request runtimeapi.Request) (map[string]any, error) {
-	// Nexus Runtime operation 沿用原有 64 KiB Bridge 请求上限；HTTP 各路由仍保留自己的错误语义。
-	if len(request.Body) > 64*1024 {
+	const limit = 64 * 1024
+	if len(request.Body) > limit {
 		return nil, &app.ToolError{Code: "INVALID_ARGUMENT", Message: "runtime request body is too large", Category: "validation"}
 	}
 	return runtimeapi.Dispatch(ctx, c.runtime, request)
+}
+
+func decodeStrictBridgeArguments(raw json.RawMessage, dst any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return errors.New("bridge arguments must contain exactly one JSON value")
+	}
+	return nil
 }
 
 func bridgeToolDescriptors(descriptors []map[string]any) ([]protocol.ToolDescriptor, error) {
@@ -312,6 +404,17 @@ func (c *Client) cancel(requestID string) {
 }
 
 func bridgeError(err error) *protocol.RemoteError {
+	var remoteErr *protocol.RemoteError
+	if errors.As(err, &remoteErr) {
+		converted := *remoteErr
+		if remoteErr.Details != nil {
+			converted.Details = make(map[string]any, len(remoteErr.Details))
+			for key, value := range remoteErr.Details {
+				converted.Details[key] = value
+			}
+		}
+		return &converted
+	}
 	converted := &protocol.RemoteError{Code: "NODE_OPERATION_FAILED", Message: err.Error()}
 	var toolErr *app.ToolError
 	if errors.As(err, &toolErr) {

@@ -66,7 +66,7 @@ func (s *Service) observeArgs(args map[string]any) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.Observe(request)
+	return s.Observe(context.Background(), request)
 }
 
 func (s *Service) actArgs(args map[string]any) (Result, error) {
@@ -74,7 +74,7 @@ func (s *Service) actArgs(args map[string]any) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.Act(request)
+	return s.Act(context.Background(), request)
 }
 
 func (s *Service) prepareCommandInvocationArgs(args map[string]any, command string) (commandInvocation, error) {
@@ -83,7 +83,7 @@ func (s *Service) prepareCommandInvocationArgs(args map[string]any, command stri
 		return commandInvocation{}, err
 	}
 	request.Cmd = command
-	return s.prepareCommandInvocation(request)
+	return s.prepareCommandInvocation(context.Background(), request)
 }
 
 func (s *Service) killSessionArgs(args map[string]any) (Result, error) {
@@ -91,7 +91,7 @@ func (s *Service) killSessionArgs(args map[string]any) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.killSession(request)
+	return s.killSession(context.Background(), request)
 }
 
 func (s *Service) sessionStatusArgs(args map[string]any) (Result, error) {
@@ -99,7 +99,7 @@ func (s *Service) sessionStatusArgs(args map[string]any) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.sessionStatus(request)
+	return s.sessionStatus(context.Background(), request)
 }
 
 func (s *Service) writeStdinArgs(args map[string]any) (Result, error) {
@@ -107,7 +107,7 @@ func (s *Service) writeStdinArgs(args map[string]any) (Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.writeStdin(request)
+	return s.writeStdin(context.Background(), request)
 }
 
 func commandOutputLimitArgs(args map[string]any) int {

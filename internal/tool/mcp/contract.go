@@ -19,7 +19,7 @@ func InputSchema(name string) (map[string]any, bool) {
 	switch name {
 	case ToolManage:
 		props["action"] = map[string]any{"type": "string", "description": "Dynamic MCP server or isolated environment action.", "enum": []string{"list", "inspect", "add", "remove", "enable", "disable", "env_set", "env_unset", "env_list", "refresh"}}
-		props["name"] = stringProp("Dynamic MCP server name. Use a stable short identifier such as figma or github.")
+		props["name"] = stringProp("Stable Dynamic MCP server name such as figma or github.")
 		props["description"] = stringProp("Short capability description shown in agentdock_context.")
 		props["transport"] = map[string]any{"type": "string", "description": "MCP transport for action=add.", "enum": []string{"streamable_http", "stdio"}}
 		props["url"] = stringProp("Absolute MCP endpoint URL for transport=streamable_http.")

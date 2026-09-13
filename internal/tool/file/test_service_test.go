@@ -3,7 +3,6 @@ package file
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/uvwt/agentdock/internal/workspace"
@@ -59,20 +58,12 @@ func (s *Service) editTest(ctx context.Context, input any) (Result, error) {
 	}
 	return s.Edit(ctx, request)
 }
-func selectFileRuntimeTest(input any) (fileRuntimeSelection, error) {
-	request, err := decodeFileTestRequest[RuntimeOptions](input)
-	if err != nil {
-		return fileRuntimeSelection{}, fmt.Errorf("decode runtime options: %w", err)
-	}
-	return selectFileRuntime(request)
-}
-
 func (s *Service) editFileTest(input any) (Result, error) {
 	request, err := decodeFileTestRequest[EditRequest](input)
 	if err != nil {
 		return nil, err
 	}
-	return s.editFile(request)
+	return s.editFile(context.Background(), request)
 }
 func (s *Service) applyPatchTest(ctx context.Context, input any) (Result, error) {
 	request, err := decodeFileTestRequest[EditRequest](input)

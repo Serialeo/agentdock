@@ -59,6 +59,7 @@ func assertToolResultMatchestestOutputSchema(t *testing.T, name string, result R
 func TestRuntimeOutputContractDefaultToolSuccessPaths(t *testing.T) {
 	runtime := newRuntimeValidationTestRuntime(t)
 	root := runtime.Config().AgentDockDefaultDir
+	projectCtx := projectContextForTest(t, runtime, root, fullProjectPermissionsForTest())
 	if err := os.WriteFile(filepath.Join(root, "contract.txt"), []byte("contract-marker\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -78,16 +79,20 @@ func TestRuntimeOutputContractDefaultToolSuccessPaths(t *testing.T) {
 		{name: "task_manage", args: map[string]any{"action": "list"}},
 		{name: "mcp_manage", args: map[string]any{"action": "list"}},
 		{name: "mcp_tool_search", args: map[string]any{"query": "*"}},
-		{name: "file_publish", args: map[string]any{"path": "contract.txt", "retention_seconds": 60}},
 	}
 	for _, call := range calls {
 		t.Run(call.name, func(t *testing.T) {
-			result, err := runtime.Call(context.Background(), call.name, call.args)
+			result, err := runtime.Call(projectCtx, call.name, call.args)
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertToolResultMatchestestOutputSchema(t, call.name, result)
 		})
+	}
+	if _, err := runtime.Call(projectCtx, "file_publish", map[string]any{"path": "contract.txt", "retention_seconds": 60}); err == nil {
+		t.Fatal("file_publish unexpectedly remained available")
+	} else if toolErr, ok := err.(*ToolError); !ok || toolErr.Code != "UNKNOWN_TOOL" {
+		t.Fatalf("file_publish error = %#v, want UNKNOWN_TOOL", err)
 	}
 }
 
@@ -218,8 +223,9 @@ func TestRuntimeOutputContractACPInfoNormalizesOmittedInitializeFields(t *testin
 		t.Fatal(err)
 	}
 	defer func() { _ = runtime.Close() }()
+	projectCtx := projectContextForTest(t, runtime, root, fullProjectPermissionsForTest())
 
-	info, err := runtime.Call(context.Background(), "acp_session", map[string]any{"action": "info"})
+	info, err := runtime.Call(projectCtx, "acp_session", map[string]any{"action": "info"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,8 +265,9 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runtime.Close() }()
+	projectCtx := projectContextForTest(t, runtime, root, fullProjectPermissionsForTest())
 
-	info, err := runtime.Call(context.Background(), "acp_session", map[string]any{"action": "info"})
+	info, err := runtime.Call(projectCtx, "acp_session", map[string]any{"action": "info"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +277,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 		t.Fatalf("auth_methods = %#v, want []", normalizedInfo["auth_methods"])
 	}
 
-	listed, err := runtime.Call(context.Background(), "acp_session", map[string]any{"action": "list"})
+	listed, err := runtime.Call(projectCtx, "acp_session", map[string]any{"action": "list"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +287,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 		t.Fatalf("empty ACP sessions = %#v, want []", normalizedListed["sessions"])
 	}
 
-	interactions, err := runtime.Call(context.Background(), "acp_interaction", map[string]any{"action": "list"})
+	interactions, err := runtime.Call(projectCtx, "acp_interaction", map[string]any{"action": "list"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +297,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 		t.Fatalf("empty ACP interactions = %#v, want []", normalizedInteractions["interactions"])
 	}
 
-	created, err := runtime.Call(context.Background(), "acp_session", map[string]any{"action": "new"})
+	created, err := runtime.Call(projectCtx, "acp_session", map[string]any{"action": "new"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,22 +306,29 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 	if !ok || session.ID == "" {
 		t.Fatalf("created session = %#v", created["session"])
 	}
+	if session.WorkSessionID != "test-work-session" || session.TargetID != "test-target" || session.ProjectID != "test-project" || session.DeploymentID != "test-deployment" || session.NodeID != "test-node" {
+		t.Fatalf("created ACP session lost Project Target ownership: %#v", session)
+	}
 
 	for _, action := range []string{"load", "resume"} {
-		result, callErr := runtime.Call(context.Background(), "acp_session", map[string]any{"action": action, "session_id": session.ID})
+		result, callErr := runtime.Call(projectCtx, "acp_session", map[string]any{"action": action, "session_id": session.ID})
 		if callErr != nil {
 			t.Fatalf("%s: %v", action, callErr)
 		}
 		assertACPOptionalSessionFieldsAbsent(t, result)
 	}
 
-	forked, err := runtime.Call(context.Background(), "acp_session", map[string]any{"action": "fork", "session_id": session.ID})
+	forked, err := runtime.Call(projectCtx, "acp_session", map[string]any{"action": "fork", "session_id": session.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertACPOptionalSessionFieldsAbsent(t, forked)
+	forkedSession, ok := forked["session"].(acpruntime.SessionRecord)
+	if !ok || forkedSession.TargetID != session.TargetID || forkedSession.WorkSessionID != session.WorkSessionID {
+		t.Fatalf("forked ACP session ownership = %#v", forked["session"])
+	}
 
-	configured, err := runtime.Call(context.Background(), "acp_session", map[string]any{
+	configured, err := runtime.Call(projectCtx, "acp_session", map[string]any{
 		"action": "set_config", "session_id": session.ID, "config_id": "safe", "config_value": false,
 	})
 	if err != nil {
@@ -326,7 +340,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 		t.Fatalf("set_config config_options = %#v, want []", normalizedConfigured["config_options"])
 	}
 
-	started, err := runtime.Call(context.Background(), "acp_prompt", map[string]any{"action": "start", "session_id": session.ID, "text": "hold"})
+	started, err := runtime.Call(projectCtx, "acp_prompt", map[string]any{"action": "start", "session_id": session.ID, "text": "hold"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +349,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 	if runID == "" {
 		t.Fatalf("prompt start = %#v", started)
 	}
-	events, err := runtime.Call(context.Background(), "acp_prompt", map[string]any{"action": "events", "run_id": runID})
+	events, err := runtime.Call(projectCtx, "acp_prompt", map[string]any{"action": "events", "run_id": runID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +365,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("prompt next_seq = %#v", events["next_seq"])
 	}
-	settled, err := runtime.Call(context.Background(), "acp_prompt", map[string]any{
+	settled, err := runtime.Call(projectCtx, "acp_prompt", map[string]any{
 		"action": "events", "run_id": runID, "after_seq": int(nextSeq), "wait_ms": 3000,
 	})
 	if err != nil {

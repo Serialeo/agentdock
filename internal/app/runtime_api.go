@@ -6,7 +6,10 @@ import (
 
 	"github.com/uvwt/agentdock/internal/buildinfo"
 	"github.com/uvwt/agentdock/internal/config"
+	"github.com/uvwt/agentdock/internal/taskstate"
+	toolfile "github.com/uvwt/agentdock/internal/tool/file"
 	toolmcp "github.com/uvwt/agentdock/internal/tool/mcp"
+	toolskill "github.com/uvwt/agentdock/internal/tool/skill"
 )
 
 const runtimeAPISource = "agentdock-api"
@@ -46,8 +49,21 @@ func (r *Runtime) RuntimeSkillFile(skill, relativePath string) (Result, error) {
 	return r.skills.RuntimeSkillFile(skill, relativePath)
 }
 
-func (r *Runtime) RuntimeTasks(status string, limit int) (Result, error) {
-	return r.taskTools.RuntimeTasks(status, limit)
+func (r *Runtime) RuntimeBrowseFiles(ctx context.Context, request toolfile.BrowseRequest) (Result, error) {
+	return r.files.BrowseDir(ctx, request)
+}
+
+func (r *Runtime) RuntimeSkillManage(ctx context.Context, request toolskill.PackageRequest) (Result, error) {
+	switch request.Action {
+	case "activate", "rollback", "env_set", "env_unset", "env_list":
+	default:
+		return nil, toolError("RUNTIME_SKILL_ACTION_UNSUPPORTED", "Skill action is not available through the Runtime settings API", "validation")
+	}
+	return r.skills.Package(ctx, request)
+}
+
+func (r *Runtime) RuntimeTasks(options taskstate.ListOptions) (Result, error) {
+	return r.taskTools.RuntimeTasks(options)
 }
 
 func (r *Runtime) RuntimeTask(id string) (Result, error) {

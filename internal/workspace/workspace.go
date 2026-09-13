@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"sync"
 )
+
+type cwdContextKey struct{}
 
 type Workspace struct {
 	root       string
@@ -55,6 +58,31 @@ func (w *Workspace) DefaultCWD() string {
 	return w.defaultCWD
 }
 
+// WithCWD binds an absolute per-operation working directory without mutating the
+// Workspace-wide default. Project WorkSession Targets must use this path instead
+// of SetDefaultCWD so concurrent sessions cannot change each other's resolution base.
+func WithCWD(ctx context.Context, cwd string) (context.Context, error) {
+	if ctx == nil {
+		return nil, errors.New("workspace context is required")
+	}
+	cwd = filepath.Clean(strings.TrimSpace(cwd))
+	if cwd == "." || !filepath.IsAbs(cwd) {
+		return nil, fmt.Errorf("workspace cwd must be absolute: %s", cwd)
+	}
+	return context.WithValue(ctx, cwdContextKey{}, cwd), nil
+}
+
+// EffectiveCWD returns the operation-scoped cwd when present, otherwise the
+// Workspace default used by non-Project internal/admin flows.
+func (w *Workspace) EffectiveCWD(ctx context.Context) string {
+	if ctx != nil {
+		if cwd, ok := ctx.Value(cwdContextKey{}).(string); ok && filepath.IsAbs(cwd) {
+			return cwd
+		}
+	}
+	return w.DefaultCWD()
+}
+
 func (w *Workspace) DefaultDisplay() string {
 	display, err := w.Relative(w.DefaultCWD())
 	if err != nil || display == "" {
@@ -82,14 +110,22 @@ func (w *Workspace) SetDefaultCWD(raw string) (string, error) {
 }
 
 func (w *Workspace) ResolveExisting(raw string) (Path, error) {
-	return w.resolve(raw, true)
+	return w.resolveFrom(raw, true, w.DefaultCWD())
 }
 
 func (w *Workspace) ResolveForWrite(raw string) (Path, error) {
-	return w.resolve(raw, false)
+	return w.resolveFrom(raw, false, w.DefaultCWD())
 }
 
-func (w *Workspace) resolve(raw string, mustExist bool) (Path, error) {
+func (w *Workspace) ResolveExistingContext(ctx context.Context, raw string) (Path, error) {
+	return w.resolveFrom(raw, true, w.EffectiveCWD(ctx))
+}
+
+func (w *Workspace) ResolveForWriteContext(ctx context.Context, raw string) (Path, error) {
+	return w.resolveFrom(raw, false, w.EffectiveCWD(ctx))
+}
+
+func (w *Workspace) resolveFrom(raw string, mustExist bool, cwd string) (Path, error) {
 	if raw == "" {
 		raw = "."
 	}
@@ -115,7 +151,7 @@ func (w *Workspace) resolve(raw string, mustExist bool) (Path, error) {
 	case filepath.IsAbs(raw):
 		candidate = raw
 	default:
-		candidate = filepath.Join(w.DefaultCWD(), filepath.FromSlash(raw))
+		candidate = filepath.Join(cwd, filepath.FromSlash(raw))
 	}
 	candidate = filepath.Clean(candidate)
 	if mustExist {

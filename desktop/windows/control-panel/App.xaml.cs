@@ -37,7 +37,6 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        UiText.ConfigureCurrentUICulture();
         // 使用稳定的 AppUserModelID，避免升级后任务栏沿用旧版本的隐式图标缓存。
         _ = SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
         base.OnStartup(e);
@@ -97,7 +96,6 @@ public partial class App : System.Windows.Application
         {
             ShowControlPanel();
         }
-        _ = ResumeUpdateProgressIfNeededAsync();
     }
 
     private static bool TryGetStartupRuntimeRoot(string[] arguments, string startupFlag, out string runtimeRoot)
@@ -198,46 +196,6 @@ public partial class App : System.Windows.Application
         });
     }
 
-    public async Task ApplyLanguagePreferenceAsync(string preference)
-    {
-        var previousPreference = UiText.ReadPreference();
-        UiText.SetPreference(preference);
-        try
-        {
-            var previousWindow = ControlPanelWindow;
-            var wasVisible = previousWindow.IsVisible;
-            var previousState = previousWindow.WindowState;
-            var left = previousWindow.Left;
-            var top = previousWindow.Top;
-
-            var replacement = new MainWindow(Runtime)
-            {
-                Left = left,
-                Top = top,
-                WindowState = previousState == WindowState.Minimized ? WindowState.Normal : previousState
-            };
-            ControlPanelWindow = replacement;
-            MainWindow = replacement;
-            previousWindow.CloseForReplacement();
-
-            if (_trayMenu is not null && !_trayMenu.Visible)
-            {
-                PopulateTrayMenu(_trayMenu, _traySnapshot);
-            }
-            if (wasVisible)
-            {
-                replacement.Show();
-                replacement.Activate();
-                await replacement.RefreshAsync();
-            }
-        }
-        catch
-        {
-            UiText.SetPreference(previousPreference);
-            throw;
-        }
-    }
-
     public void RequestExit()
     {
         _exitRequested = true;
@@ -305,7 +263,7 @@ public partial class App : System.Windows.Application
             _traySnapshot = await Runtime.GetSnapshotAsync();
             if (_notifyIcon is not null)
             {
-                _notifyIcon.Text = TruncateNotifyIconText($"AgentDock: {GetTrayStatusText(_traySnapshot)}");
+                _notifyIcon.Text = TruncateNotifyIconText($"AgentDock：{GetTrayStatusText(_traySnapshot)}");
             }
             if (_trayMenu is not null && !_trayMenu.Visible)
             {
@@ -316,7 +274,7 @@ public partial class App : System.Windows.Application
         {
             if (_notifyIcon is not null)
             {
-                _notifyIcon.Text = $"AgentDock: {UiText.Get("StatusUnavailable")}";
+                _notifyIcon.Text = "AgentDock：状态不可用";
             }
             if (_trayMenu is not null && !_trayMenu.Visible)
             {
@@ -338,41 +296,41 @@ public partial class App : System.Windows.Application
             oldItem.Dispose();
         }
 
-        var statusText = snapshot is null ? UiText.Get("LoadingStatus") : GetTrayStatusText(snapshot);
-        var status = new Forms.ToolStripMenuItem($"AgentDock: {statusText}") { Enabled = false };
+        var statusText = snapshot is null ? "正在读取状态…" : GetTrayStatusText(snapshot);
+        var status = new Forms.ToolStripMenuItem($"AgentDock：{statusText}") { Enabled = false };
         menu.Items.Add(status);
         menu.Items.Add(new Forms.ToolStripSeparator());
 
-        menu.Items.Add(CreateMenuItem(UiText.Get("OpenAgentDock"), (_, _) => ShowControlPanel()));
+        menu.Items.Add(CreateMenuItem("打开 AgentDock", (_, _) => ShowControlPanel()));
         menu.Items.Add(new Forms.ToolStripSeparator());
 
         if (snapshot?.CoreRunning == true)
         {
-            menu.Items.Add(CreateMenuItem(UiText.Get("StopAgentDock"), async (_, _) => await RunTrayActionAsync("stop")));
-            menu.Items.Add(CreateMenuItem(UiText.Get("RestartAgentDock"), async (_, _) => await RunTrayActionAsync("restart")));
+            menu.Items.Add(CreateMenuItem("停止 AgentDock", async (_, _) => await RunTrayActionAsync("stop")));
+            menu.Items.Add(CreateMenuItem("重启 AgentDock", async (_, _) => await RunTrayActionAsync("restart")));
         }
         else
         {
             menu.Items.Add(CreateMenuItem(
-                UiText.Get("StartAgentDock"),
+                "启动 AgentDock",
                 async (_, _) => await RunTrayActionAsync("start"),
                 snapshot is not null));
         }
         menu.Items.Add(CreateMenuItem(
-            _updateInProgress ? UiText.Get("CheckingForUpdates") : UiText.Get("CheckForUpdates"),
+            _updateInProgress ? "正在检查更新…" : "检查更新…",
             async (_, _) => await RunTrayUpdateAsync(),
             snapshot is not null && !_updateInProgress));
         menu.Items.Add(new Forms.ToolStripSeparator());
 
-        menu.Items.Add(CreateMenuItem(UiText.Get("OpenLogsFolder"), (_, _) => Runtime.OpenLogsDirectory()));
-        menu.Items.Add(CreateMenuItem(UiText.Get("OpenConfigFolder"), (_, _) => Runtime.OpenConfigDirectory()));
-        menu.Items.Add(CreateMenuItem(UiText.Get("OpenDocumentation"), (_, _) => OpenDocumentation()));
+        menu.Items.Add(CreateMenuItem("打开日志目录", (_, _) => Runtime.OpenLogsDirectory()));
+        menu.Items.Add(CreateMenuItem("打开配置目录", (_, _) => Runtime.OpenConfigDirectory()));
+        menu.Items.Add(CreateMenuItem("打开使用文档", (_, _) => OpenDocumentation()));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(CreateMenuItem(UiText.Get("ExitTray"), (_, _) => Dispatcher.Invoke(RequestExit)));
+        menu.Items.Add(CreateMenuItem("退出菜单栏", (_, _) => Dispatcher.Invoke(RequestExit)));
 
         if (_notifyIcon is not null)
         {
-            _notifyIcon.Text = TruncateNotifyIconText($"AgentDock: {statusText}");
+            _notifyIcon.Text = TruncateNotifyIconText($"AgentDock：{statusText}");
         }
     }
 
@@ -387,9 +345,9 @@ public partial class App : System.Windows.Application
     {
         if (snapshot.Healthy)
         {
-            return UiText.Get("RunningNormally");
+            return "运行正常";
         }
-        return snapshot.CoreRunning ? UiText.Get("ServiceError") : UiText.Get("Stopped");
+        return snapshot.CoreRunning ? "服务异常" : "已停止";
     }
 
     private static void OpenDocumentation()
@@ -405,98 +363,6 @@ public partial class App : System.Windows.Application
     private Task RunTrayUpdateAsync() =>
         CheckForUpdatesAsync(ControlPanelWindow.IsVisible ? ControlPanelWindow : null);
 
-    private async Task ResumeUpdateProgressIfNeededAsync()
-    {
-        UpdateProgressWindow? progressWindow = null;
-        try
-        {
-            var transaction = await Runtime.ReadUpdateUiHandoffTransactionAsync();
-            if (transaction is null)
-            {
-                return;
-            }
-
-            _updateInProgress = true;
-            ControlPanelWindow.SetUpdateState(true, UiText.Get("PleaseWaitUpdating"));
-            progressWindow = new UpdateProgressWindow(transaction.SourceVersion, transaction.TargetVersion)
-            {
-                WindowStartupLocation = WindowStartupLocation.CenterScreen
-            };
-            var initialMessage = string.Equals(transaction.State, "rolling_back", StringComparison.OrdinalIgnoreCase)
-                ? UiText.Get("UpdateStageRollingBack")
-                : UiText.Get("UpdateStageRestarting");
-            progressWindow.Report(new UpdateProgress(null, true, initialMessage));
-            progressWindow.Show();
-
-            var deadline = DateTimeOffset.UtcNow.AddMinutes(4);
-            UpdateTerminalResult? result = null;
-            while (DateTimeOffset.UtcNow < deadline)
-            {
-                result = await Runtime.ReadUpdateTerminalResultAsync(transaction.TransactionId);
-                if (result is not null)
-                {
-                    break;
-                }
-                await Task.Delay(250);
-            }
-
-            if (result is null)
-            {
-                var timeoutMessage = UiText.Get("UpdateTransactionResultTimeout");
-                progressWindow.Fail(timeoutMessage);
-                ControlPanelWindow.SetUpdateStatus(timeoutMessage);
-                return;
-            }
-
-            var state = result.State.ToLowerInvariant();
-            if (state == "committed")
-            {
-                var completedMessage = UiText.Get("UpdateCompleted");
-                var warnings = result.Warnings
-                    .Where(value => !string.IsNullOrWhiteSpace(value))
-                    .Select(value => value.Trim())
-                    .ToArray();
-                if (warnings.Length > 0)
-                {
-                    completedMessage += Environment.NewLine + string.Join(Environment.NewLine, warnings);
-                }
-                progressWindow.Complete(completedMessage);
-                ControlPanelWindow.SetUpdateStatus(completedMessage);
-                await Runtime.AcknowledgeUpdateUiHandoffAsync(transaction.TransactionId);
-                return;
-            }
-
-            var failureMessage = state == "rolled_back"
-                ? UiText.Get("UpdateRolledBack")
-                : UiText.Get("UpdateFailed");
-            if (!string.IsNullOrWhiteSpace(result.Failure?.Message))
-            {
-                failureMessage += Environment.NewLine + result.Failure.Message.Trim();
-            }
-            progressWindow.Fail(failureMessage);
-            ControlPanelWindow.SetUpdateStatus(failureMessage);
-            await Runtime.AcknowledgeUpdateUiHandoffAsync(transaction.TransactionId);
-        }
-        catch (Exception ex)
-        {
-            var message = LastNonEmptyLine(ex.Message, UiText.Get("UpdateFailed"));
-            if (progressWindow is not null)
-            {
-                progressWindow.Fail(message);
-            }
-            ControlPanelWindow.SetUpdateStatus(message);
-        }
-        finally
-        {
-            if (progressWindow is not null)
-            {
-                _updateInProgress = false;
-                ControlPanelWindow.SetUpdateState(false);
-                await RefreshTraySnapshotAsync();
-            }
-        }
-    }
-
     public async Task CheckForUpdatesAsync(Window? owner = null)
     {
         if (_updateInProgress)
@@ -505,7 +371,7 @@ public partial class App : System.Windows.Application
         }
 
         _updateInProgress = true;
-        ControlPanelWindow.SetUpdateState(true, UiText.Get("PleaseWaitCheckingUpdates"));
+        ControlPanelWindow.SetUpdateState(true, "正在检查更新，请稍候…");
         UpdateProgressWindow? progressWindow = null;
         try
         {
@@ -517,10 +383,10 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            var prompt = UiText.Format("NewVersionPrompt", check.CurrentVersion, check.LatestVersion);
+            var prompt = $"发现 AgentDock 新版本。\n\n当前版本：{check.CurrentVersion}\n最新版本：{check.LatestVersion}\n\n是否立即更新？";
             if (ShowUpdateMessage(owner, prompt, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             {
-                ControlPanelWindow.SetUpdateStatus(UiText.Get("UpdateCancelled"));
+                ControlPanelWindow.SetUpdateStatus("已取消更新。");
                 return;
             }
 
@@ -538,13 +404,13 @@ public partial class App : System.Windows.Application
 
             var output = await Runtime.RunUpdateAsync(progress);
             await ControlPanelWindow.RefreshAsync();
-            var completedMessage = LastNonEmptyLine(output, UiText.Get("UpdateCompleted"));
+            var completedMessage = LastNonEmptyLine(output, "更新完成。");
             progressWindow.Complete(completedMessage);
             ControlPanelWindow.SetUpdateStatus(completedMessage);
         }
         catch (Exception ex)
         {
-            var message = LastNonEmptyLine(ex.Message, UiText.Get("UpdateCheckFailed"));
+            var message = LastNonEmptyLine(ex.Message, "检查更新失败。");
             ControlPanelWindow.SetUpdateStatus(message);
             if (progressWindow is null)
             {
@@ -570,8 +436,8 @@ public partial class App : System.Windows.Application
         MessageBoxImage image)
     {
         return owner is { IsVisible: true }
-            ? System.Windows.MessageBox.Show(owner, message, UiText.Get("UpdateWindowTitle"), buttons, image)
-            : System.Windows.MessageBox.Show(message, UiText.Get("UpdateWindowTitle"), buttons, image);
+            ? System.Windows.MessageBox.Show(owner, message, "AgentDock 更新", buttons, image)
+            : System.Windows.MessageBox.Show(message, "AgentDock 更新", buttons, image);
     }
 
     private async Task RunTrayActionAsync(string action)
@@ -585,7 +451,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            _notifyIcon?.ShowBalloonTip(5000, "AgentDock", LastNonEmptyLine(ex.Message, UiText.Get("OperationFailed")), Forms.ToolTipIcon.Error);
+            _notifyIcon?.ShowBalloonTip(5000, "AgentDock", LastNonEmptyLine(ex.Message, "操作失败。"), Forms.ToolTipIcon.Error);
         }
     }
 

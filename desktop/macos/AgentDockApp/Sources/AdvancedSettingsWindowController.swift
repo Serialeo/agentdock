@@ -9,11 +9,11 @@ private enum BrowserConnectionMode: CaseIterable {
     var title: String {
         switch self {
         case .managed:
-            return L10n.text("Isolated browser")
+            return "隔离浏览器"
         case .reuseExisting:
-            return L10n.text("Prefer an existing local CDP browser")
+            return "优先使用本机已有 CDP 浏览器"
         case .specifiedCDP:
-            return L10n.text("Connect to a specified CDP browser")
+            return "连接指定 CDP 浏览器"
         }
     }
 
@@ -33,29 +33,28 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private let menuLoginAgent: MenuLoginAgentController
     private let onChanged: () -> Void
 
-    private let languagePreference = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let serviceAutostart = NSButton(checkboxWithTitle: L10n.text("Allow AgentDock to run in the background"), target: nil, action: nil)
-    private let menuAutostart = NSButton(checkboxWithTitle: L10n.text("Show AgentDock in the menu bar after sign-in"), target: nil, action: nil)
+    private let serviceAutostart = NSButton(checkboxWithTitle: "允许 AgentDock 后台运行", target: nil, action: nil)
+    private let menuAutostart = NSButton(checkboxWithTitle: "登录后显示 AgentDock 菜单栏", target: nil, action: nil)
     private let portField = NSTextField(string: "8765")
     private let logLevel = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let mcpAppsEnabled = NSButton(checkboxWithTitle: L10n.text("Enable MCP Apps UI"), target: nil, action: nil)
-    private let browserEnabled = NSButton(checkboxWithTitle: L10n.text("Enable browser CDP control"), target: nil, action: nil)
+    private let mcpAppsEnabled = NSButton(checkboxWithTitle: "启用 MCP Apps UI", target: nil, action: nil)
+    private let browserEnabled = NSButton(checkboxWithTitle: "启用浏览器 CDP 控制", target: nil, action: nil)
     private let browserConnectionMode = NSPopUpButton(frame: .zero, pullsDown: false)
     private let browserCDPURL = NSTextField(string: "")
     private let browserStatus = NSTextField(wrappingLabelWithString: "")
-    private let acpEnabled = NSButton(checkboxWithTitle: L10n.text("Enable Coding Agent"), target: nil, action: nil)
+    private let acpEnabled = NSButton(checkboxWithTitle: "启用 Coding Agent", target: nil, action: nil)
     private let acpAgent = NSPopUpButton(frame: .zero, pullsDown: false)
     private let acpCommand = NSTextField(string: "")
     private let acpArgsJSON = NSTextField(string: "[]")
     private let acpStatus = NSTextField(wrappingLabelWithString: "")
     private let nexusEndpoint = NSTextField(string: "")
     private let nexusPairingCode = NSSecureTextField(string: "")
-    private let nexusPairButton = NSButton(title: L10n.text("Pair and restart"), target: nil, action: nil)
-    private let nexusDeviceTokenStatus = NSTextField(labelWithString: "")
+    private let nexusPairButton = NSButton(title: "配对并重启", target: nil, action: nil)
+    private let nexusDeviceTokenStatus = NSTextField(wrappingLabelWithString: "")
     private let progress = NSProgressIndicator()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
-    private let applyButton = NSButton(title: L10n.text("Apply and restart"), target: nil, action: nil)
-    private let cancelButton = NSButton(title: L10n.text("Cancel"), target: nil, action: nil)
+    private let applyButton = NSButton(title: "应用并重启", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "取消", target: nil, action: nil)
 
     private var currentConfiguration: ServiceConfiguration?
     private var initialServiceAutostart = true
@@ -71,18 +70,9 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private var initialACPCommand = ""
     private var initialACPArgsJSON = "[]"
     private var isBusy = false
-    private var isUpdateInProgress = false
     private var browserCDPRow: NSView?
     private var acpCommandRow: NSView?
     private var acpArgsRow: NSView?
-
-    private var controlsLocked: Bool {
-        isBusy || isUpdateInProgress
-    }
-
-    var hasActiveServiceOperation: Bool {
-        isBusy
-    }
 
     init(
         service: ServiceController,
@@ -94,14 +84,13 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         self.menuLoginAgent = menuLoginAgent
         self.onChanged = onChanged
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 760),
-            styleMask: [.titled, .closable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 590, height: 850),
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = L10n.text("AgentDock Advanced Settings")
+        window.title = "AgentDock 高级设置"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 620, height: 520)
         window.center()
         super.init(window: window)
         configureUI()
@@ -151,44 +140,13 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         showStatus("", isError: false)
         setBusy(false)
         refreshApplyState()
-        fitWindowToVisibleScreen()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func setUpdateInProgress(_ inProgress: Bool) {
-        isUpdateInProgress = inProgress
-        setBusy(isBusy)
-        if inProgress {
-            showStatus(L10n.text("Updating AgentDock…"), isError: false)
-        } else if statusLabel.stringValue == L10n.text("Updating AgentDock…") {
-            statusLabel.isHidden = true
-        }
-    }
-
     private func configureUI() {
         guard let contentView = window?.contentView else { return }
-
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(scrollView)
-
-        let scrollDocumentView = NSView()
-        scrollDocumentView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = scrollDocumentView
-
-        for preference in UILanguagePreference.allCases {
-            languagePreference.addItem(withTitle: preference.title)
-            languagePreference.lastItem?.representedObject = preference.rawValue
-        }
-        selectLanguagePreference(L10n.languagePreference())
-        languagePreference.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        languagePreference.target = self
-        languagePreference.action = #selector(languageChanged)
 
         serviceAutostart.target = self
         serviceAutostart.action = #selector(markChanged)
@@ -203,7 +161,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         portField.formatter = portFormatter
         portField.alignment = .right
         portField.placeholderString = "1024–65535"
-        portField.toolTip = L10n.text("The service port for a standard user must be between 1024 and 65535")
+        portField.toolTip = "普通用户服务端口必须在 1024 到 65535 之间"
         portField.widthAnchor.constraint(equalToConstant: 96).isActive = true
         portField.target = self
         portField.action = #selector(markChanged)
@@ -220,38 +178,42 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         browserEnabled.target = self
         browserEnabled.action = #selector(browserToggled)
         browserConnectionMode.addItems(withTitles: BrowserConnectionMode.allCases.map(\.title))
-        browserConnectionMode.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        browserConnectionMode.widthAnchor.constraint(equalToConstant: 290).isActive = true
         browserConnectionMode.target = self
         browserConnectionMode.action = #selector(browserConnectionChanged)
-        browserCDPURL.placeholderString = L10n.text("For example: http://127.0.0.1:9222")
+        browserCDPURL.placeholderString = "例如 http://127.0.0.1:9222"
         browserCDPURL.target = self
         browserCDPURL.action = #selector(markChanged)
         browserCDPURL.delegate = self
+        browserCDPURL.widthAnchor.constraint(equalToConstant: 390).isActive = true
         browserStatus.textColor = .secondaryLabelColor
         browserStatus.font = .systemFont(ofSize: 12)
 
         acpEnabled.target = self
         acpEnabled.action = #selector(acpChanged)
         acpAgent.addItems(withTitles: ACPAgentPreset.allCases.map(\.title))
-        acpAgent.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        acpAgent.widthAnchor.constraint(equalToConstant: 180).isActive = true
         acpAgent.target = self
         acpAgent.action = #selector(acpChanged)
         acpCommand.placeholderString = "/absolute/path/to/acp-adapter"
         acpCommand.target = self
         acpCommand.action = #selector(markChanged)
         acpCommand.delegate = self
+        acpCommand.widthAnchor.constraint(equalToConstant: 390).isActive = true
         acpArgsJSON.placeholderString = "[]"
         acpArgsJSON.target = self
         acpArgsJSON.action = #selector(markChanged)
         acpArgsJSON.delegate = self
+        acpArgsJSON.widthAnchor.constraint(equalToConstant: 390).isActive = true
         acpStatus.textColor = .secondaryLabelColor
         acpStatus.font = .systemFont(ofSize: 12)
+        acpStatus.widthAnchor.constraint(equalToConstant: 500).isActive = true
 
         nexusEndpoint.placeholderString = "https://nexus.example.com"
         nexusEndpoint.target = self
         nexusEndpoint.action = #selector(markChanged)
         nexusEndpoint.delegate = self
-        nexusPairingCode.placeholderString = L10n.text("One-time pairing code generated by NexusDock")
+        nexusPairingCode.placeholderString = "NexusDock 生成的一次性配对码"
         nexusPairingCode.target = self
         nexusPairingCode.action = #selector(markChanged)
         nexusPairingCode.delegate = self
@@ -259,14 +221,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         nexusPairButton.action = #selector(pairNexusPressed)
         nexusDeviceTokenStatus.textColor = .secondaryLabelColor
         nexusDeviceTokenStatus.font = .systemFont(ofSize: 12)
-        nexusDeviceTokenStatus.lineBreakMode = .byCharWrapping
-        nexusDeviceTokenStatus.maximumNumberOfLines = 2
-        nexusDeviceTokenStatus.heightAnchor.constraint(equalToConstant: 34).isActive = true
-
-        for flexibleView in [browserCDPURL, browserStatus, acpCommand, acpArgsJSON, acpStatus, nexusEndpoint, nexusPairingCode, nexusDeviceTokenStatus] {
-            flexibleView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            flexibleView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
+        nexusDeviceTokenStatus.widthAnchor.constraint(equalToConstant: 390).isActive = true
 
         progress.style = .spinning
         progress.controlSize = .small
@@ -282,45 +237,40 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         cancelButton.target = self
         cancelButton.action = #selector(cancelPressed)
 
-        let openLogs = NSButton(title: L10n.text("Open logs"), target: self, action: #selector(openLogsPressed))
+        let openLogs = NSButton(title: "打开日志", target: self, action: #selector(openLogsPressed))
         openLogs.bezelStyle = .inline
-        let openConfig = NSButton(title: L10n.text("Open configuration folder"), target: self, action: #selector(openConfigurationPressed))
+        let openConfig = NSButton(title: "打开配置目录", target: self, action: #selector(openConfigurationPressed))
         openConfig.bezelStyle = .inline
 
-        let startupStack = NSStackView(views: [
-            serviceAutostart,
-            menuAutostart,
-            formRow(title: L10n.text("Interface language"), control: languagePreference),
-        ])
+        let startupStack = NSStackView(views: [serviceAutostart, menuAutostart])
         startupStack.orientation = .vertical
         startupStack.alignment = .leading
         startupStack.spacing = 8
 
         let serviceForm = NSStackView(views: [
+            formRow(title: "服务端口", control: portField),
+            formRow(title: "日志级别", control: logLevel),
             mcpAppsEnabled,
-            formRow(title: L10n.text("Service port"), control: portField),
-            formRow(title: L10n.text("Log level"), control: logLevel),
         ])
         serviceForm.orientation = .vertical
         serviceForm.alignment = .leading
         serviceForm.spacing = 10
 
-        let cdpRow = formRow(title: L10n.text("CDP address"), control: browserCDPURL, fillsAvailableWidth: true)
+        let cdpRow = formRow(title: "CDP 地址", control: browserCDPURL)
         browserCDPRow = cdpRow
         let browserStack = NSStackView(views: [
             browserEnabled,
-            formRow(title: L10n.text("Connection mode"), control: browserConnectionMode),
+            formRow(title: "连接方式", control: browserConnectionMode),
             cdpRow,
             browserStatus,
         ])
         browserStack.orientation = .vertical
         browserStack.alignment = .leading
         browserStack.spacing = 5
-        cdpRow.widthAnchor.constraint(equalTo: browserStack.widthAnchor).isActive = true
-        browserStatus.widthAnchor.constraint(equalTo: browserStack.widthAnchor).isActive = true
+        browserStatus.widthAnchor.constraint(equalToConstant: 500).isActive = true
 
-        let commandRow = formRow(title: "Command", control: acpCommand, fillsAvailableWidth: true)
-        let argsRow = formRow(title: "Args JSON", control: acpArgsJSON, fillsAvailableWidth: true)
+        let commandRow = formRow(title: "Command", control: acpCommand)
+        let argsRow = formRow(title: "Args JSON", control: acpArgsJSON)
         acpCommandRow = commandRow
         acpArgsRow = argsRow
         let acpStack = NSStackView(views: [
@@ -333,38 +283,20 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         acpStack.orientation = .vertical
         acpStack.alignment = .leading
         acpStack.spacing = 8
-        commandRow.widthAnchor.constraint(equalTo: acpStack.widthAnchor).isActive = true
-        argsRow.widthAnchor.constraint(equalTo: acpStack.widthAnchor).isActive = true
-        acpStatus.widthAnchor.constraint(equalTo: acpStack.widthAnchor).isActive = true
 
-        let nexusEndpointRow = formRow(title: "Endpoint", control: nexusEndpoint, fillsAvailableWidth: true)
-        let nexusPairingCodeRow = formRow(title: L10n.text("Pairing code"), control: nexusPairingCode, fillsAvailableWidth: true)
-        let nexusPairRow = NSView()
-        nexusPairButton.translatesAutoresizingMaskIntoConstraints = false
-        nexusDeviceTokenStatus.translatesAutoresizingMaskIntoConstraints = false
-        nexusPairRow.addSubview(nexusPairButton)
-        nexusPairRow.addSubview(nexusDeviceTokenStatus)
-        NSLayoutConstraint.activate([
-            nexusPairButton.leadingAnchor.constraint(equalTo: nexusPairRow.leadingAnchor),
-            nexusPairButton.centerYAnchor.constraint(equalTo: nexusPairRow.centerYAnchor),
-            nexusDeviceTokenStatus.leadingAnchor.constraint(equalTo: nexusPairRow.leadingAnchor, constant: 140),
-            nexusDeviceTokenStatus.trailingAnchor.constraint(equalTo: nexusPairRow.trailingAnchor),
-            nexusDeviceTokenStatus.topAnchor.constraint(equalTo: nexusPairRow.topAnchor),
-            nexusDeviceTokenStatus.bottomAnchor.constraint(equalTo: nexusPairRow.bottomAnchor),
-        ])
         let nexusStack = NSStackView(views: [
-            nexusEndpointRow,
-            nexusPairingCodeRow,
-            nexusPairRow,
+            formRow(title: "Endpoint", control: nexusEndpoint),
+            formRow(title: "配对码", control: nexusPairingCode),
+            nexusPairButton,
+            formRow(title: "Device Token", control: nexusDeviceTokenStatus),
         ])
         nexusStack.orientation = .vertical
         nexusStack.alignment = .leading
         nexusStack.spacing = 8
-        for row in [nexusEndpointRow, nexusPairingCodeRow, nexusPairRow] {
-            row.widthAnchor.constraint(equalTo: nexusStack.widthAnchor).isActive = true
-        }
+        nexusEndpoint.widthAnchor.constraint(equalToConstant: 390).isActive = true
+        nexusPairingCode.widthAnchor.constraint(equalToConstant: 390).isActive = true
 
-        let utilityRow = NSStackView(views: [openLogs, openConfig, NSView()])
+        let utilityRow = NSStackView(views: [openLogs, openConfig])
         utilityRow.orientation = .horizontal
         utilityRow.spacing = 14
 
@@ -373,19 +305,18 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         actionRow.alignment = .centerY
         actionRow.spacing = 10
         statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let root = NSStackView(views: [
-            sectionTitle(L10n.text("Startup")),
+            sectionTitle("启动"),
             startupStack,
             separator(),
-            sectionTitle(L10n.text("Service")),
+            sectionTitle("服务"),
             serviceForm,
             separator(),
             sectionTitle("Coding Agent（ACP）"),
             acpStack,
             separator(),
-            sectionTitle(L10n.text("Browser")),
+            sectionTitle("浏览器"),
             browserStack,
             separator(),
             sectionTitle("Nexus"),
@@ -398,25 +329,14 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         root.alignment = .leading
         root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false
-        scrollDocumentView.addSubview(root)
-
-        for separator in root.arrangedSubviews.compactMap({ $0 as? NSBox }) {
-            separator.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        }
-        for section in [startupStack, serviceForm, browserStack, acpStack, nexusStack, utilityRow, actionRow] {
-            section.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
-        }
+        contentView.addSubview(root)
 
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            scrollDocumentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-            root.leadingAnchor.constraint(equalTo: scrollDocumentView.leadingAnchor, constant: 28),
-            root.trailingAnchor.constraint(equalTo: scrollDocumentView.trailingAnchor, constant: -28),
-            root.topAnchor.constraint(equalTo: scrollDocumentView.topAnchor, constant: 24),
-            root.bottomAnchor.constraint(equalTo: scrollDocumentView.bottomAnchor, constant: -22),
+            root.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+            root.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            root.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+            root.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -22),
+            actionRow.widthAnchor.constraint(equalTo: root.widthAnchor),
         ])
     }
 
@@ -429,86 +349,23 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private func separator() -> NSBox {
         let box = NSBox()
         box.boxType = .separator
+        box.widthAnchor.constraint(equalToConstant: 534).isActive = true
         return box
     }
 
-    private func formRow(title: String, control: NSView, fillsAvailableWidth: Bool = false) -> NSView {
-        let row = NSView()
+    private func formRow(title: String, control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byClipping
-        label.translatesAutoresizingMaskIntoConstraints = false
-        control.translatesAutoresizingMaskIntoConstraints = false
-        label.widthAnchor.constraint(equalToConstant: 128).isActive = true
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        if fillsAvailableWidth {
-            control.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
-
-        row.addSubview(label)
-        row.addSubview(control)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            control.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 12),
-            control.topAnchor.constraint(equalTo: row.topAnchor),
-            control.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-            fillsAvailableWidth
-                ? control.trailingAnchor.constraint(equalTo: row.trailingAnchor)
-                : row.trailingAnchor.constraint(equalTo: control.trailingAnchor),
-        ])
+        label.widthAnchor.constraint(equalToConstant: 92).isActive = true
+        let row = NSStackView(views: [label, control])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
         return row
-    }
-
-    private func fitWindowToVisibleScreen() {
-        guard let window else { return }
-        let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame
-        let margin: CGFloat = 12
-        guard let visibleFrame else { return }
-
-        var frame = window.frame
-        frame.size.width = min(frame.width, visibleFrame.width - margin * 2)
-        frame.size.height = min(frame.height, visibleFrame.height - margin * 2)
-        frame.origin.x = min(max(frame.origin.x, visibleFrame.minX + margin), visibleFrame.maxX - margin - frame.width)
-        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY + margin), visibleFrame.maxY - margin - frame.height)
-        window.setFrame(frame, display: false)
     }
 
     @objc private func markChanged() {
         refreshApplyState()
-    }
-
-    @objc private func languageChanged() {
-        guard !isUpdateInProgress else { return }
-        let previous = L10n.languagePreference()
-        let selected = selectedLanguagePreference()
-        guard selected != previous else { return }
-
-        let warning = NSAlert()
-        warning.messageText = L10n.text("Change interface language?")
-        warning.informativeText = L10n.text("Changing the interface language restarts the AgentDock interface. Any unsaved changes in this window will be lost.")
-        warning.alertStyle = .warning
-        warning.addButton(withTitle: L10n.text("Continue"))
-        warning.addButton(withTitle: L10n.text("Cancel"))
-        guard warning.runModal() == .alertFirstButtonReturn else {
-            selectLanguagePreference(previous)
-            return
-        }
-
-        L10n.setLanguagePreference(selected)
-        let relaunch = Process()
-        relaunch.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        relaunch.arguments = ["-n", Bundle.main.bundlePath]
-        do {
-            // AppKit 的静态控件在创建时取本地化文本；只重启菜单栏 UI，Core/Tunnel 不受影响。
-            try relaunch.run()
-            NSApp.terminate(nil)
-        } catch {
-            L10n.setLanguagePreference(previous)
-            selectLanguagePreference(previous)
-            showStatus(L10n.format("Failed to restart AgentDock interface: %@", error.localizedDescription), isError: true)
-        }
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -536,14 +393,13 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
            selectedBrowserConnectionMode() == .managed,
            BrowserSupportController.detectExecutable() == nil {
             browserEnabled.state = .off
-            showStatus(L10n.text("No supported Chromium-based browser was detected and no external CDP is configured."), isError: true)
+            showStatus("未检测到受支持的 Chromium 系浏览器，且未配置外部 CDP。", isError: true)
         }
         refreshBrowserStatus()
         refreshApplyState()
     }
 
     @objc private func applyPressed() {
-        guard !isUpdateInProgress else { return }
         guard let configuration = currentConfiguration else { return }
         let selectedAgent = selectedACPAgent()
         let sameAgent = selectedAgent == configuration.acpAgent
@@ -560,7 +416,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         let browserMode = selectedBrowserConnectionMode()
         let configuredCDP = browserCDPURL.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if browserMode == .specifiedCDP, configuredCDP.isEmpty {
-            showStatus(L10n.text("A CDP address is required when “Connect to a specified CDP browser” is selected."), isError: true)
+            showStatus("选择“连接指定 CDP 浏览器”时必须填写 CDP 地址。", isError: true)
             return
         }
         let settings = EditableServiceSettings(
@@ -576,7 +432,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             acpArgs: selectedAgent == .custom ? customArguments : (sameAgent ? configuration.acpArgs : [])
         )
         setBusy(true)
-        showStatus(L10n.text("Saving configuration and validating AgentDock…"), isError: false)
+        showStatus("正在保存配置并验证 AgentDock…", isError: false)
         Task {
             do {
                 let validatedSettings = try settings.validated()
@@ -618,7 +474,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
                 }
                 refreshBrowserStatus()
                 refreshACPStatus()
-                showStatus(L10n.text("Settings saved."), isError: false)
+                showStatus("设置已保存。", isError: false)
                 setBusy(false)
                 refreshApplyState()
                 onChanged()
@@ -632,21 +488,20 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     @objc private func cancelPressed() { close() }
 
     @objc private func pairNexusPressed() {
-        guard !isUpdateInProgress else { return }
         let endpoint = nexusEndpoint.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let pairingCode = nexusPairingCode.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !endpoint.isEmpty, !pairingCode.isEmpty else {
-            showStatus(L10n.text("Enter the NexusDock address and one-time pairing code."), isError: true)
+            showStatus("请填写 NexusDock 地址和一次性配对码。", isError: true)
             return
         }
         setBusy(true)
-        showStatus(L10n.text("Pairing and restarting AgentDock…"), isError: false)
+        showStatus("正在配对并重启 AgentDock…", isError: false)
         Task {
             do {
                 try await service.pairNexus(endpoint: endpoint, pairingCode: pairingCode)
                 nexusPairingCode.stringValue = ""
                 refreshNexusStatus()
-                showStatus(L10n.text("NexusDock pairing completed and the Device Token was saved securely."), isError: false)
+                showStatus("NexusDock 配对完成，Device Token 已安全保存。", isError: false)
                 setBusy(false)
                 onChanged()
             } catch {
@@ -658,22 +513,6 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
 
     @objc private func openLogsPressed() { service.openLogs() }
     @objc private func openConfigurationPressed() { service.openConfiguration() }
-
-    private func selectedLanguagePreference() -> UILanguagePreference {
-        guard let rawValue = languagePreference.selectedItem?.representedObject as? String,
-              let preference = UILanguagePreference(rawValue: rawValue) else {
-            return .system
-        }
-        return preference
-    }
-
-    private func selectLanguagePreference(_ preference: UILanguagePreference) {
-        for item in languagePreference.itemArray where (item.representedObject as? String) == preference.rawValue {
-            languagePreference.select(item)
-            return
-        }
-        languagePreference.selectItem(at: 0)
-    }
 
     private func selectedACPAgent() -> ACPAgentPreset {
         let title = acpAgent.titleOfSelectedItem ?? ""
@@ -709,18 +548,16 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             configuredArguments: configuredArguments
         )
         let enabled = acpEnabled.state == .on
-        acpAgent.isEnabled = enabled && !controlsLocked
-        acpCommand.isEnabled = enabled && isCustom && !controlsLocked
-        acpArgsJSON.isEnabled = enabled && isCustom && !controlsLocked
+        acpAgent.isEnabled = enabled && !isBusy
+        acpCommand.isEnabled = enabled && isCustom && !isBusy
+        acpArgsJSON.isEnabled = enabled && isCustom && !isBusy
         if isCustom, (try? ACPDesktopConfiguration.decodeArguments(acpArgsJSON.stringValue)) == nil {
-            acpStatus.stringValue = L10n.text("Args JSON must be a JSON string array.")
+            acpStatus.stringValue = "Args JSON 必须是 JSON 字符串数组。"
             acpStatus.textColor = enabled ? .systemRed : .secondaryLabelColor
         } else if resolution.available {
             acpStatus.stringValue = enabled
                 ? resolution.message
-                : (isCustom
-                    ? L10n.format("Configured %@ · takes effect when enabled", preset.title)
-                    : L10n.format("Detected %@ · takes effect when enabled", preset.title))
+                : (isCustom ? "已配置 \(preset.title) · 启用后生效" : "已检测到 \(preset.title) · 启用后生效")
             acpStatus.textColor = .secondaryLabelColor
         } else {
             acpStatus.stringValue = resolution.message
@@ -733,26 +570,26 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         let mode = selectedBrowserConnectionMode()
         let configuredCDP = browserCDPURL.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         browserCDPRow?.isHidden = mode != .specifiedCDP
-        browserCDPURL.isEnabled = !controlsLocked && mode == .specifiedCDP
+        browserCDPURL.isEnabled = !isBusy && mode == .specifiedCDP
 
         switch mode {
         case .specifiedCDP:
             if configuredCDP.isEmpty {
-                browserStatus.stringValue = L10n.text("Enter the CDP address to connect to.")
+                browserStatus.stringValue = "请输入要连接的 CDP 地址。"
                 browserStatus.textColor = .systemRed
                 return
             }
-            browserStatus.stringValue = L10n.text("Use the specified CDP browser. Existing login state in that browser may be reused.")
+            browserStatus.stringValue = "使用指定 CDP 浏览器，并可能沿用其中的登录状态。"
             browserStatus.textColor = .secondaryLabelColor
         case .reuseExisting:
-            browserStatus.stringValue = L10n.text("Prefer an existing local CDP browser; fall back to an isolated browser when none is found. Existing login state may be reused.")
+            browserStatus.stringValue = "优先使用本机已有 CDP 浏览器；未找到时自动使用隔离浏览器。可能沿用已有登录状态。"
             browserStatus.textColor = .secondaryLabelColor
         case .managed:
             if BrowserSupportController.detectExecutable() != nil {
-                browserStatus.stringValue = L10n.text("Use an isolated browser without reusing the login state from your everyday browser.")
+                browserStatus.stringValue = "使用隔离浏览器，不沿用日常浏览器登录状态。"
                 browserStatus.textColor = .secondaryLabelColor
             } else {
-                browserStatus.stringValue = L10n.text("No supported Chromium-based browser was detected.")
+                browserStatus.stringValue = "未检测到受支持的 Chromium 系浏览器。"
                 browserStatus.textColor = enabled ? .systemRed : .secondaryLabelColor
             }
         }
@@ -762,17 +599,17 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         let status = service.nexusDeviceStatus()
         if status.paired {
             nexusEndpoint.stringValue = status.endpoint
-            nexusDeviceTokenStatus.stringValue = L10n.format("Saved securely · node_id=%@", status.nodeID)
+            nexusDeviceTokenStatus.stringValue = "已安全保存 · node_id=\(status.nodeID)"
             nexusDeviceTokenStatus.textColor = .secondaryLabelColor
             return
         }
         nexusDeviceTokenStatus.stringValue = status.error
-            ?? L10n.text("Not paired yet; Device Token will be generated automatically during one-time pairing.")
+            ?? "尚未配对；Device Token 将由一次性配对自动生成。"
         nexusDeviceTokenStatus.textColor = status.error == nil ? .secondaryLabelColor : .systemRed
     }
 
     private func refreshApplyState() {
-        guard !controlsLocked, currentConfiguration != nil else {
+        guard !isBusy, currentConfiguration != nil else {
             applyButton.isEnabled = false
             return
         }
@@ -799,16 +636,15 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             || browserCDP != initialBrowserCDPURL
             || acpSettingsChanged
         applyButton.isEnabled = changed
-        nexusPairButton.isEnabled = !controlsLocked
+        nexusPairButton.isEnabled = !isBusy
             && !nexusEndpoint.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !nexusPairingCode.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func setBusy(_ busy: Bool) {
         isBusy = busy
-        let locked = controlsLocked
-        for control in [languagePreference, serviceAutostart, menuAutostart, portField, logLevel, mcpAppsEnabled, browserEnabled, browserConnectionMode, browserCDPURL, acpEnabled, acpAgent, acpCommand, acpArgsJSON, nexusEndpoint, nexusPairingCode, nexusPairButton] {
-            control.isEnabled = !locked
+        for control in [serviceAutostart, menuAutostart, portField, logLevel, mcpAppsEnabled, browserEnabled, browserConnectionMode, browserCDPURL, acpEnabled, acpAgent, acpCommand, acpArgsJSON, nexusEndpoint, nexusPairingCode, nexusPairButton] {
+            control.isEnabled = !busy
         }
         refreshBrowserStatus()
         refreshACPStatus()

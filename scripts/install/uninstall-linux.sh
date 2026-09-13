@@ -85,6 +85,17 @@ validate_absolute_path() {
   esac
 }
 
+service_user_home() {
+  user="$1"
+  if command -v getent >/dev/null 2>&1; then
+    home_dir="$(getent passwd "$user" | cut -d: -f6)"
+  else
+    home_dir="$(awk -F: -v user="$user" '$1 == user {print $6; exit}' /etc/passwd)"
+  fi
+  validate_absolute_path "运行用户主目录（${user}）" "$home_dir"
+  trim_trailing_slashes "$home_dir"
+}
+
 canonical_existing_path() {
   path="$1"
   if command -v realpath >/dev/null 2>&1; then
@@ -108,21 +119,29 @@ canonical_existing_path() {
 require_safe_removal_path() {
   label="$1"
   path="$2"
+  path_kind="${3:-removal}"
   validate_absolute_path "$label" "$path"
   normalized_path="$(trim_trailing_slashes "$path")"
 
   case "$normalized_path" in
-    /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
+    /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
       die "拒绝删除危险路径（${label}）：$path"
       ;;
+    /root)
+      [ "$path_kind" = data-parent ] || die "拒绝删除危险路径（${label}）：$path"
+      ;;
   esac
+
+  if [ "$path_kind" != data-parent ] && [ "$normalized_path" = "$service_home" ]; then
+    die "拒绝删除用户主目录（${label}）：$path"
+  fi
 
   case "$normalized_path" in
     /home/*|/Users/*)
       account_relative="${normalized_path#/*/}"
       case "$account_relative" in
         */*) ;;
-        *) die "拒绝删除用户主目录（${label}）：$path" ;;
+        *) [ "$path_kind" = data-parent ] || die "拒绝删除用户主目录（${label}）：$path" ;;
       esac
       ;;
   esac
@@ -245,13 +264,9 @@ remove_managed_config() {
 remove_managed_data() {
   data_dir="$1"
 
-  # 自定义数据目录可能与其他程序共用，只删除 AgentDock 管理的子目录。
+  # 默认父目录是运行用户的 HOME；即使为空，也不能删除或修改它的属主。
   run_root rm -rf "$data_dir/.agentdock" "$data_dir/AgentDock"
-  if run_root rmdir "$data_dir" >/dev/null 2>&1; then
-    log "已移除空数据目录：$data_dir"
-  else
-    log "数据目录仍包含其他文件，已保留：$data_dir"
-  fi
+  log "已清除 AgentDock 数据，保留数据父目录：$data_dir"
 }
 
 choose_scope() {
@@ -324,7 +339,9 @@ openrc_dir="${AGENTDOCK_OPENRC_DIR:-/etc/init.d}"
 env_file="${AGENTDOCK_ENV_FILE:-/etc/agentdock/agentdock.env}"
 config_dir="$(dirname "$env_file")"
 source_dir="${AGENTDOCK_SOURCE_DIR:-/opt/agentdock}"
-data_dir="${AGENTDOCK_DATA_DIR:-/srv/agentdock}"
+service_user="${AGENTDOCK_SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
+service_home="$(service_user_home "$service_user")"
+data_dir="${AGENTDOCK_DATA_DIR:-$service_home}"
 
 validate_service_name "$service_name"
 validate_service_directory "systemd 目录" "$systemd_dir"
@@ -337,14 +354,18 @@ if is_true "$PURGE_CONFIG"; then
 fi
 if is_true "$PURGE_DATA"; then
   source_dir="$(require_safe_removal_path "安装目录" "$source_dir")"
-  data_dir="$(require_safe_removal_path "数据目录" "$data_dir")"
+  data_dir="$(require_safe_removal_path "数据父目录" "$data_dir" data-parent)"
+  state_dir="$(require_safe_removal_path "状态目录" "$data_dir/.agentdock")"
+  workspace_dir="$(require_safe_removal_path "工作目录" "$data_dir/AgentDock")"
   validate_managed_source "$source_dir"
-  paths_overlap "$source_dir" "$data_dir" && \
-    die "拒绝清除互相重叠的安装目录和数据目录：${source_dir}、$data_dir"
+  for managed_dir in "$state_dir" "$workspace_dir"; do
+    paths_overlap "$source_dir" "$managed_dir" && \
+      die "拒绝清除互相重叠的安装目录和数据目录：${source_dir}、$managed_dir"
+    paths_overlap "$managed_dir" "$config_dir" && \
+      die "拒绝清除与配置目录重叠的数据目录：${managed_dir}、$config_dir"
+  done
   path_contains "$source_dir" "$config_dir" && \
     die "拒绝清除与配置目录重叠的安装目录：${source_dir}、$config_dir"
-  path_contains "$data_dir" "$config_dir" && \
-    die "拒绝清除与配置目录重叠的数据目录：${data_dir}、$config_dir"
 fi
 
 remove_systemd_services "$service_name" "$tunnel_service_name" "$systemd_dir"

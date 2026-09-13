@@ -97,6 +97,11 @@ type SessionRecord struct {
 	ID                    string        `json:"id"`
 	Agent                 string        `json:"agent"`
 	RemoteSessionID       string        `json:"remote_session_id"`
+	WorkSessionID         string        `json:"work_session_id,omitempty"`
+	TargetID              string        `json:"target_id,omitempty"`
+	ProjectID             string        `json:"project_id,omitempty"`
+	DeploymentID          string        `json:"deployment_id,omitempty"`
+	NodeID                string        `json:"node_id,omitempty"`
 	CWD                   string        `json:"cwd"`
 	AdditionalDirectories []string      `json:"additional_directories,omitempty"`
 	ModeID                string        `json:"mode_id,omitempty"`

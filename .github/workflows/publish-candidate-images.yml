@@ -1,0 +1,113 @@
+name: Publish candidate containers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish candidate (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PRIVATE_GO_READ_TOKEN: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: runtime
+            target: runtime
+            tag_prefix: ''
+          - variant: dev
+            target: dev
+            tag_prefix: dev-
+          - variant: browser
+            target: browser
+            tag_prefix: browser-
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve candidate metadata
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push candidate image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/serialeo/agentdock:${{ matrix.tag_prefix }}sha-${{ steps.candidate.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ matrix.tag_prefix }}sha-${{ steps.candidate.outputs.short_sha }}
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.candidate.outputs.build_date }}
+          secret-envs: |
+            github_token=PRIVATE_GO_READ_TOKEN
+          cache-from: type=gha,scope=candidate-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=candidate-${{ matrix.variant }},ignore-error=true
+
+      - name: Report candidate digest
+        shell: bash
+        run: |
+          echo "image=ghcr.io/serialeo/agentdock:${{ matrix.tag_prefix }}sha-${{ steps.candidate.outputs.short_sha }}"
+          echo "digest=${{ steps.push.outputs.digest }}"
+
+  verify:
+    name: Verify candidate variants
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run candidate image smoke
+        shell: bash
+        env:
+          AGENTDOCK_TEST_BUILD: 'false'
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          export AGENTDOCK_TEST_RUNTIME_IMAGE="ghcr.io/serialeo/agentdock:sha-${short_sha}"
+          export AGENTDOCK_TEST_DEV_IMAGE="ghcr.io/serialeo/agentdock:dev-sha-${short_sha}"
+          export AGENTDOCK_TEST_BROWSER_IMAGE="ghcr.io/serialeo/agentdock:browser-sha-${short_sha}"
+          ./scripts/test/test-docker-images.sh

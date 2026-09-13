@@ -15,7 +15,7 @@ import (
 )
 
 func TestToolDescriptorsExposeSafetyAnnotations(t *testing.T) {
-	descriptors := toolDescriptorsForConfig(t, []string{"read_file", "skill_package", "task_manage", "file_publish"}, config.Config{})
+	descriptors := toolDescriptorsForConfig(t, []string{"read_file", "skill_package", "task_manage"}, config.Config{})
 	byName := map[string]map[string]any{}
 	for _, descriptor := range descriptors {
 		name, _ := descriptor["name"].(string)
@@ -25,7 +25,6 @@ func TestToolDescriptorsExposeSafetyAnnotations(t *testing.T) {
 	assertToolAnnotation(t, byName["read_file"], true, false, false)
 	assertToolAnnotation(t, byName["skill_package"], false, true, true)
 	assertToolAnnotation(t, byName["task_manage"], false, false, false)
-	assertToolAnnotation(t, byName["file_publish"], false, false, true)
 
 	for _, def := range app.ToolDefinitions() {
 		if def.Annotations == nil {
@@ -51,23 +50,6 @@ func assertToolAnnotation(t *testing.T, descriptor map[string]any, readOnly, des
 	}
 	assertBoolPointer("destructiveHint", destructive)
 	assertBoolPointer("openWorldHint", openWorld)
-}
-
-func TestFilePublishDescriptorExposesFileRewritePath(t *testing.T) {
-	descriptors := toolDescriptorsForConfig(t, []string{"file_publish"}, config.Config{})
-	byName := map[string]map[string]any{}
-	for _, descriptor := range descriptors {
-		name, _ := descriptor["name"].(string)
-		byName[name] = descriptor
-	}
-	args, ok := byName["file_publish"]["file_arg_rewrite_paths"].([]string)
-	if !ok || len(args) != 1 || args[0] != "file" {
-		t.Fatalf("file_publish file_arg_rewrite_paths = %#v", byName["file_publish"]["file_arg_rewrite_paths"])
-	}
-	meta, ok := byName["file_publish"]["_meta"].(map[string]any)
-	if !ok || meta["file_arg_rewrite_paths"] == nil || meta["openai/fileParams"] == nil {
-		t.Fatalf("file_publish _meta missing: %#v", meta)
-	}
 }
 
 func TestOpenAIFileMetadataMatchesDeclaredSchemas(t *testing.T) {
@@ -200,7 +182,7 @@ func TestOfficialSDKServerListsAndCallsAgentDockTools(t *testing.T) {
 	}
 
 	foundAgentDockContext := false
-	foundFilePublishMetadata := false
+	foundFilePublish := false
 	for tool, err := range session.Tools(t.Context(), nil) {
 		if err != nil {
 			t.Fatalf("Tools() error = %v", err)
@@ -209,12 +191,11 @@ func TestOfficialSDKServerListsAndCallsAgentDockTools(t *testing.T) {
 		case "agentdock_context":
 			foundAgentDockContext = true
 		case "file_publish":
-			paths, _ := tool.Meta["openai/fileParams"].([]any)
-			foundFilePublishMetadata = len(paths) == 1 && paths[0] == "file"
+			foundFilePublish = true
 		}
 	}
-	if !foundAgentDockContext || !foundFilePublishMetadata {
-		t.Fatalf("tool discovery incomplete: agentdock_context=%v file_publish_meta=%v", foundAgentDockContext, foundFilePublishMetadata)
+	if !foundAgentDockContext || foundFilePublish {
+		t.Fatalf("tool discovery mismatch: agentdock_context=%v file_publish=%v", foundAgentDockContext, foundFilePublish)
 	}
 
 	result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "agentdock_context", Arguments: map[string]any{}})
@@ -225,6 +206,11 @@ func TestOfficialSDKServerListsAndCallsAgentDockTools(t *testing.T) {
 	runtimeInfo, runtimeOK := structured["runtime"].(map[string]any)
 	if !ok || !runtimeOK || runtimeInfo["os"] == "" || runtimeInfo["path_model"] != config.PathModel || result.IsError {
 		t.Fatalf("CallTool() result = %#v", result)
+	}
+
+	retired, retiredErr := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "file_publish", Arguments: map[string]any{"path": "README.md"}})
+	if retiredErr == nil && retired != nil && !retired.IsError {
+		t.Fatalf("retired file_publish unexpectedly succeeded: %#v", retired)
 	}
 
 	if err := session.Close(); err != nil {

@@ -15,17 +15,9 @@ import (
 )
 
 func (svc *Service) ReadFile(ctx context.Context, request ReadRequest) (Result, error) {
-	selection, err := selectFileRuntime(request.RuntimeOptions)
-	if err != nil {
-		return nil, err
-	}
 	if request.Path == "" {
 		return nil, toolError("INVALID_ARGUMENT", "path is required", "validation")
 	}
-	if selection.isWSL() {
-		return svc.readFileWSL(ctx, request, selection)
-	}
-
 	rawPath := request.Path
 	absPath := ""
 	displayPath := ""
@@ -36,7 +28,7 @@ func (svc *Service) ReadFile(ctx context.Context, request ReadRequest) (Result, 
 			return nil, err
 		}
 	} else {
-		p, err := svc.ws.ResolveExisting(rawPath)
+		p, err := svc.ws.ResolveExistingContext(ctx, rawPath)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +66,7 @@ func (svc *Service) ReadFile(ctx context.Context, request ReadRequest) (Result, 
 	if meta.TruncatedReason != "" {
 		result["truncated_reason"] = meta.TruncatedReason
 	}
-	return addFileRuntimeResult(result, selection), nil
+	return result, nil
 }
 
 type listDirOptions struct {
@@ -113,16 +105,9 @@ func parseListDirOptions(request ListRequest) (listDirOptions, error) {
 }
 
 func (svc *Service) ListDir(ctx context.Context, request ListRequest) (Result, error) {
-	selection, err := selectFileRuntime(request.RuntimeOptions)
-	if err != nil {
-		return nil, err
-	}
 	opts, err := parseListDirOptions(request)
 	if err != nil {
 		return nil, err
-	}
-	if selection.isWSL() {
-		return svc.listDirWSL(ctx, request, selection, opts)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -132,7 +117,7 @@ func (svc *Service) ListDir(ctx context.Context, request ListRequest) (Result, e
 	if path == "" {
 		path = "."
 	}
-	root, err := svc.ws.ResolveExisting(path)
+	root, err := svc.ws.ResolveExistingContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +239,7 @@ func (svc *Service) ListDir(ctx context.Context, request ListRequest) (Result, e
 		"partial":       len(skippedPaths) > 0,
 		"skipped_paths": skippedPaths,
 	}
-	return addFileRuntimeResult(result, selection), nil
+	return result, nil
 }
 
 func hiddenRelativePath(rel string) bool {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uvwt/agentdock-protocol/mcpcontract"
+	"github.com/Serialeo/agentdock-protocol/mcpcontract"
 	"github.com/uvwt/agentdock/internal/config"
 	toolcore "github.com/uvwt/agentdock/internal/tool/core"
 )

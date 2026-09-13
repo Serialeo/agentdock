@@ -7,21 +7,6 @@ const (
 	ToolListDir    = "list_dir"
 	ToolSearchText = "search_text"
 	ToolFileEdit   = "file_edit"
-
-	structuredPatchGrammarDescription = ` Structured envelope format:
-*** Begin Patch
-*** Add File: <path>
-+<added line>
-*** Delete File: <path>
-*** Update File: <path>
-[*** Move to: <new path>]
-@@ [<optional context line>]
- <context line>
--<removed line>
-+<added line>
-[*** End of File]
-*** End Patch
-Add/Delete/Update operations may repeat in one envelope. Update lines use a leading space for context, '-' for removal, and '+' for addition; @@ may be used without context or with one context line.`
 )
 
 func InputSchema(name string) (map[string]any, bool) {
@@ -34,15 +19,13 @@ func InputSchema(name string) (map[string]any, bool) {
 
 	switch name {
 	case ToolReadFile:
-		props["path"] = stringProp(PathDescription("Host path. Relative paths resolve from ~/AgentDock."))
-		AddRuntimeProperties(props)
+		props["path"] = stringProp("Host path or skill:// resource. Relative Host paths resolve from ~/AgentDock.")
 		props["start_line"] = intProp("1-based start line.")
 		props["end_line"] = intProp("Inclusive end line.")
 		props["max_bytes"] = boundedIntProp("Maximum output bytes. Defaults to 262144 and is capped at 4194304.", 1, MaxTextOutputBytes)
 		required = []string{"path"}
 	case ToolListDir:
-		props["path"] = stringProp(PathDescription("Host directory path. Relative paths resolve from ~/AgentDock."))
-		AddRuntimeProperties(props)
+		props["path"] = stringProp("Host directory path. Relative paths resolve from ~/AgentDock.")
 		props["max_depth"] = boundedIntProp("Maximum traversal depth relative to path. Defaults to 1 and is capped at 20.", 1, 20)
 		props["max_entries"] = boundedIntProp("Maximum returned entries. Defaults to 200 and is capped at 5000.", 1, 5000)
 		props["patterns"] = map[string]any{"type": "array", "description": "Include glob patterns relative to path. * stays within one path segment; ** crosses directories. Defaults to [\"**/*\"].", "items": map[string]any{"type": "string"}}
@@ -51,8 +34,7 @@ func InputSchema(name string) (map[string]any, bool) {
 		props["include_hidden"] = boolProp("Include hidden paths.")
 		props["include_ignored"] = boolProp("Include normally skipped or ignored paths.")
 	case ToolSearchText:
-		props["path"] = stringProp(PathDescription("Host path. Relative paths resolve from ~/AgentDock."))
-		AddRuntimeProperties(props)
+		props["path"] = stringProp("Host path. Relative paths resolve from ~/AgentDock.")
 		props["query"] = stringProp("Text or regex query.")
 		props["regex"] = boolProp("Treat query as regex.")
 		props["case_sensitive"] = boolProp("Use case-sensitive search.")
@@ -66,18 +48,17 @@ func InputSchema(name string) (map[string]any, bool) {
 		required = []string{"query"}
 	case ToolFileEdit:
 		props["action"] = map[string]any{"type": "string", "description": "File edit action.", "enum": []string{"replace", "patch", "add", "delete", "move"}}
-		props["path"] = stringProp(PathDescription("Host path for replace, add, delete, or move. Relative paths resolve from ~/AgentDock."))
-		AddRuntimeProperties(props)
+		props["path"] = stringProp("Host path for replace, add, delete, or move. Relative paths resolve from ~/AgentDock.")
 		props["old"] = stringProp("Exact UTF-8 text to replace.")
 		props["new"] = stringProp("Replacement UTF-8 text for action=replace.")
 		props["replace_all"] = boolProp("Replace every match instead of only the first.")
 		props["expected_matches"] = map[string]any{"type": "integer", "description": "Required number of matches. Defaults to 1; zero asserts no matches.", "minimum": 0}
 		props["content"] = stringProp("Text content for action=add.")
-		props["new_path"] = stringProp(PathDescription("Destination path for action=move."))
+		props["new_path"] = stringProp("Destination Host path for action=move.")
 		props["overwrite"] = boolProp("Allow add or move to replace an existing destination file.")
 		props["recursive"] = boolProp("Required for deleting directories.")
-		props["patch"] = stringProp(PatchDescription("Patch text for action=patch."))
-		props["workdir"] = stringProp(PathDescription("Patch working directory."))
+		props["patch"] = stringProp("Patch text for action=patch.")
+		props["workdir"] = stringProp("Host patch working directory. Relative paths resolve from ~/AgentDock.")
 		props["dry_run"] = boolProp("Preview or validate without writing.")
 		props["max_diff_bytes"] = boundedIntProp("Maximum diff preview bytes. Defaults to 65536 and is capped at 4194304.", 1, MaxTextOutputBytes)
 		required = []string{"action"}
@@ -145,22 +126,7 @@ func OutputSchema(name string) (map[string]any, bool) {
 		props["path"] = stringProp("Host path. Relative paths resolve from ~/AgentDock.")
 		props["new_path"] = stringProp("Move destination path.")
 		props["workdir"] = stringProp("Patch working directory.")
-		props["affected_files"] = map[string]any{
-			"type":        "array",
-			"description": "Files affected by a patch. Structured-envelope results use operation/move_to; unified-diff results use status/binary.",
-			"items": map[string]any{
-				"type":                 "object",
-				"additionalProperties": false,
-				"required":             []string{"path"},
-				"properties": map[string]any{
-					"path":      stringProp("Affected file path."),
-					"operation": map[string]any{"type": "string", "enum": []string{"add", "delete", "update", "move"}},
-					"move_to":   stringProp("Move destination for operation=move."),
-					"status":    stringProp("Unified diff file status."),
-					"binary":    boolProp("Whether a unified diff file is binary."),
-				},
-			},
-		}
+		props["affected_files"] = map[string]any{"type": "array", "description": "Files affected by a patch.", "items": map[string]any{"type": "string"}}
 		props["dry_run"] = boolProp("Whether this was a dry run.")
 		props["matches"] = intProp("Match count for replace.")
 		props["changed"] = boolProp("Whether content changed.")
@@ -173,6 +139,9 @@ func OutputSchema(name string) (map[string]any, bool) {
 	default:
 		return nil, false
 	}
-	AddRuntimeOutputProperties(props)
 	return toolcontract.OutputObject(props, required...), true
 }
+
+func ToolDescription(base string) string { return base }
+
+func EditDescription(base string) string { return base }

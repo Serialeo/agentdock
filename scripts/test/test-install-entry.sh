@@ -195,7 +195,8 @@ TEST_SERVICE_ENV_OUTPUT="$SERVICE_ENV_OUTPUT" \
     source "$1"
     run_as_service_user "$(id -un)" "$2" "$3"
   ' bash "$ROOT_DIR/scripts/install/install-linux-platform.sh" "$SERVICE_HOME_ROOT" "$FAKE_BIN/capture-service-env"
-assert_line "HOME=$SERVICE_HOME_ROOT" "$SERVICE_ENV_OUTPUT"
+SERVICE_ACCOUNT_HOME="$(bash -c 'source "$1"; service_user_home "$(id -un)"' bash "$ROOT_DIR/scripts/install/install-linux-platform.sh")"
+assert_line "HOME=$SERVICE_ACCOUNT_HOME" "$SERVICE_ENV_OUTPUT"
 assert_line "AGENTDOCK_HOME=$SERVICE_HOME_ROOT/.agentdock" "$SERVICE_ENV_OUTPUT"
 assert_line "AGENTDOCK_DEFAULT_DIR=$SERVICE_HOME_ROOT/AgentDock" "$SERVICE_ENV_OUTPUT"
 
@@ -503,7 +504,7 @@ PATH="$FAKE_BIN:$PATH" \
 [ ! -e "$UNINSTALL_ROOT/systemd/agentdock-cloudflared.service" ]
 [ ! -d "$UNINSTALL_ROOT/systemd/agentdock-cloudflared.service.d" ]
 
-# 完全卸载支持路径中的空格，并删除空配置目录、程序和数据。
+# 完全卸载支持路径中的空格，只删除数据子目录并保留空数据父目录。
 PURGE_ROOT="$TMP_ROOT/purge with spaces"
 mkdir -p "$PURGE_ROOT/config" "$PURGE_ROOT/source/bin" "$PURGE_ROOT/data/.agentdock" "$PURGE_ROOT/systemd" "$PURGE_ROOT/openrc"
 printf 'AGENTDOCK_HOST=127.0.0.1\n' >"$PURGE_ROOT/config/agentdock.env"
@@ -520,7 +521,9 @@ PATH="$FAKE_BIN:$PATH" \
   sh "$ENTRY" --uninstall --purge-data
 [ ! -d "$PURGE_ROOT/config" ]
 [ ! -d "$PURGE_ROOT/source" ]
-[ ! -d "$PURGE_ROOT/data" ]
+[ -d "$PURGE_ROOT/data" ]
+[ ! -e "$PURGE_ROOT/data/.agentdock" ]
+[ ! -e "$PURGE_ROOT/data/AgentDock" ]
 
 # 共享数据父目录中的非 AgentDock 文件必须保留。
 SHARED_ROOT="$TMP_ROOT/shared-data"
@@ -543,6 +546,162 @@ PATH="$FAKE_BIN:$PATH" \
 [ -f "$SHARED_ROOT/data/custom.keep" ]
 [ ! -e "$SHARED_ROOT/data/.agentdock" ]
 [ ! -e "$SHARED_ROOT/data/AgentDock" ]
+
+# 默认使用 passwd 中的安装用户 HOME；sudo 和显式运行用户按优先级选择。
+ACCOUNT_BIN="$TMP_ROOT/account-bin"
+mkdir -p "$ACCOUNT_BIN"
+REAL_ID="$(command -v id)"
+REAL_RMDIR="$(command -v rmdir)"
+export REAL_ID REAL_RMDIR
+cat >"$ACCOUNT_BIN/id" <<'SH'
+#!/bin/sh
+if [ "$*" = '-un' ]; then
+  printf 'installer\n'
+else
+  exec "$REAL_ID" "$@"
+fi
+SH
+cat >"$ACCOUNT_BIN/getent" <<'SH'
+#!/bin/sh
+[ "$1" = passwd ] || exit 1
+case "$2" in
+  installer|sudoer|chosen) printf '%s:x:1000:1000::%s/%s:/bin/sh\n' "$2" "$TEST_ACCOUNT_ROOT" "$2" ;;
+  *) exit 2 ;;
+esac
+SH
+cat >"$ACCOUNT_BIN/rmdir" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >>"$TEST_RMDIR_LOG"
+exec "$REAL_RMDIR" "$@"
+SH
+for command_name in chown userdel deluser; do
+  cat >"$ACCOUNT_BIN/$command_name" <<'SH'
+#!/bin/sh
+printf '%s %s\n' "$(basename "$0")" "$*" >>"$TEST_FORBIDDEN_LOG"
+exit 1
+SH
+done
+chmod +x "$ACCOUNT_BIN"/*
+
+for account_case in default sudo explicit override empty; do
+  ACCOUNT_ROOT="$TMP_ROOT/account-$account_case"
+  case "$account_case" in
+    sudo) selected_account=sudoer ;;
+    explicit|override) selected_account=chosen ;;
+    *) selected_account=installer ;;
+  esac
+  account_home="$ACCOUNT_ROOT/$selected_account"
+  selected_data="$account_home"
+  [ "$account_case" != override ] || selected_data="$ACCOUNT_ROOT/custom-data"
+  for account in installer sudoer chosen; do
+    mkdir -p "$ACCOUNT_ROOT/$account/.agentdock" "$ACCOUNT_ROOT/$account/AgentDock"
+    if [ "$account_case" != empty ]; then
+      printf 'keep\n' >"$ACCOUNT_ROOT/$account/personal.keep"
+    fi
+  done
+  mkdir -p "$ACCOUNT_ROOT/config" "$ACCOUNT_ROOT/source/bin" "$ACCOUNT_ROOT/systemd" \
+    "$ACCOUNT_ROOT/openrc" "$selected_data/.agentdock" "$selected_data/AgentDock"
+  printf 'binary\n' >"$ACCOUNT_ROOT/source/bin/agentdock"
+  printf 'config\n' >"$ACCOUNT_ROOT/config/agentdock.env"
+  (
+    unset SUDO_USER AGENTDOCK_SERVICE_USER AGENTDOCK_DATA_DIR
+    case "$account_case" in
+      sudo) export SUDO_USER=sudoer ;;
+      explicit|override) export SUDO_USER=sudoer AGENTDOCK_SERVICE_USER=chosen ;;
+    esac
+    if [ "$account_case" = override ]; then
+      export AGENTDOCK_DATA_DIR="$selected_data"
+    fi
+    PATH="$ACCOUNT_BIN:$FAKE_BIN:$PATH" \
+      HOME="$ACCOUNT_ROOT/inherited-wrong-home" \
+      TEST_ACCOUNT_ROOT="$ACCOUNT_ROOT" \
+      TEST_RMDIR_LOG="$ACCOUNT_ROOT/rmdir.log" \
+      TEST_FORBIDDEN_LOG="$ACCOUNT_ROOT/forbidden.log" \
+      AGENTDOCK_NO_SUDO=true \
+      AGENTDOCK_ENV_FILE="$ACCOUNT_ROOT/config/agentdock.env" \
+      AGENTDOCK_SOURCE_DIR="$ACCOUNT_ROOT/source" \
+      AGENTDOCK_SYSTEMD_DIR="$ACCOUNT_ROOT/systemd" \
+      AGENTDOCK_OPENRC_DIR="$ACCOUNT_ROOT/openrc" \
+      sh "$RELEASE_DIR/uninstall-linux.sh" --purge-data
+  )
+  [ -d "$account_home" ]
+  [ -d "$selected_data" ]
+  [ ! -e "$selected_data/.agentdock" ]
+  [ ! -e "$selected_data/AgentDock" ]
+  [ ! -e "$ACCOUNT_ROOT/forbidden.log" ]
+  ! grep -Fqx "$account_home" "$ACCOUNT_ROOT/rmdir.log"
+  ! grep -Fqx "$selected_data" "$ACCOUNT_ROOT/rmdir.log"
+  for account in installer sudoer chosen; do
+    if [ "$account_case" != empty ]; then
+      [ -f "$ACCOUNT_ROOT/$account/personal.keep" ]
+    fi
+    if [ "$ACCOUNT_ROOT/$account" != "$selected_data" ]; then
+      [ -d "$ACCOUNT_ROOT/$account/.agentdock" ]
+      [ -d "$ACCOUNT_ROOT/$account/AgentDock" ]
+    fi
+  done
+done
+
+# HOME 可包含独立的程序和配置目录，但待删除子目录不能与它们重叠。
+# 任何路径拒绝都必须发生在停服和删除配置之前。
+for protection_case in siblings source-home config-home source-overlap config-overlap data-link managed-link data-traversal; do
+  PROTECTION_ROOT="$TMP_ROOT/protection-$protection_case"
+  account_home="$PROTECTION_ROOT/chosen"
+  selected_source="$account_home/.local/agentdock"
+  selected_config="$account_home/.config/agentdock"
+  selected_data="$account_home"
+  mkdir -p "$selected_source/bin" "$selected_config" "$account_home/.agentdock" \
+    "$account_home/AgentDock" "$PROTECTION_ROOT/outside" "$PROTECTION_ROOT/systemd" "$PROTECTION_ROOT/openrc"
+  printf 'keep\n' >"$PROTECTION_ROOT/outside/personal.keep"
+  printf 'unit\n' >"$PROTECTION_ROOT/systemd/agentdock.service"
+  case "$protection_case" in
+    source-home) selected_source="$account_home" ;;
+    config-home) selected_config="$account_home" ;;
+    source-overlap) selected_source="$account_home/AgentDock/source" ;;
+    config-overlap) selected_config="$account_home/.agentdock/config" ;;
+    data-link)
+      ln -s "$account_home" "$PROTECTION_ROOT/home-link"
+      selected_data="$PROTECTION_ROOT/home-link"
+      ;;
+    managed-link)
+      rmdir "$account_home/.agentdock"
+      ln -s "$PROTECTION_ROOT/outside" "$account_home/.agentdock"
+      ;;
+    data-traversal) selected_data="$account_home/child/.." ;;
+  esac
+  mkdir -p "$selected_source/bin" "$selected_config"
+  printf 'binary\n' >"$selected_source/bin/agentdock"
+  printf 'config\n' >"$selected_config/agentdock.env"
+  if PATH="$ACCOUNT_BIN:$FAKE_BIN:$PATH" \
+    TEST_ACCOUNT_ROOT="$PROTECTION_ROOT" \
+    TEST_RMDIR_LOG="$PROTECTION_ROOT/rmdir.log" \
+    TEST_FORBIDDEN_LOG="$PROTECTION_ROOT/forbidden.log" \
+    AGENTDOCK_NO_SUDO=true \
+    AGENTDOCK_SERVICE_USER=chosen \
+    AGENTDOCK_ENV_FILE="$selected_config/agentdock.env" \
+    AGENTDOCK_SOURCE_DIR="$selected_source" \
+    AGENTDOCK_DATA_DIR="$selected_data" \
+    AGENTDOCK_SYSTEMD_DIR="$PROTECTION_ROOT/systemd" \
+    AGENTDOCK_OPENRC_DIR="$PROTECTION_ROOT/openrc" \
+    sh "$RELEASE_DIR/uninstall-linux.sh" --purge-data >"$PROTECTION_ROOT/stdout.log" 2>"$PROTECTION_ROOT/stderr.log"; then
+    [ "$protection_case" = siblings ] || {
+      printf 'uninstaller accepted unsafe paths: %s\n' "$protection_case" >&2
+      exit 1
+    }
+    [ -d "$account_home" ]
+    [ ! -e "$account_home/.agentdock" ]
+    [ ! -e "$account_home/AgentDock" ]
+    [ ! -e "$selected_source" ]
+    [ ! -e "$selected_config" ]
+  else
+    [ "$protection_case" != siblings ]
+    grep -Eq '拒绝删除用户主目录|拒绝清除.*重叠|软链接或非规范路径|路径跳转' "$PROTECTION_ROOT/stderr.log"
+    [ -f "$PROTECTION_ROOT/systemd/agentdock.service" ]
+    [ -f "$selected_source/bin/agentdock" ]
+    [ -f "$selected_config/agentdock.env" ]
+  fi
+  [ -f "$PROTECTION_ROOT/outside/personal.keep" ]
+done
 
 # 危险、相对、跳转和软链接路径必须在停服前拒绝。
 SAFE_SERVICE_ROOT="$TMP_ROOT/safe-services"

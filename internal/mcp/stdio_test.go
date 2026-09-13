@@ -60,25 +60,13 @@ func TestServeStdioRejectsUninitializedServer(t *testing.T) {
 	}
 }
 
-func TestServeStdioAdvertisesContextAwareInstructions(t *testing.T) {
+func TestServeStdioDoesNotAdvertiseLegacyInstructions(t *testing.T) {
 	tests := []struct {
-		name       string
-		cfg        config.Config
-		wantPrefix string
+		name string
+		cfg  config.Config
 	}{
-		{
-			name:       "without Nexus",
-			cfg:        config.Config{Instructions: "Use absolute paths under /srv."},
-			wantPrefix: baseServerInstructions,
-		},
-		{
-			name: "with Nexus",
-			cfg: config.Config{
-				NexusEndpoint: "http://127.0.0.1:18777",
-				Instructions:  "Use absolute paths under /srv.",
-			},
-			wantPrefix: nexusServerInstructions,
-		},
+		{name: "without Nexus", cfg: config.Config{}},
+		{name: "with Nexus", cfg: config.Config{NexusEndpoint: "http://127.0.0.1:18777"}},
 	}
 
 	for _, test := range tests {
@@ -102,11 +90,8 @@ func TestServeStdioAdvertisesContextAwareInstructions(t *testing.T) {
 				t.Fatalf("Connect() error = %v", err)
 			}
 			result := session.InitializeResult()
-			if result == nil || !strings.HasPrefix(result.Instructions, test.wantPrefix) {
-				t.Fatalf("InitializeResult() = %#v, want %q first", result, test.wantPrefix)
-			}
-			if !strings.Contains(result.Instructions, "Additional operator instructions:\nUse absolute paths under /srv.") {
-				t.Fatalf("InitializeResult() = %#v, want operator instructions appended", result)
+			if result == nil || result.Instructions != "" {
+				t.Fatalf("InitializeResult() = %#v, want no legacy instructions", result)
 			}
 			if err := session.Close(); err != nil {
 				t.Fatalf("Close() error = %v", err)

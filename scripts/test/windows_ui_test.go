@@ -15,7 +15,7 @@ func TestWindowsControlPanelPrivilegeModeCopyStaysUserFacing(t *testing.T) {
 	content := string(data)
 	for _, want := range []string{
 		`x:Name="ElevatedCoreCheckBox"`,
-		`Content="{local:Loc RunCoreElevated}"`,
+		`Content="以管理员权限运行 AgentDock 核心"`,
 		`Click="ElevatedCoreCheckBox_Click"`,
 	} {
 		if !strings.Contains(content, want) {
@@ -24,71 +24,6 @@ func TestWindowsControlPanelPrivilegeModeCopyStaysUserFacing(t *testing.T) {
 	}
 	if strings.Contains(content, "开启时使用 Windows Highest") {
 		t.Fatal("Windows privilege mode control must not expose implementation details")
-	}
-}
-
-func TestWindowsControlPanelSupportsPersistentLanguagePreference(t *testing.T) {
-	root := filepath.Join("..", "..", "desktop", "windows", "control-panel")
-	checks := map[string][]string{
-		"MainWindow.xaml": {
-			`x:Name="LanguageComboBox"`,
-			`Tag="system"`,
-			`Tag="zh-CN"`,
-			`Tag="en"`,
-			`SelectionChanged="LanguageComboBox_SelectionChanged"`,
-		},
-		"MainWindow.xaml.cs": {
-			`UiText.ReadPreference()`,
-			`UiText.Get("LanguageChangeDiscardWarning")`,
-			`MessageBoxButton.YesNo`,
-			`SelectUiLanguage(UiText.ReadPreference())`,
-			`ApplyLanguagePreferenceAsync(preference)`,
-		},
-		"App.xaml.cs": {
-			`UiText.SetPreference(preference)`,
-			`new MainWindow(Runtime)`,
-			`previousWindow.CloseForReplacement()`,
-		},
-		filepath.Join("Localization", "UiText.cs"): {
-			`"AgentDock",`,
-			`"ui-language"`,
-			`File.Delete(PreferencePath)`,
-			`ResolveLocale(string preference, string systemCultureName)`,
-		},
-	}
-
-	for relativePath, wants := range checks {
-		data, err := os.ReadFile(filepath.Join(root, relativePath))
-		if err != nil {
-			t.Fatalf("read %s: %v", relativePath, err)
-		}
-		content := string(data)
-		for _, want := range wants {
-			if !strings.Contains(content, want) {
-				t.Fatalf("Windows language preference contract missing %q in %s", want, relativePath)
-			}
-		}
-	}
-}
-
-func TestWindowsControlPanelDynamicTextUsesSelectedResourceCulture(t *testing.T) {
-	path := filepath.Join("..", "..", "desktop", "windows", "control-panel", "Localization", "UiText.cs")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read UiText.cs: %v", err)
-	}
-	content := string(data)
-	for _, want := range []string{
-		`private static CultureInfo _resourceCulture`,
-		`Resources.GetString(key, _resourceCulture)`,
-		`_resourceCulture = culture;`,
-	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("Windows dynamic localization contract missing %q", want)
-		}
-	}
-	if strings.Contains(content, `Resources.GetString(key, CultureInfo.CurrentUICulture)`) {
-		t.Fatal("Windows dynamic localization must not depend on ambient CurrentUICulture")
 	}
 }
 
@@ -115,17 +50,17 @@ func TestWindowsControlPanelShowsLiveNexusStatusInsideRuntimeStatus(t *testing.T
 	root := filepath.Join("..", "..", "desktop", "windows", "control-panel")
 	files := map[string][]string{
 		"MainWindow.xaml": {
-			`Text="{local:Loc HealthCheck}" Grid.Row="1"`,
+			`Text="健康检查" Grid.Row="1"`,
 			`Text="Nexus" Grid.Row="2"`,
-			`x:Name="NexusStatusText" Grid.Row="2" Grid.Column="1" Text="{local:Loc NotConfigured}"`,
-			`Text="{local:Loc Version}" Grid.Row="3"`,
+			`x:Name="NexusStatusText" Grid.Row="2" Grid.Column="1" Text="未配置"`,
+			`Text="版本" Grid.Row="3"`,
 		},
 		"MainWindow.xaml.cs": {
 			`NexusStatusText.Text`,
-			`UiText.Get("Connected")`,
-			`UiText.Get("NotConnected")`,
-			`UiText.Get("NotConfigured")`,
-			`UiText.Get("ConfigurationError")`,
+			`"已连接"`,
+			`"未连接"`,
+			`"未配置"`,
+			`"配置异常"`,
 			`snapshot.NexusConnected`,
 			`GetSnapshotAsync(includeNexusConnection: true)`,
 		},

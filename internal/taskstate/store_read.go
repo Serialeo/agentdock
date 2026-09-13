@@ -40,18 +40,28 @@ func (s *Store) Delete(id string) (Task, error) {
 }
 
 func (s *Store) List(status Status, limit int) ([]Task, error) {
-	release, err := s.acquireStoreLock()
-	if err != nil {
-		return nil, err
-	}
-	defer release()
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	page, err := s.ListPage(ListOptions{Status: status, Limit: limit})
+	return page.Tasks, err
+}
+
+func (s *Store) ListPage(options ListOptions) (ListPage, error) {
+	options, err := NormalizeListOptions(options)
+	if err != nil {
+		return ListPage{}, err
+	}
+	release, err := s.acquireStoreLock()
+	if err != nil {
+		return ListPage{}, err
+	}
+	defer release()
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
-		return nil, err
+		return ListPage{}, err
 	}
+	page := ListPage{Offset: options.Offset, Limit: options.Limit}
 	tasks := make([]Task, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "tsk_") || filepath.Ext(entry.Name()) != ".json" {
@@ -67,15 +77,36 @@ func (s *Store) List(status Status, limit int) ([]Task, error) {
 			slog.Warn("skip invalid task state", "file", entry.Name(), "error", err)
 			continue
 		}
-		if status == "" || task.Status == status {
+		if !taskMatchesListQuery(task, options) {
+			continue
+		}
+		// 状态分组统计覆盖同一关键词和时间范围，不受当前状态页或分页截断影响。
+		page.Counts.All++
+		switch task.Status {
+		case StatusActive:
+			page.Counts.Active++
+		case StatusBlocked:
+			page.Counts.Blocked++
+		case StatusCompleted:
+			page.Counts.Completed++
+		}
+		if options.Status == "" || task.Status == options.Status {
 			tasks = append(tasks, task)
 		}
 	}
-	sort.Slice(tasks, func(i, j int) bool { return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt) })
-	if len(tasks) > limit {
-		tasks = tasks[:limit]
-	}
-	return tasks, nil
+	sort.Slice(tasks, func(i, j int) bool {
+		left, right := taskListTime(tasks[i], options.TimeField), taskListTime(tasks[j], options.TimeField)
+		if left.Equal(right) {
+			return tasks[i].ID > tasks[j].ID
+		}
+		return left.After(right)
+	})
+	page.Total = len(tasks)
+	start := min(options.Offset, len(tasks))
+	end := start + min(options.Limit, len(tasks)-start)
+	page.Tasks = tasks[start:end]
+	page.HasMore = end < len(tasks)
+	return page, nil
 }
 
 func (s *Store) loadLocked(id string) (Task, error) {

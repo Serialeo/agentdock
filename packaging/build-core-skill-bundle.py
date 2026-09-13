@@ -15,6 +15,7 @@ CORE_SKILLS = (
     "agentdock-user-guide",
     "skill-authoring",
     "skill-installation",
+    "skill-vetter-runtime",
 )
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 TEXT_FILE_SUFFIXES = {
@@ -72,7 +73,7 @@ def package_skill(skill_root: Path, archive_path: Path) -> str:
             relative = path.relative_to(skill_root).as_posix()
             data = normalize_package_data(path, path.read_bytes())
             # Core Skills are documents and interpreter-driven scripts. A fixed file mode
-            # keeps package bytes stable across Windows, WSL, and Unix checkouts.
+            # keeps package bytes stable across Windows, macOS, and Linux checkouts.
             mode = 0o644
             info = zipfile.ZipInfo(relative, FIXED_ZIP_TIME)
             info.create_system = 3

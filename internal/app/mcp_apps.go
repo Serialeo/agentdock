@@ -1,6 +1,6 @@
 package app
 
-import protocol "github.com/uvwt/agentdock-protocol"
+import protocol "github.com/Serialeo/agentdock-protocol"
 
 // UIBinding describes when a tool should attach an MCP App resource to its descriptor or result.
 // It is deliberately separate from the resource registry: binding a result does not prove that a node can serve the resource.
@@ -17,7 +17,6 @@ var toolUIBindings = map[string]UIBinding{
 	"workflow_template_manage": {ResourceURI: protocol.WorkflowUIResourceURI, Action: "match"},
 	"mcp_tool_call":            {ResourceURI: protocol.DynamicMCPUIResourceURI},
 	"recall_write":             {ResourceURI: protocol.RecallUIResourceURI},
-	"file_publish":             {ResourceURI: protocol.ArtifactUIResourceURI},
 }
 
 func toolUIBinding(name string) *UIBinding {

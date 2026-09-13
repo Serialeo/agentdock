@@ -1,6 +1,6 @@
 services:
   agentdock:
-    image: ${AGENTDOCK_IMAGE:-ghcr.io/uvwt/agentdock:latest}
+    image: ${AGENTDOCK_IMAGE:-ghcr.io/serialeo/agentdock:latest}
     restart: unless-stopped
     logging:
       driver: json-file

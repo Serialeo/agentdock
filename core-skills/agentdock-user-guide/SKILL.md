@@ -1,7 +1,7 @@
 ---
 name: agentdock-user-guide
 description: 当用户询问 AgentDock 是什么、如何使用、配置在哪里、不同平台或安装方式怎样修改配置并生效、如何重启或验证配置、如何发现并配置 Codex/Claude/Grok 等 Coding Agent 的 ACP，以及常见运行问题时使用；覆盖 macOS Desktop、Windows Desktop、Linux 服务、Docker 和直接运行二进制，不用于源码开发与贡献流程。
-version: 1.1.0
+version: 1.1.1
 ---
 
 # AgentDock User Guide
@@ -124,13 +124,13 @@ AgentDock Core 在启动时从**进程环境**读取运行配置。不同发行�
 
 如果宿主提供 `agentdock_context`，优先用它读取当前设备的 `os`、`version`、AgentDock 状态目录和默认工作目录。它只能帮助确认当前 AgentDock 实例，不能替代对 Desktop runtime、service unit、Compose 配置等真实启动来源的检查。
 
-不要因为用户在 macOS 或 Windows 上聊天，就推断 AgentDock Core 一定直接运行在该系统：它也可能实际运行在 Docker、WSL、远程 Linux 或另一台设备。
+不要因为用户在 macOS 或 Windows 上聊天，就推断 AgentDock Core 一定直接运行在该系统：它也可能实际运行在 Docker、远程 Linux 或另一台设备。
 
 ### 2. 按安装方式读取对应说明
 
 - macOS Desktop：`references/macos.md`
 - Windows Desktop：`references/windows.md`
-- Linux systemd/OpenRC/手工服务：`references/linux.md`
+- Linux systemd/OpenRC/手工服务，以及运行用户、目录权限和卸载：`references/linux.md`。当前安装器默认使用安装用户及其主目录下的 `.agentdock`、`AgentDock`，不创建专用账号，不提供旧安装迁移流程。
 - Docker / Docker Compose：`references/docker.md`
 - Coding Agent / ACP：`references/acp.md`
 - 直接运行 `agentdock`：继续使用本文件的“直接运行二进制”说明

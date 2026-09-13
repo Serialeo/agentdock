@@ -20,6 +20,7 @@ func registerRuntimeAPI(mux *http.ServeMux, runtime runtimeapi.Runtime, cfg conf
 	h := runtimeAPIHandler(runtime, cfg, oauthStore)
 	mux.HandleFunc("/internal/runtime/status", h)
 	mux.HandleFunc("/internal/runtime/capabilities", h)
+	mux.HandleFunc("/internal/runtime/files", h)
 	mux.HandleFunc("/internal/runtime/skills", h)
 	mux.HandleFunc("/internal/runtime/skills/", h)
 	mux.HandleFunc("/internal/runtime/tasks", h)
@@ -69,10 +70,23 @@ func runtimeAPIHandler(runtime runtimeapi.Runtime, cfg config.Config, oauthStore
 
 func runtimeRequestBody(r *http.Request) ([]byte, error) {
 	cleanPath := strings.TrimSuffix(r.URL.Path, "/")
-	if r.Method != http.MethodPost || (cleanPath != "/internal/runtime/mcp" && cleanPath != "/internal/runtime/evolve") {
+	if r.Method != http.MethodPost {
 		return nil, nil
 	}
-	return io.ReadAll(io.LimitReader(r.Body, 64*1024+1))
+	limit := int64(64 * 1024)
+	switch cleanPath {
+	case "/internal/runtime/mcp", "/internal/runtime/evolve", "/internal/runtime/skills/manage":
+	default:
+		return nil, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("runtime request body is too large")
+	}
+	return data, nil
 }
 
 func writeRuntimeAPIHandlerError(w http.ResponseWriter, err error) {

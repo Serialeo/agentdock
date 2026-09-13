@@ -1,14 +1,7 @@
 package file
 
-// RuntimeOptions 描述文件工具的实际文件系统运行环境。非 Windows 主机只接受零值。
-type RuntimeOptions struct {
-	Runtime         string `json:"runtime,omitempty"`
-	WSLDistribution string `json:"wsl_distribution,omitempty"`
-}
-
 // ReadRequest 是 read_file 进入文件核心后的稳定输入契约。
 type ReadRequest struct {
-	RuntimeOptions
 	Path      string `json:"path"`
 	StartLine *int   `json:"start_line,omitempty"`
 	EndLine   *int   `json:"end_line,omitempty"`
@@ -17,7 +10,6 @@ type ReadRequest struct {
 
 // ListRequest 是 list_dir 进入文件核心后的稳定输入契约。
 type ListRequest struct {
-	RuntimeOptions
 	Path            string   `json:"path,omitempty"`
 	MaxDepth        *int     `json:"max_depth,omitempty"`
 	MaxEntries      *int     `json:"max_entries,omitempty"`
@@ -28,9 +20,17 @@ type ListRequest struct {
 	IncludeIgnored  bool     `json:"include_ignored,omitempty"`
 }
 
+// BrowseRequest 是管理端文件浏览器使用的浅层分页输入。
+// 它不属于 MCP 工具契约，只用于 Runtime API，避免 WebUI 为展示目录树触发递归遍历。
+type BrowseRequest struct {
+	Path          string `json:"path,omitempty"`
+	Offset        *int   `json:"offset,omitempty"`
+	Limit         *int   `json:"limit,omitempty"`
+	IncludeHidden bool   `json:"include_hidden,omitempty"`
+}
+
 // SearchRequest 是 search_text 进入文件核心后的稳定输入契约。
 type SearchRequest struct {
-	RuntimeOptions
 	Path           string   `json:"path,omitempty"`
 	Query          string   `json:"query"`
 	Regex          bool     `json:"regex,omitempty"`
@@ -47,7 +47,6 @@ type SearchRequest struct {
 // EditRequest 统一承载 file_edit 五种 action 的输入，避免为每个 action 再制造一层类型。
 // action 对字段组合的业务约束仍由文件服务在对应主流程中校验。
 type EditRequest struct {
-	RuntimeOptions
 	Action          string `json:"action"`
 	Path            string `json:"path,omitempty"`
 	Old             string `json:"old,omitempty"`

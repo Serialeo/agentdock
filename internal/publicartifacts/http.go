@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	protocol "github.com/uvwt/agentdock-protocol"
+	protocol "github.com/Serialeo/agentdock-protocol"
 )
 
 func (s Store) ServeHTTP(w http.ResponseWriter, r *http.Request, prefix string) {

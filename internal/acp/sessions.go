@@ -75,7 +75,7 @@ func (m *Manager) NewSession(ctx context.Context, cwd string, additionalDirector
 	if strings.TrimSpace(response.SessionID) == "" {
 		return SessionResult{}, newError("ACP_INVALID_RESPONSE", "ACP session/new omitted sessionId", false, map[string]any{"agent": m.opts.Agent.Name}, nil)
 	}
-	record, err := m.persistNewSession(response, resolved, additional)
+	record, err := m.persistNewSession(response, resolved, additional, sessionOwnershipFromContext(ctx))
 	if err != nil {
 		return SessionResult{}, err
 	}
@@ -222,7 +222,7 @@ func (m *Manager) ForkSession(ctx context.Context, id, cwd string, additionalDir
 	if strings.TrimSpace(response.SessionID) == "" {
 		return SessionResult{}, newError("ACP_INVALID_RESPONSE", "ACP session/fork omitted sessionId", false, map[string]any{"session_id": id}, nil)
 	}
-	record, err := m.persistNewSession(response, resolved, additional)
+	record, err := m.persistNewSession(response, resolved, additional, sessionOwnershipFromContext(ctx))
 	if err != nil {
 		return SessionResult{}, err
 	}
@@ -412,7 +412,7 @@ func (m *Manager) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *Manager) persistNewSession(state sessionLifecycleResponse, cwd string, additional []string) (SessionRecord, error) {
+func (m *Manager) persistNewSession(state sessionLifecycleResponse, cwd string, additional []string, ownership SessionOwnership) (SessionRecord, error) {
 	id, err := newID("acps")
 	if err != nil {
 		return SessionRecord{}, err
@@ -423,6 +423,7 @@ func (m *Manager) persistNewSession(state sessionLifecycleResponse, cwd string, 
 		RemoteSessionID: state.SessionID, CWD: cwd, AdditionalDirectories: append([]string(nil), additional...),
 		Status: SessionReady, CreatedAt: now, UpdatedAt: now,
 	}
+	applySessionOwnership(&record, ownership)
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()

@@ -28,9 +28,12 @@ type PrepareFunc func(*exec.Cmd) (func(), PreparationStatus)
 type CommandFactory func(context.Context) *exec.Cmd
 
 type ExecutionContext struct {
-	Runtime      string
-	Distribution string
-	Workdir      string
+	Workdir       string
+	WorkSessionID string
+	TargetID      string
+	ProjectID     string
+	DeploymentID  string
+	NodeID        string
 }
 
 type Session struct {
@@ -86,9 +89,12 @@ type Snapshot struct {
 	Completed          bool
 	ExitCode           int
 	CommandOK          bool
-	Runtime            string
-	WSLDistribution    string
 	Workdir            string
+	WorkSessionID      string
+	TargetID           string
+	ProjectID          string
+	DeploymentID       string
+	NodeID             string
 }
 
 type Store struct {
@@ -102,13 +108,16 @@ type Store struct {
 }
 
 type Summary struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	ElapsedMS    int64  `json:"elapsed_ms"`
-	TimedOut     bool   `json:"timed_out"`
-	Runtime      string `json:"runtime,omitempty"`
-	Distribution string `json:"wsl_distribution,omitempty"`
-	Workdir      string `json:"workdir,omitempty"`
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	ElapsedMS     int64  `json:"elapsed_ms"`
+	TimedOut      bool   `json:"timed_out"`
+	Workdir       string `json:"workdir,omitempty"`
+	WorkSessionID string `json:"work_session_id,omitempty"`
+	TargetID      string `json:"target_id,omitempty"`
+	ProjectID     string `json:"project_id,omitempty"`
+	DeploymentID  string `json:"deployment_id,omitempty"`
+	NodeID        string `json:"node_id,omitempty"`
 }
 
 func NewStore() *Store {
@@ -343,13 +352,16 @@ func (s *Session) Summary() Summary {
 		}
 	}
 	return Summary{
-		ID:           s.ID,
-		Status:       status,
-		ElapsedMS:    finishedAt.Sub(s.StartedAt).Milliseconds(),
-		TimedOut:     s.TimedOut,
-		Runtime:      s.execution.Runtime,
-		Distribution: s.execution.Distribution,
-		Workdir:      s.execution.Workdir,
+		ID:            s.ID,
+		Status:        status,
+		ElapsedMS:     finishedAt.Sub(s.StartedAt).Milliseconds(),
+		TimedOut:      s.TimedOut,
+		Workdir:       s.execution.Workdir,
+		WorkSessionID: s.execution.WorkSessionID,
+		TargetID:      s.execution.TargetID,
+		ProjectID:     s.execution.ProjectID,
+		DeploymentID:  s.execution.DeploymentID,
+		NodeID:        s.execution.NodeID,
 	}
 }
 
@@ -470,6 +482,12 @@ func (s *Session) SetExecutionContext(execution ExecutionContext) {
 	s.mu.Unlock()
 }
 
+func (s *Session) ExecutionContext() ExecutionContext {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.execution
+}
+
 func (s *Session) Write(text string) error {
 	_, err := io.WriteString(s.Stdin, text)
 	return err
@@ -541,7 +559,12 @@ func (s *Session) snapshot(status string, maxBytes int, advance bool) Snapshot {
 		StdoutTruncated: maxBytes > 0 && len([]byte(stdoutSegment)) > maxBytes,
 		StderrTruncated: maxBytes > 0 && len([]byte(stderrSegment)) > maxBytes,
 		Completed:       s.completed, ExitCode: s.exitCode, CommandOK: s.exitCode == 0 && !s.TimedOut,
-		Runtime: s.execution.Runtime, WSLDistribution: s.execution.Distribution, Workdir: s.execution.Workdir,
+		Workdir:       s.execution.Workdir,
+		WorkSessionID: s.execution.WorkSessionID,
+		TargetID:      s.execution.TargetID,
+		ProjectID:     s.execution.ProjectID,
+		DeploymentID:  s.execution.DeploymentID,
+		NodeID:        s.execution.NodeID,
 	}
 }
 

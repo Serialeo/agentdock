@@ -1435,8 +1435,7 @@ fi
 
 case "$(uname -m)" in
   arm64|aarch64) release_arch="arm64" ;;
-  x86_64|amd64) release_arch="amd64" ;;
-  *) die "不支持的 macOS 架构：$(uname -m)" ;;
+  *) die "仅支持 macOS arm64，当前架构：$(uname -m)" ;;
 esac
 
 asset="agentdock_darwin_${release_arch}.tar.gz"

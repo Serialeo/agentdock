@@ -3,6 +3,7 @@ module github.com/uvwt/agentdock
 go 1.26.5
 
 require (
+	github.com/Serialeo/agentdock-protocol v0.8.1
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
@@ -12,8 +13,8 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/rogpeppe/go-internal v1.15.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
-	github.com/uvwt/agentdock-protocol v0.8.1
 	golang.org/x/sys v0.45.0
+	golang.org/x/text v0.14.0
 )
 
 require (
@@ -30,6 +31,5 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )

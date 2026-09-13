@@ -14,20 +14,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 "$ROOT_DIR/scripts/test/check-macos-i18n.py"
-
 swiftc \
   -swift-version 5 \
   -parse-as-library \
-  "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/Localization.swift" \
-  "$ROOT_DIR/desktop/macos/AgentDockApp/Tests/LocalizationPreferenceTests.swift" \
-  -o "$TMP_ROOT/localization-preference-tests"
-"$TMP_ROOT/localization-preference-tests"
-
-swiftc \
-  -swift-version 5 \
-  -parse-as-library \
-  "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/Localization.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/InstallerConfiguration.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/AppVersion.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/DesktopUpdateResult.swift" \
@@ -46,7 +35,6 @@ swiftc \
 swiftc \
   -swift-version 5 \
   -parse-as-library \
-  "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/Localization.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/InstallerConfiguration.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/AppVersion.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/DesktopUpdateServiceState.swift" \
@@ -55,7 +43,6 @@ swiftc \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/ACPConfiguration.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/TunnelTokenStore.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/LegacyDesktopRuntimeMigration.swift" \
-  "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/UpdateProgressEvent.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/ServiceController.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/InstallerRunner.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Tests/ServiceControllerValidationTests.swift" \
@@ -65,7 +52,6 @@ swiftc \
 swiftc \
   -swift-version 5 \
   -parse-as-library \
-  "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/Localization.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/DesktopPermissionChecker.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/FileAccessPermissionChecker.swift" \
   "$ROOT_DIR/desktop/macos/AgentDockApp/Sources/PermissionUIComponents.swift" \
@@ -74,13 +60,12 @@ swiftc \
 "$TMP_ROOT/permission-checker-tests"
 
 mkdir -p "$TMP_ROOT/output"
-: > "$TMP_ROOT/output/AgentDock-macos-universal.zip"
-: > "$TMP_ROOT/output/AgentDock-macos-universal.zip.sha256"
+: > "$TMP_ROOT/output/AgentDock-macos-arm64.zip"
+: > "$TMP_ROOT/output/AgentDock-macos-arm64.zip.sha256"
 
 case "$(uname -m)" in
   arm64|aarch64) release_arch="arm64" ;;
-  x86_64|amd64) release_arch="amd64" ;;
-  *) print -u2 -- "unsupported test architecture: $(uname -m)"; exit 1 ;;
+  *) print -u2 -- "仅支持 macOS arm64，当前架构：$(uname -m)"; exit 1 ;;
 esac
 
 # 构建当前架构的真实 Core 与最小 cloudflared 构建输入。最终 App 必须把它们
@@ -121,14 +106,13 @@ chmod 0755 "$payload_dir/$cloudflared_binary"
   shasum -a 256 "$cloudflared_binary" > "$cloudflared_binary.sha256"
 )
 
-AGENTDOCK_MACOS_ARCHES="$(uname -m)" \
 AGENTDOCK_MACOS_APP_OUTPUT_DIR="$TMP_ROOT/output" \
 AGENTDOCK_MACOS_OFFLINE_PAYLOAD_DIR="$payload_dir" \
   "$ROOT_DIR/packaging/macos/build-app.sh"
 
 APP="$TMP_ROOT/output/AgentDock.app"
-DMG="$TMP_ROOT/output/AgentDock-macos-universal.dmg"
-ZIP="$TMP_ROOT/output/AgentDock-macos-universal.zip"
+DMG="$TMP_ROOT/output/AgentDock-macos-arm64.dmg"
+ZIP="$TMP_ROOT/output/AgentDock-macos-arm64.zip"
 test -x "$APP/Contents/MacOS/AgentDock"
 MENU_LOGIN_HELPER="$APP/Contents/Helpers/AgentDockLoginHelper"
 test -x "$MENU_LOGIN_HELPER"
@@ -190,16 +174,8 @@ test -f "$ZIP.sha256"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 test "$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")" = "com.uvwt.agentdock"
 test "$(plutil -extract CFBundleIconFile raw -o - "$APP/Contents/Info.plist")" = "AgentDock.icns"
-test "$(plutil -extract CFBundleDevelopmentRegion raw -o - "$APP/Contents/Info.plist")" = "en"
 test "$(plutil -extract LSUIElement raw -o - "$APP/Contents/Info.plist")" = "true"
 test -n "$(plutil -extract NSAppleEventsUsageDescription raw -o - "$APP/Contents/Info.plist")"
-for localization in en zh-Hans; do
-  lproj="$APP/Contents/Resources/$localization.lproj"
-  test -f "$lproj/Localizable.strings"
-  test -f "$lproj/InfoPlist.strings"
-  plutil -lint "$lproj/Localizable.strings" >/dev/null
-  plutil -lint "$lproj/InfoPlist.strings" >/dev/null
-done
 codesign --verify --deep --strict --verbose=2 "$APP"
 hdiutil verify "$DMG" >/dev/null
 (

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -166,6 +167,38 @@ func TestRuntimeAPISkillsNoAuthWhenUnconfigured(t *testing.T) {
 	}
 }
 
+func TestRuntimeAPIFilesBrowseReturnsOnlyShallowMetadata(t *testing.T) {
+	cfg := testConfig(t)
+	if err := os.Mkdir(filepath.Join(cfg.AgentDockDefaultDir, "folder"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.AgentDockDefaultDir, "visible.txt"), []byte("do-not-return-file-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.AgentDockDefaultDir, "folder", "nested.txt"), []byte("nested"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := app.NewRuntime(cfg)
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	defer runtime.Close()
+	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/runtime/files?limit=200", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"name":"folder"`) || !strings.Contains(body, `"name":"visible.txt"`) {
+		t.Fatalf("browse response missing direct entries: %s", body)
+	}
+	if strings.Contains(body, "nested.txt") || strings.Contains(body, "do-not-return-file-content") || strings.Contains(body, `"content"`) {
+		t.Fatalf("browse response leaked descendant or file content: %s", body)
+	}
+}
+
 func TestRuntimeAPIRejectsInvalidTaskQuery(t *testing.T) {
 	cfg := testConfig(t)
 	runtime, err := app.NewRuntime(cfg)
@@ -180,8 +213,15 @@ func TestRuntimeAPIRejectsInvalidTaskQuery(t *testing.T) {
 	}{
 		{name: "non-integer limit", url: "/internal/runtime/tasks?limit=many", code: "INVALID_LIMIT"},
 		{name: "negative limit", url: "/internal/runtime/tasks?limit=-1", code: "INVALID_LIMIT"},
+		{name: "zero limit", url: "/internal/runtime/tasks?limit=0", code: "INVALID_LIMIT"},
 		{name: "excessive limit", url: "/internal/runtime/tasks?limit=201", code: "INVALID_LIMIT"},
 		{name: "invalid status", url: "/internal/runtime/tasks?status=paused", code: "INVALID_STATUS"},
+		{name: "invalid time field", url: "/internal/runtime/tasks?time_field=completed_at", code: "INVALID_TASK_QUERY"},
+		{name: "negative offset", url: "/internal/runtime/tasks?offset=-1", code: "INVALID_TASK_QUERY"},
+		{name: "date without timezone", url: "/internal/runtime/tasks?from=2026-09-13", code: "INVALID_TASK_QUERY"},
+		{name: "inverted range", url: "/internal/runtime/tasks?from=2026-09-13T00:00:00Z&to=2026-09-12T00:00:00Z", code: "INVALID_TASK_QUERY"},
+		{name: "duplicate boundary", url: "/internal/runtime/tasks?from=2026-09-13T00:00:00Z&from=2026-09-12T00:00:00Z", code: "INVALID_TASK_QUERY"},
+		{name: "unknown query", url: "/internal/runtime/tasks?after=2026-09-13T00:00:00Z", code: "INVALID_TASK_QUERY"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -23,6 +22,7 @@ func TestReadFileSupportsSkillURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	projectCtx := projectContextForTest(t, rt, cfg.AgentDockDefaultDir, fullProjectPermissionsForTest())
 	packageDir := installDocumentSkillForTest(t, rt, "demo-skill", "1.0.0", "Read Skill resources in tests.")
 	if err := os.MkdirAll(filepath.Join(packageDir, "references"), 0o700); err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestReadFileSupportsSkillURI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := rt.Call(context.Background(), "read_file", map[string]any{
+	result, err := rt.Call(projectCtx, "read_file", map[string]any{
 		"path": "skill://demo-skill/references/guide.md",
 	})
 	if err != nil {
@@ -58,9 +58,10 @@ func TestReadFileRejectsSkillURITraversalAndSymlinkEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	projectCtx := projectContextForTest(t, rt, cfg.AgentDockDefaultDir, fullProjectPermissionsForTest())
 	packageDir := installDocumentSkillForTest(t, rt, "demo-skill", "1.0.0", "Reject escaping Skill resources.")
 
-	_, err = rt.Call(context.Background(), "read_file", map[string]any{
+	_, err = rt.Call(projectCtx, "read_file", map[string]any{
 		"path": "skill://demo-skill/../outside.txt",
 	})
 	assertToolErrorCode(t, err, "INVALID_SKILL_URI")
@@ -73,7 +74,7 @@ func TestReadFileRejectsSkillURITraversalAndSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	_, err = rt.Call(context.Background(), "read_file", map[string]any{
+	_, err = rt.Call(projectCtx, "read_file", map[string]any{
 		"path": "skill://demo-skill/escape.txt",
 	})
 	assertToolErrorCode(t, err, "SKILL_PATH_ESCAPE")

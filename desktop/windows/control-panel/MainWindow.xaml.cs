@@ -36,16 +36,7 @@ public partial class MainWindow : Window
     {
         _runtime = runtime;
         InitializeComponent();
-        _updatingUi = true;
-        SelectUiLanguage(UiText.ReadPreference());
-        _updatingUi = false;
         Closing += MainWindow_Closing;
-    }
-
-    internal void CloseForReplacement()
-    {
-        Closing -= MainWindow_Closing;
-        Close();
     }
 
     public async Task RefreshAsync()
@@ -57,21 +48,21 @@ public partial class MainWindow : Window
 
         try
         {
-            FooterStatusText.Text = UiText.Get("Refreshing");
+            FooterStatusText.Text = "正在刷新…";
             var snapshot = await _runtime.GetSnapshotAsync(includeNexusConnection: true);
             _snapshot = snapshot;
             _bearerToken = _runtime.ReadBearerToken();
             _oauthPassword = _runtime.ReadOAuthPassword();
             ApplySnapshot(snapshot);
-            FooterStatusText.Text = UiText.Format("LastRefresh", snapshot.CheckedAt);
+            FooterStatusText.Text = $"上次刷新：{snapshot.CheckedAt:HH:mm:ss}";
             await AutoTestPublicAsync(snapshot);
         }
         catch (Exception ex)
         {
             FooterStatusText.Text = ex.Message;
-            HeaderStatusText.Text = UiText.Get("StatusReadFailed");
+            HeaderStatusText.Text = "状态读取失败";
             StatusDot.Fill = new SolidColorBrush(Color.FromRgb(217, 45, 32));
-            NexusStatusText.Text = UiText.Get("StatusReadFailed");
+            NexusStatusText.Text = "状态读取失败";
         }
         finally
         {
@@ -84,20 +75,20 @@ public partial class MainWindow : Window
         _updatingUi = true;
         try
         {
-            HeaderStatusText.Text = snapshot.Healthy ? UiText.Get("RunningNormally") : snapshot.CoreRunning ? UiText.Get("RunningHealthFailed") : UiText.Get("Stopped");
+            HeaderStatusText.Text = snapshot.Healthy ? "运行正常" : snapshot.CoreRunning ? "运行但健康检查失败" : "已停止";
             StatusDot.Fill = new SolidColorBrush(snapshot.Healthy
                 ? Color.FromRgb(18, 183, 106)
                 : snapshot.CoreRunning ? Color.FromRgb(247, 144, 9) : Color.FromRgb(152, 162, 179));
 
             NexusStatusText.Text = !string.IsNullOrWhiteSpace(snapshot.Nexus.Error)
-                ? UiText.Get("ConfigurationError")
+                ? "配置异常"
                 : !snapshot.Nexus.Paired
-                    ? UiText.Get("NotConfigured")
-                    : snapshot.NexusConnected ? UiText.Get("Connected") : UiText.Get("NotConnected");
+                    ? "未配置"
+                    : snapshot.NexusConnected ? "已连接" : "未连接";
 
-            ServiceStatusText.Text = snapshot.CoreRunning ? UiText.Get("Running") : UiText.Get("Stopped");
-            HealthStatusText.Text = snapshot.Healthy ? UiText.Get("Healthy") : UiText.Get("Unavailable");
-            VersionText.Text = string.IsNullOrWhiteSpace(snapshot.Version) ? UiText.Get("Unknown") : snapshot.Version;
+            ServiceStatusText.Text = snapshot.CoreRunning ? "正在运行" : "已停止";
+            HealthStatusText.Text = snapshot.Healthy ? "正常" : "不可用";
+            VersionText.Text = string.IsNullOrWhiteSpace(snapshot.Version) ? "未知" : snapshot.Version;
             LocalMcpTextBox.Text = snapshot.LocalMcpUrl;
             PublicMcpTextBox.Text = snapshot.PublicMcpUrl;
             UpdateCredentialText();
@@ -112,7 +103,7 @@ public partial class MainWindow : Window
                     ? snapshot.PublicOrigin
                     : snapshot.SavedNamedOrigin;
             }
-            TunnelTokenStoredText.Text = snapshot.TunnelTokenStored ? UiText.Get("TunnelTokenSaved") : UiText.Get("NotSaved");
+            TunnelTokenStoredText.Text = snapshot.TunnelTokenStored ? "Tunnel Token已加密保存" : "未保存";
             ElevatedCoreCheckBox.IsChecked = string.Equals(snapshot.Manifest.PrivilegeMode, "elevated", StringComparison.OrdinalIgnoreCase);
             CoreStartupCheckBox.IsChecked = snapshot.CoreStartupEnabled;
             TrayStartupCheckBox.IsChecked = snapshot.TrayStartupEnabled;
@@ -124,8 +115,8 @@ public partial class MainWindow : Window
             NexusDeviceTokenStatusText.Text = snapshot.Nexus.Error.Length > 0
                 ? snapshot.Nexus.Error
                 : snapshot.Nexus.Paired
-                    ? UiText.Format("DeviceTokenSaved", snapshot.Nexus.NodeId)
-                    : UiText.Get("DeviceNotPairedHelp");
+                    ? $"已安全保存 · node_id={snapshot.Nexus.NodeId}"
+                    : "尚未配对；Device Token 将由一次性配对自动生成。";
             NexusDeviceTokenStatusText.Foreground = snapshot.Nexus.Error.Length > 0
                 ? new SolidColorBrush(Color.FromRgb(217, 45, 32))
                 : new SolidColorBrush(Color.FromRgb(102, 112, 133));
@@ -161,7 +152,7 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(snapshot.PublicOrigin))
         {
-            PublicTestStatusText.Text = snapshot.TunnelMode == "quick" ? UiText.Get("WaitingTemporaryAddress") : UiText.Get("PublicAddressNotConfigured");
+            PublicTestStatusText.Text = snapshot.TunnelMode == "quick" ? "正在等待新的临时地址…" : "未配置公网地址";
             return;
         }
 
@@ -174,7 +165,7 @@ public partial class MainWindow : Window
 
         _lastAutoTestOrigin = snapshot.PublicOrigin;
         _lastAutoTestAt = now;
-        PublicTestStatusText.Text = UiText.Get("AutoDetectingPublicAddress");
+        PublicTestStatusText.Text = "正在自动检测公网地址…";
         var result = await _runtime.TestUrlAsync(snapshot.PublicOrigin);
         PublicTestStatusText.Text = result.Message;
     }
@@ -186,7 +177,7 @@ public partial class MainWindow : Window
         try
         {
             await action();
-            statusTarget.Text = UiText.Get("OperationCompleted");
+            statusTarget.Text = "操作完成";
             await RefreshAsync();
             return true;
         }
@@ -201,9 +192,9 @@ public partial class MainWindow : Window
     private Task RunCoreActionAsync(string action, string pendingText) =>
         ExecuteActionAsync(pendingText, () => _runtime.RunActionAsync(action));
 
-    private async void StartButton_Click(object sender, RoutedEventArgs e) => await RunCoreActionAsync("start", UiText.Get("Starting"));
-    private async void StopButton_Click(object sender, RoutedEventArgs e) => await RunCoreActionAsync("stop", UiText.Get("Stopping"));
-    private async void RestartButton_Click(object sender, RoutedEventArgs e) => await RunCoreActionAsync("restart", UiText.Get("Restarting"));
+    private async void StartButton_Click(object sender, RoutedEventArgs e) => await RunCoreActionAsync("start", "正在启动…");
+    private async void StopButton_Click(object sender, RoutedEventArgs e) => await RunCoreActionAsync("stop", "正在停止…");
+    private async void RestartButton_Click(object sender, RoutedEventArgs e) => await RunCoreActionAsync("restart", "正在重启…");
 
     private async void UpdateButton_Click(object sender, RoutedEventArgs e) =>
         await ((App)Application.Current).CheckForUpdatesAsync(this);
@@ -237,21 +228,21 @@ public partial class MainWindow : Window
     {
         BearerTokenTextBox.Text = _showBearer ? _bearerToken : MaskSecret(_bearerToken);
         OAuthPasswordTextBox.Text = _showOAuth ? _oauthPassword : MaskSecret(_oauthPassword);
-        ToggleBearerButton.Content = _showBearer ? UiText.Get("Hide") : UiText.Get("Show");
-        ToggleOAuthButton.Content = _showOAuth ? UiText.Get("Hide") : UiText.Get("Show");
+        ToggleBearerButton.Content = _showBearer ? "隐藏" : "显示";
+        ToggleOAuthButton.Content = _showOAuth ? "隐藏" : "显示";
     }
 
-    private static string MaskSecret(string value) => string.IsNullOrEmpty(value) ? UiText.Get("NotConfigured") : new string('●', Math.Clamp(value.Length, 8, 32));
+    private static string MaskSecret(string value) => string.IsNullOrEmpty(value) ? "未配置" : new string('●', Math.Clamp(value.Length, 8, 32));
 
     private async void TestPublicButton_Click(object sender, RoutedEventArgs e)
     {
         var origin = _snapshot?.PublicOrigin ?? "";
         if (string.IsNullOrWhiteSpace(origin))
         {
-            PublicTestStatusText.Text = UiText.Get("CurrentNoPublicAddress");
+            PublicTestStatusText.Text = "当前没有公网地址";
             return;
         }
-        PublicTestStatusText.Text = UiText.Get("Testing");
+        PublicTestStatusText.Text = "正在测试…";
         var result = await _runtime.TestUrlAsync(origin);
         PublicTestStatusText.Text = result.Message;
     }
@@ -291,11 +282,11 @@ public partial class MainWindow : Window
         if (mode == "quick")
         {
             PublicMcpTextBox.Text = "";
-            PublicTestStatusText.Text = UiText.Get("GeneratingTemporaryAddress");
+            PublicTestStatusText.Text = "正在生成新的临时地址…";
             _lastAutoTestOrigin = "";
         }
         await ExecuteActionAsync(
-            UiText.Get("SwitchingPublicAccess"),
+            "正在切换公网访问模式…",
             () => _runtime.SetTunnelModeAsync(mode, ServerUrlTextBox.Text.Trim(), TunnelTokenPasswordBox.Password),
             TunnelActionStatusText);
         TunnelTokenPasswordBox.Clear();
@@ -304,11 +295,11 @@ public partial class MainWindow : Window
     private async void RegenerateQuickButton_Click(object sender, RoutedEventArgs e)
     {
         PublicMcpTextBox.Text = "";
-        PublicTestStatusText.Text = UiText.Get("GeneratingTemporaryAddress");
-        TunnelActionStatusText.Text = UiText.Get("OldAddressHidden");
+        PublicTestStatusText.Text = "正在生成新的临时地址…";
+        TunnelActionStatusText.Text = "旧地址已隐藏，正在启动新的 Quick Tunnel…";
         _lastAutoTestOrigin = "";
         await ExecuteActionAsync(
-            UiText.Get("OldAddressHidden"),
+            "旧地址已隐藏，正在启动新的 Quick Tunnel…",
             () => _runtime.RegenerateQuickTunnelAsync(),
             TunnelActionStatusText);
     }
@@ -340,9 +331,9 @@ public partial class MainWindow : Window
 
         BrowserConnectionHelpText.Text = mode switch
         {
-            BrowserConnectionReuse => UiText.Get("BrowserReuseHelp"),
-            BrowserConnectionSpecified => UiText.Get("BrowserSpecifiedHelp"),
-            _ => UiText.Get("BrowserManagedHelp")
+            BrowserConnectionReuse => "优先使用本机已有 CDP 浏览器；未找到时自动使用隔离浏览器。可能沿用已有登录状态。",
+            BrowserConnectionSpecified => "使用指定 CDP 浏览器，并可能沿用其中的登录状态。",
+            _ => "使用隔离浏览器，不沿用日常浏览器登录状态。"
         };
     }
 
@@ -390,7 +381,7 @@ public partial class MainWindow : Window
             configuredCommand = AcpCommandTextBox.Text.Trim();
             if (!TryReadAcpArguments(AcpArgsTextBox.Text, out var customArguments))
             {
-                AcpStatusText.Text = UiText.Get("ArgsJsonInvalid");
+                AcpStatusText.Text = "Args JSON 必须是 JSON 字符串数组。";
                 AcpStatusText.Foreground = enabled
                     ? new SolidColorBrush(Color.FromRgb(217, 45, 32))
                     : new SolidColorBrush(Color.FromRgb(102, 112, 133));
@@ -409,75 +400,18 @@ public partial class MainWindow : Window
         AcpStatusText.Text = enabled
             ? resolution.Message
             : resolution.Available
-                ? isCustom ? UiText.Get("CustomConfigured") : UiText.Format("AgentDetected", AgentDisplayName(agent))
+                ? isCustom ? "已配置 自定义 · 启用后生效" : $"已检测到 {AgentDisplayName(agent)} · 启用后生效"
                 : resolution.Message;
         AcpStatusText.Foreground = enabled && !resolution.Available
             ? new SolidColorBrush(Color.FromRgb(217, 45, 32))
             : new SolidColorBrush(Color.FromRgb(102, 112, 133));
     }
 
-    private async void LanguageComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_updatingUi || Application.Current is not App app)
-        {
-            return;
-        }
-
-        var preference = SelectedUiLanguage();
-        if (preference == UiText.ReadPreference())
-        {
-            return;
-        }
-
-        var confirm = MessageBox.Show(
-            this,
-            UiText.Get("LanguageChangeDiscardWarning"),
-            "AgentDock",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.Yes)
-        {
-            _updatingUi = true;
-            SelectUiLanguage(UiText.ReadPreference());
-            _updatingUi = false;
-            return;
-        }
-
-        try
-        {
-            await app.ApplyLanguagePreferenceAsync(preference);
-        }
-        catch (Exception ex)
-        {
-            _updatingUi = true;
-            SelectUiLanguage(UiText.ReadPreference());
-            _updatingUi = false;
-            SettingsStatusText.Text = UiText.Format("LanguageChangeFailed", ex.Message);
-            MessageBox.Show(this, SettingsStatusText.Text, "AgentDock", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void SelectUiLanguage(string preference)
-    {
-        foreach (var item in LanguageComboBox.Items.OfType<ComboBoxItem>())
-        {
-            if (string.Equals(item.Tag?.ToString(), preference, StringComparison.Ordinal))
-            {
-                LanguageComboBox.SelectedItem = item;
-                return;
-            }
-        }
-        LanguageComboBox.SelectedIndex = 0;
-    }
-
-    private string SelectedUiLanguage() =>
-        (LanguageComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? UiText.SystemPreference;
-
     private async void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(PortTextBox.Text.Trim(), out var port) || port is < 1 or > 65535)
         {
-            MessageBox.Show(this, UiText.Get("PortInvalid"), "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "端口必须是 1 到 65535 之间的整数。", "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -493,7 +427,7 @@ public partial class MainWindow : Window
         {
             if (!TryReadAcpArguments(AcpArgsTextBox.Text, out var customArguments))
             {
-                MessageBox.Show(this, UiText.Get("ArgsJsonInvalid"), "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, "Args JSON 必须是 JSON 字符串数组。", "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             configuredAcpArguments = customArguments;
@@ -505,8 +439,8 @@ public partial class MainWindow : Window
         if (acpEnabled && !_runtime.ResolveAcpAdapter(acpAgent, configuredAcpCommand, configuredAcpArguments).Available)
         {
             var message = isCustomAcp
-                ? UiText.Get("CustomAcpUnavailable")
-                : UiText.Format("AgentUnavailable", AgentDisplayName(acpAgent));
+                ? "自定义 ACP Adapter 当前不可用，请检查 Command 与 Args JSON。"
+                : $"{AgentDisplayName(acpAgent)} 当前不可用，请先安装对应命令。";
             MessageBox.Show(this, message, "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -515,7 +449,7 @@ public partial class MainWindow : Window
         var browserCdpUrl = BrowserCdpUrlTextBox.Text.Trim();
         if (browserConnectionMode == BrowserConnectionSpecified && string.IsNullOrWhiteSpace(browserCdpUrl))
         {
-            MessageBox.Show(this, UiText.Get("SpecifiedCdpRequired"), "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "选择“连接指定 CDP 浏览器”时必须填写 CDP 地址。", "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -534,7 +468,7 @@ public partial class MainWindow : Window
             AcpArgs = isCustomAcp ? configuredAcpArguments?.ToList() ?? [] : []
         };
         var saved = await ExecuteActionAsync(
-            UiText.Get("SavingAndRestarting"),
+            "正在保存设置并重启…",
             () => _runtime.SaveSettingsAsync(settings),
             SettingsStatusText);
         if (saved)
@@ -551,11 +485,11 @@ public partial class MainWindow : Window
         var pairingCode = NexusPairingCodePasswordBox.Password.Trim();
         if (endpoint.Length == 0 || pairingCode.Length == 0)
         {
-            MessageBox.Show(this, UiText.Get("PairingFieldsRequired"), "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "请填写 NexusDock 地址和一次性配对码。", "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         var paired = await ExecuteActionAsync(
-            UiText.Get("PairingAndRestarting"),
+            "正在配对并重启 AgentDock…",
             () => _runtime.PairNexusAsync(endpoint, pairingCode),
             NexusDeviceTokenStatusText);
         if (paired)
@@ -573,11 +507,11 @@ public partial class MainWindow : Window
 
         var elevated = ElevatedCoreCheckBox.IsChecked == true;
         ElevatedCoreCheckBox.IsEnabled = false;
-        SettingsStatusText.Text = elevated ? UiText.Get("SwitchingAdmin") : UiText.Get("SwitchingStandard");
+        SettingsStatusText.Text = elevated ? "正在切换到管理员模式…" : "正在切换到普通用户模式…";
         try
         {
             await _runtime.SetPrivilegeModeAsync(elevated);
-            SettingsStatusText.Text = elevated ? UiText.Get("SwitchedAdmin") : UiText.Get("SwitchedStandard");
+            SettingsStatusText.Text = elevated ? "已切换到管理员模式" : "已切换到普通用户模式";
         }
         catch (Exception ex)
         {
@@ -598,7 +532,7 @@ public partial class MainWindow : Window
             return;
         }
         await ExecuteActionAsync(
-            UiText.Get("UpdatingCoreStartup"),
+            "正在更新核心开机启动…",
             () => _runtime.SetStartupAsync("core", CoreStartupCheckBox.IsChecked == true),
             SettingsStatusText);
     }
@@ -610,7 +544,7 @@ public partial class MainWindow : Window
             return;
         }
         await ExecuteActionAsync(
-            UiText.Get("UpdatingTrayStartup"),
+            "正在更新托盘开机启动…",
             () => _runtime.SetStartupAsync("tray", TrayStartupCheckBox.IsChecked == true),
             SettingsStatusText);
     }
@@ -636,8 +570,8 @@ public partial class MainWindow : Window
         "codex" => "Codex",
         "claude" => "Claude",
         "grok" => "Grok Build",
-        "custom" => UiText.Get("Custom"),
-        _ => throw new ArgumentOutOfRangeException(nameof(agent), agent, UiText.Get("UnsupportedCodingAgent"))
+        "custom" => "自定义",
+        _ => throw new ArgumentOutOfRangeException(nameof(agent), agent, "不支持的 Coding Agent")
     };
 
     private static bool TryReadAcpArguments(string raw, out List<string> arguments)
@@ -765,7 +699,7 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             Hide();
-            FooterStatusText.Text = UiText.Get("MinimizedToTray");
+            FooterStatusText.Text = "控制面板已最小化到系统托盘";
         }
     }
 }

@@ -89,7 +89,7 @@ final class InstallerRunner {
                     // 需要与 Named Tunnel 相同的自愈，否则会一直等到 URL 超时。
                     try service.restartTunnel()
                     guard await service.waitForTunnelProcess() else {
-                        throw ValidationError(L10n.text("AgentDock Tunnel was re-registered, but cloudflared did not run reliably."))
+                        throw ValidationError("AgentDock Tunnel 已重新注册，但 cloudflared 没有稳定运行。")
                     }
                 }
             }
@@ -104,14 +104,14 @@ final class InstallerRunner {
                 publicURL = try await waitForQuickTunnelURL(timeout: 35)
                 guard let configuration = ServiceConfiguration.load(from: paths.environment),
                       await service.waitForHealth(configuration: configuration) else {
-                    throw ValidationError(L10n.text("A temporary public address was generated, but AgentDock Core did not recover to a healthy state."))
+                    throw ValidationError("临时公网地址已生成，但 AgentDock Core 没有恢复健康。")
                 }
             }
 
             let finalConfiguration = ServiceConfiguration.load(from: paths.environment)
             guard let finalConfiguration,
                   let localMCPURL = finalConfiguration.localMCPURL?.absoluteString else {
-                throw ValidationError(L10n.text("AgentDock configuration was written, but the final local MCP address could not be read."))
+                throw ValidationError("AgentDock 配置已写入，但无法读取最终本地 MCP 地址。")
             }
             let publicMCPURL = publicURL.isEmpty ? "" : publicURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/mcp"
             try legacyMigration?.commit()
@@ -141,11 +141,7 @@ final class InstallerRunner {
                     try service.setTunnelEnabled(true)
                 }
             } catch {
-                throw ValidationError(L10n.format(
-                    "Failed to apply configuration, and restoring the pre-install state also failed: %@; %@",
-                    originalError.localizedDescription,
-                    error.localizedDescription
-                ))
+                throw ValidationError("应用配置失败，而且安装前状态恢复也失败：\(originalError.localizedDescription)；\(error.localizedDescription)")
             }
             throw originalError
         }
@@ -204,7 +200,7 @@ final class InstallerRunner {
             tunnelValues["AGENTDOCK_TUNNEL_TARGET"] = "http://127.0.0.1:\(port)"
         case .named:
             guard let serverURL else {
-                throw ValidationError(L10n.text("Custom domain mode is missing an HTTPS public address."))
+                throw ValidationError("固定域名模式缺少 HTTPS 公网地址。")
             }
             let tokenStore = TunnelTokenStore(paths: paths)
             tunnelToken = try tokenStore.tokenForNamedTunnel(providedToken: providedTunnelToken)
@@ -240,23 +236,23 @@ final class InstallerRunner {
             guard values.isRegularFile == true,
                   values.isSymbolicLink != true,
                   fileManager.isExecutableFile(atPath: url.path) else {
-                throw ValidationError(L10n.format("AgentDock.app is missing a valid %@: %@", title, url.path))
+                throw ValidationError("AgentDock.app 缺少有效的 \(title)：\(url.path)")
             }
         }
         let manifest = paths.coreSkillBundle.appendingPathComponent("manifest.json")
         let manifestValues = try manifest.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         guard manifestValues.isRegularFile == true, manifestValues.isSymbolicLink != true else {
-            throw ValidationError(L10n.text("AgentDock.app is missing the official core Skill bundle."))
+            throw ValidationError("AgentDock.app 缺少官方核心 Skill Bundle。")
         }
 
         let version = try runProcess(executable: paths.binary.path, arguments: ["--version"])
         guard version.status == 0,
               AppVersion.matchesCoreVersion(version.output) else {
-            throw ValidationError(L10n.text("The Core bundled in AgentDock.app does not match the app version. Reinstall the application."))
+            throw ValidationError("AgentDock.app 内置 Core 与 App 版本不一致，请重新安装应用。")
         }
         let cloudflared = try runProcess(executable: paths.cloudflared.path, arguments: ["--version"])
         guard cloudflared.status == 0 else {
-            throw ValidationError(L10n.text("The cloudflared bundled in AgentDock.app cannot run."))
+            throw ValidationError("AgentDock.app 内的 cloudflared 无法运行。")
         }
     }
 
@@ -266,7 +262,7 @@ final class InstallerRunner {
             arguments: ["skill", "bootstrap", "--bundle", paths.coreSkillBundle.path]
         )
         guard result.status == 0 else {
-            throw ValidationError(result.output.isEmpty ? L10n.text("Official core Skill initialization failed.") : result.output)
+            throw ValidationError(result.output.isEmpty ? "官方核心 Skill 初始化失败。" : result.output)
         }
     }
 
@@ -297,7 +293,7 @@ final class InstallerRunner {
             }
             let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             guard values.isRegularFile == true, values.isSymbolicLink != true else {
-                throw ValidationError(L10n.format("Runtime configuration must be a regular file: %@", url.path))
+                throw ValidationError("运行配置必须是普通文件：\(url.path)")
             }
             return FileSnapshot(url: url, data: try Data(contentsOf: url))
         }
@@ -319,15 +315,11 @@ final class InstallerRunner {
         let temporary = directory.appendingPathComponent(".\(url.lastPathComponent).tmp.\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: temporary) }
         guard fileManager.createFile(atPath: temporary.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            throw ValidationError(L10n.format("Unable to create temporary configuration file: %@", url.lastPathComponent))
+            throw ValidationError("无法创建配置临时文件：\(url.lastPathComponent)")
         }
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
         if Darwin.rename(temporary.path, url.path) != 0 {
-            throw ValidationError(L10n.format(
-                "Unable to atomically replace %@: %@",
-                url.lastPathComponent,
-                String(cString: strerror(errno))
-            ))
+            throw ValidationError("无法原子替换 \(url.lastPathComponent)：\(String(cString: strerror(errno)))")
         }
     }
 
@@ -351,7 +343,7 @@ final class InstallerRunner {
                 }
                 Thread.sleep(forTimeInterval: 0.25)
             }
-            throw ValidationError(L10n.text("cloudflared did not generate a temporary public address before the timeout."))
+            throw ValidationError("cloudflared 未在超时前生成临时公网地址。")
         }
     }
 
@@ -405,8 +397,7 @@ func runUpdateProcess(
     executable: String,
     arguments: [String],
     environment: [String: String],
-    outputURL: URL,
-    onProgress: @escaping (UpdateProgressEvent) -> Void
+    outputURL: URL
 ) throws -> ProcessExecution {
     let outputDirectory = outputURL.deletingLastPathComponent()
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -419,7 +410,7 @@ func runUpdateProcess(
         contents: nil,
         attributes: [.posixPermissions: 0o600]
     ) else {
-        throw ValidationError(L10n.text("Unable to create the update log file."))
+        throw ValidationError("无法创建更新日志文件。")
     }
     try FileManager.default.setAttributes(
         [.posixPermissions: 0o600],
@@ -428,45 +419,14 @@ func runUpdateProcess(
     let outputHandle = try FileHandle(forWritingTo: outputURL)
     defer { try? outputHandle.close() }
 
-    let progressPipe = Pipe()
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments
     process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, replacement in replacement }
-    process.standardOutput = progressPipe
+    process.standardOutput = outputHandle
     process.standardError = outputHandle
     try process.run()
-
-    // stdout 是版本化 NDJSON 机器协议；stderr 仍完整写入 update.log。
-    // 更新器进入 App 替换临界区前会把自身输出接管到日志文件，因此旧 GUI 退出时这里自然读到 EOF。
-    let progressHandle = progressPipe.fileHandleForReading
-    var buffered = Data()
-    var protocolWarnings: [String] = []
-    while true {
-        let chunk = progressHandle.availableData
-        if chunk.isEmpty { break }
-        buffered.append(chunk)
-        consumeUpdateProgressLines(
-            from: &buffered,
-            final: false,
-            onProgress: onProgress,
-            warnings: &protocolWarnings
-        )
-    }
-    consumeUpdateProgressLines(
-        from: &buffered,
-        final: true,
-        onProgress: onProgress,
-        warnings: &protocolWarnings
-    )
     process.waitUntilExit()
-
-    if !protocolWarnings.isEmpty {
-        let warningText = protocolWarnings.joined(separator: "\n") + "\n"
-        if let warningData = warningText.data(using: .utf8) {
-            try? outputHandle.write(contentsOf: warningData)
-        }
-    }
     try outputHandle.synchronize()
 
     let outputData = (try? Data(contentsOf: outputURL)) ?? Data()
@@ -474,40 +434,4 @@ func runUpdateProcess(
         status: process.terminationStatus,
         output: String(data: outputData, encoding: .utf8) ?? ""
     )
-}
-
-private func consumeUpdateProgressLines(
-    from buffer: inout Data,
-    final: Bool,
-    onProgress: (UpdateProgressEvent) -> Void,
-    warnings: inout [String]
-) {
-    while let newline = buffer.firstIndex(of: 0x0a) {
-        let line = Data(buffer[..<newline])
-        buffer.removeSubrange(...newline)
-        decodeUpdateProgressLine(line, onProgress: onProgress, warnings: &warnings)
-    }
-    if final, !buffer.isEmpty {
-        let line = buffer
-        buffer.removeAll(keepingCapacity: false)
-        decodeUpdateProgressLine(line, onProgress: onProgress, warnings: &warnings)
-    }
-}
-
-private func decodeUpdateProgressLine(
-    _ line: Data,
-    onProgress: (UpdateProgressEvent) -> Void,
-    warnings: inout [String]
-) {
-    guard !line.isEmpty else { return }
-    do {
-        let event = try JSONDecoder().decode(UpdateProgressEvent.self, from: line)
-        guard event.schemaVersion == 1 else {
-            warnings.append("Unsupported AgentDock update progress schema: \(event.schemaVersion)")
-            return
-        }
-        onProgress(event)
-    } catch {
-        warnings.append("Unable to decode AgentDock update progress event: \(error.localizedDescription)")
-    }
 }

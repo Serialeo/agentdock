@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"strings"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
+	"github.com/Serialeo/agentdock-protocol/mcpapps"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	protocol "github.com/uvwt/agentdock-protocol"
-	"github.com/uvwt/agentdock-protocol/mcpapps"
 )
 
 type appResourceDefinition struct {
@@ -51,13 +51,6 @@ func (s *Server) appResourceDefinitions() []appResourceDefinition {
 			Title:       "AgentDock dynamic MCP",
 			Description: "Compact external MCP tool invocation view.",
 			HTML:        mcpapps.HTML("dynamic_mcp", "Dynamic MCP"),
-		},
-		{
-			URI:         protocol.ArtifactUIResourceURI,
-			Name:        "agentdock-artifact",
-			Title:       "AgentDock artifact",
-			Description: "Compact published Artifact summary with expandable file metadata and signed URL information.",
-			HTML:        mcpapps.HTML("artifact", "Artifact"),
 		},
 	}
 	if s.cfg.NexusEndpoint != "" {

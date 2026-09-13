@@ -71,7 +71,7 @@ func (s *Service) loadImageSource(ctx context.Context, request ViewImageRequest)
 			},
 		}, nil
 	case pathValue != "":
-		resolved, err := s.ws.ResolveExisting(pathValue)
+		resolved, err := s.ws.ResolveExistingContext(ctx, pathValue)
 		if err != nil {
 			return loadedImageSource{}, err
 		}

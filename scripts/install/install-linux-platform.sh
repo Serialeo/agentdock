@@ -6,10 +6,11 @@ DEFAULT_GO_VERSION="${AGENTDOCK_GO_VERSION:-1.22.12}"
 DEFAULT_REPO_URL="${AGENTDOCK_REPO_URL:-https://github.com/uvwt/agentdock.git}"
 DEFAULT_BRANCH="${AGENTDOCK_BRANCH:-main}"
 DEFAULT_SOURCE_DIR="${AGENTDOCK_SOURCE_DIR:-/opt/agentdock}"
-DEFAULT_DATA_DIR="${AGENTDOCK_DATA_DIR:-/srv/agentdock}"
+DEFAULT_DATA_DIR="${AGENTDOCK_DATA_DIR:-}"
 DEFAULT_ENV_FILE="${AGENTDOCK_ENV_FILE:-/etc/agentdock/agentdock.env}"
 DEFAULT_SERVICE_NAME="${AGENTDOCK_SERVICE_NAME:-agentdock}"
-DEFAULT_SERVICE_USER="${AGENTDOCK_SERVICE_USER:-agentdock}"
+INSTALLER_USER="${SUDO_USER:-$(id -un)}"
+DEFAULT_SERVICE_USER="${AGENTDOCK_SERVICE_USER:-$INSTALLER_USER}"
 DEFAULT_HOST="${AGENTDOCK_HOST:-127.0.0.1}"
 DEFAULT_PORT="${AGENTDOCK_PORT:-8765}"
 DEFAULT_LOG_LEVEL="${AGENTDOCK_LOG_LEVEL:-info}"
@@ -74,6 +75,10 @@ Alpine/极简系统如果没有 curl/bash：
   AGENTDOCK_OAUTH_PASSWORD、AGENTDOCK_OAUTH_TOKEN_SECRET
   AGENTDOCK_TUNNEL_MODE、AGENTDOCK_CLOUDFLARE_TUNNEL_TOKEN
   AGENTDOCK_CLOUDFLARED_BINARY、AGENTDOCK_CLOUDFLARED_INSTALL_PATH
+
+默认以安装用户运行（sudo 安装时使用 SUDO_USER），不创建系统用户。
+AGENTDOCK_SERVICE_USER 可指定其他已存在的用户。
+默认在运行用户主目录创建 .agentdock 和 AgentDock；AGENTDOCK_DATA_DIR 可覆盖数据根目录。
 
 参数：
   -h, --help    显示帮助，不执行部署
@@ -214,25 +219,27 @@ run_root() {
 
 run_as_service_user() {
   local user="$1"
-  local home_dir="$2"
+  local data_dir="$2"
+  local home_dir
+  home_dir="$(service_user_home "$user")"
   shift 2
 
   # 安装器可能由另一个 AgentDock 实例启动，不能让父进程的实例目录泄漏到新实例。
   # 核心 Skill 必须始终写入本次部署选择的数据目录。
   if [[ "$(id -u)" == "$(id -u "$user")" ]]; then
     env HOME="$home_dir" \
-      AGENTDOCK_HOME="$home_dir/.agentdock" \
-      AGENTDOCK_DEFAULT_DIR="$home_dir/AgentDock" \
+      AGENTDOCK_HOME="$data_dir/.agentdock" \
+      AGENTDOCK_DEFAULT_DIR="$data_dir/AgentDock" \
       "$@"
   elif command -v runuser >/dev/null 2>&1; then
     run_root runuser -u "$user" -- env HOME="$home_dir" \
-      AGENTDOCK_HOME="$home_dir/.agentdock" \
-      AGENTDOCK_DEFAULT_DIR="$home_dir/AgentDock" \
+      AGENTDOCK_HOME="$data_dir/.agentdock" \
+      AGENTDOCK_DEFAULT_DIR="$data_dir/AgentDock" \
       "$@"
   elif command -v su >/dev/null 2>&1; then
     # 单引号中的位置参数由 su 启动的 /bin/sh 展开。
     # shellcheck disable=SC2016
-    run_root su -s /bin/sh "$user" -c 'HOME="$1"; AGENTDOCK_HOME="$1/.agentdock"; AGENTDOCK_DEFAULT_DIR="$1/AgentDock"; export HOME AGENTDOCK_HOME AGENTDOCK_DEFAULT_DIR; shift; exec "$@"' sh "$home_dir" "$@"
+    run_root su -s /bin/sh "$user" -c 'HOME="$1"; AGENTDOCK_HOME="$2/.agentdock"; AGENTDOCK_DEFAULT_DIR="$2/AgentDock"; export HOME AGENTDOCK_HOME AGENTDOCK_DEFAULT_DIR; shift 2; exec "$@"' sh "$home_dir" "$data_dir" "$@"
   else
     die "缺少 runuser 或 su，无法以运行用户初始化核心 Skill：$user"
   fi
@@ -371,8 +378,7 @@ install_go_official() {
   machine="$(uname -m)"
   case "$machine" in
     x86_64|amd64) go_arch="amd64" ;;
-    aarch64|arm64) go_arch="arm64" ;;
-    *) die "暂不支持自动安装 Go 的架构：$machine" ;;
+    *) die "仅支持 Linux amd64，当前架构：$machine" ;;
   esac
   url="https://go.dev/dl/go${version}.linux-${go_arch}.tar.gz"
   tmp_dir="$(mktemp -d)"
@@ -417,26 +423,32 @@ PYGEN
   fi
 }
 
-service_user_exists() {
-  id "$1" >/dev/null 2>&1
+require_service_user() {
+  id "$1" >/dev/null 2>&1 || die "运行用户不存在：$1；请指定已存在的用户，安装器不会创建系统用户。"
 }
 
-ensure_service_user() {
+service_user_home() {
   local user="$1"
-  local home_dir="$2"
-  if service_user_exists "$user"; then
-    return
-  fi
-  log "创建运行用户：$user"
-  if command -v useradd >/dev/null 2>&1; then
-    run_root useradd --system --home-dir "$home_dir" --create-home --shell /usr/sbin/nologin "$user"
-  elif command -v adduser >/dev/null 2>&1; then
-    run_root addgroup -S "$user" 2>/dev/null || true
-    run_root adduser -S -D -H -h "$home_dir" -s /sbin/nologin -G "$user" "$user"
-    run_root mkdir -p "$home_dir"
+  local home_dir
+  if command -v getent >/dev/null 2>&1; then
+    home_dir="$(getent passwd "$user" | cut -d: -f6)"
   else
-    die "未找到 useradd/adduser，无法创建运行用户：$user"
+    home_dir="$(awk -F: -v user="$user" '$1 == user {print $6; exit}' /etc/passwd)"
   fi
+  validate_abs_path '运行用户主目录' "$home_dir"
+  printf '%s' "$home_dir"
+}
+
+prepare_data_directories() {
+  local data_dir="$1"
+  local service_user="$2"
+  local service_group="$3"
+  if [[ ! -d "$data_dir" ]]; then
+    run_root install -d -m 0755 -o "$service_user" -g "$service_group" "$data_dir"
+  fi
+  run_root mkdir -p "$data_dir/.agentdock" "$data_dir/AgentDock"
+  # 只调整 AgentDock 管理的子目录，不能改用户主目录或其他个人文件的所有者。
+  run_root chown -R "$service_user:$service_group" "$data_dir/.agentdock" "$data_dir/AgentDock"
 }
 
 
@@ -456,8 +468,7 @@ release_arch() {
   machine="$(uname -m)"
   case "$machine" in
     x86_64|amd64) printf 'amd64' ;;
-    aarch64|arm64) printf 'arm64' ;;
-    *) die "暂不支持预编译二进制架构：$machine" ;;
+    *) die "仅支持 Linux amd64，当前架构：$machine" ;;
   esac
 }
 
@@ -537,7 +548,7 @@ clone_or_update_source() {
   local source_dir="$3"
   local update_existing="$4"
   local installer_user installer_group parent
-  installer_user="${SUDO_USER:-$(id -un)}"
+  installer_user="$INSTALLER_USER"
   installer_group="$(id -gn "$installer_user" 2>/dev/null || printf '%s' "$installer_user")"
   parent="$(dirname "$source_dir")"
 
@@ -588,11 +599,13 @@ write_env_file() {
   local oauth_enabled="$8"
   local oauth_password="$9"
   local oauth_token_secret="${10}"
+  local data_dir="${11}"
+  local service_home="${12}"
 
   local env_dir tmp_file managed_keys
   env_dir="$(dirname "$env_file")"
   tmp_file="$(mktemp)"
-  managed_keys='AGENTDOCK_HOST|AGENTDOCK_PORT|AGENTDOCK_AUTH_TOKEN|AGENTDOCK_LOG_LEVEL|AGENTDOCK_NEXUS_ENDPOINT|AGENTDOCK_NEXUS_TOKEN|AGENTDOCK_SERVER_URL'
+  managed_keys='HOME|AGENTDOCK_HOME|AGENTDOCK_DEFAULT_DIR|AGENTDOCK_HOST|AGENTDOCK_PORT|AGENTDOCK_AUTH_TOKEN|AGENTDOCK_LOG_LEVEL|AGENTDOCK_NEXUS_ENDPOINT|AGENTDOCK_NEXUS_TOKEN|AGENTDOCK_SERVER_URL'
   if [[ "$configure_oauth" == "yes" ]]; then
     managed_keys+='|AGENTDOCK_OAUTH_ENABLED|AGENTDOCK_OAUTH_PASSWORD|AGENTDOCK_OAUTH_TOKEN_SECRET'
   fi
@@ -606,6 +619,9 @@ write_env_file() {
 
   {
     cat <<ENV
+HOME=$service_home
+AGENTDOCK_HOME=$data_dir/.agentdock
+AGENTDOCK_DEFAULT_DIR=$data_dir/AgentDock
 AGENTDOCK_HOST=$host
 AGENTDOCK_PORT=$port
 AGENTDOCK_AUTH_TOKEN=$token
@@ -810,8 +826,7 @@ install_cloudflared() {
     machine="$(uname -m)"
     case "$machine" in
       x86_64|amd64) arch="amd64" ;;
-      aarch64|arm64) arch="arm64" ;;
-      *) die "暂不支持自动安装 cloudflared 的架构：$machine" ;;
+      *) die "仅支持 Linux amd64，当前架构：$machine" ;;
     esac
     download_url="${CLOUDFLARED_RELEASE_BASE_URL%/}/cloudflared-linux-$arch"
     tmp_file="$(mktemp)"
@@ -1216,7 +1231,7 @@ main() {
   require_linux
 
   local detected_root source_default repo_url branch source_dir data_dir env_file
-  local service_name service_user service_group service_manager service_manager_prompt host port token log_level
+  local service_name service_user service_group service_home service_manager service_manager_prompt host port token log_level
   local install_mode release_version update_existing run_full_check install_deps
   local oauth_password oauth_token_secret oauth_enabled configure_oauth
   local go_version public_domain smoke_url health_host build_from_source
@@ -1236,7 +1251,7 @@ main() {
 AgentDock Linux 一键部署将执行：
 1. 默认下载预编译二进制，避免安装 Go/gcc 编译链。
 2. 仅在选择 source 或 binary 下载失败且选择 fallback 时源码构建。
-3. 生成 /etc/agentdock/agentdock.env 和 systemd/OpenRC 服务配置。AgentDock 固定使用运行用户 home 下的 .agentdock 与 AgentDock。
+3. 默认以安装用户运行，不创建系统用户；生成环境文件和 systemd/OpenRC 服务配置，数据保存在所选数据根目录下的 .agentdock 与 AgentDock。
 4. 启动 systemd/OpenRC 服务并验证 healthz。
 
 生产建议：监听 127.0.0.1，通过 Caddy/Nginx 做 HTTPS 反代；不要把 AgentDock 直接裸露到公网。
@@ -1254,7 +1269,6 @@ INTRO
     branch="$(prompt 'Git 分支' "$DEFAULT_BRANCH")"
   fi
   source_dir="$(prompt '安装目录' "$source_default")"
-  data_dir="$(prompt '运行数据根目录' "$DEFAULT_DATA_DIR")"
   env_file="$(prompt '环境变量文件' "$DEFAULT_ENV_FILE")"
   service_manager_prompt="$(prompt '服务管理器：auto/systemd/openrc/none' "$DEFAULT_SERVICE_MANAGER")"
   service_manager="$(detect_service_manager "$service_manager_prompt")"
@@ -1264,7 +1278,12 @@ INTRO
     log "服务管理器：$service_manager"
   fi
   service_name="$(prompt '服务名' "$DEFAULT_SERVICE_NAME")"
-  service_user="$(prompt '运行用户' "$DEFAULT_SERVICE_USER")"
+  service_user="$(prompt '运行用户（必须已存在，默认安装用户）' "$DEFAULT_SERVICE_USER")"
+  validate_no_space '运行用户' "$service_user"
+  require_service_user "$service_user"
+  service_group="$(id -gn "$service_user")"
+  service_home="$(service_user_home "$service_user")"
+  data_dir="$(prompt '运行数据根目录' "${DEFAULT_DATA_DIR:-$service_home}")"
   existing_host="$(read_env_assignment "$env_file" AGENTDOCK_HOST)"
   existing_port="$(read_env_assignment "$env_file" AGENTDOCK_PORT)"
   existing_log_level="$(read_env_assignment "$env_file" AGENTDOCK_LOG_LEVEL)"
@@ -1275,7 +1294,6 @@ INTRO
   validate_abs_path '运行数据根目录' "$data_dir"
   validate_abs_path '环境变量文件' "$env_file"
   validate_no_space '服务名' "$service_name"
-  validate_no_space '运行用户' "$service_user"
   validate_host "$host"
   validate_port "$port"
 
@@ -1390,7 +1408,8 @@ INTRO
 
 即将部署：
 - 安装目录：$source_dir
-- 运行用户 home：$data_dir
+- 运行用户 home：$service_home
+- 运行数据根目录：$data_dir
 - 内部状态目录：$data_dir/.agentdock
 - 默认工作目录：$data_dir/AgentDock
 - env 文件：$env_file
@@ -1402,7 +1421,7 @@ INTRO
 - 本机监听：http://$host:$port
 - 公网访问：$tunnel_mode
 - 认证方式：Bearer Token、OAuth（公网模式自动同时配置）
-- 密钥：安装完成后在终端显示，并写入 root-only env 文件
+- 密钥：安装完成后在终端显示，并写入运行用户所有的 0600 env 文件
 
 SUMMARY
   confirm '确认开始执行部署？' y || die '用户取消。'
@@ -1473,12 +1492,9 @@ SUMMARY
   # 因此不能依赖目录碰巧是 0755。
   run_root chmod 0755 "$source_dir" "$source_dir/bin" "$source_dir/bin/agentdock"
 
-  ensure_service_user "$service_user" "$data_dir"
-  service_group="$(id -gn "$service_user")"
-  run_root mkdir -p "$data_dir/.agentdock" "$data_dir/AgentDock"
-  run_root chown -R "$service_user:$service_group" "$data_dir"
+  prepare_data_directories "$data_dir" "$service_user" "$service_group"
   write_env_file "$env_file" "$host" "$port" "$token" "$log_level" \
-    "$server_url" "$configure_oauth" "$oauth_enabled" "$oauth_password" "$oauth_token_secret"
+    "$server_url" "$configure_oauth" "$oauth_enabled" "$oauth_password" "$oauth_token_secret" "$data_dir" "$service_home"
   # 原生运行时需要在服务用户身份下读取并原子更新公网地址；目录仅允许该服务用户访问。
   run_root chown "$service_user:$service_group" "$(dirname "$env_file")" "$env_file"
   run_root chmod 0700 "$(dirname "$env_file")"
@@ -1526,7 +1542,7 @@ SUMMARY
       server_url="$TUNNEL_PUBLIC_URL"
       oauth_enabled="true"
       write_env_file "$env_file" "$host" "$port" "$token" "$log_level" \
-        "$server_url" yes true "$oauth_password" "$oauth_token_secret"
+        "$server_url" yes true "$oauth_password" "$oauth_token_secret" "$data_dir" "$service_home"
       run_root chown "$service_user:$service_group" "$env_file"
       log "已将临时公网地址写入 AgentDock OAuth 配置并重启服务"
       start_service "$service_manager" "$service_name"

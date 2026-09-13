@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,8 +14,9 @@ func TestRuntimeCloseStopsRunningCommandSessions(t *testing.T) {
 		t.Skip("test command uses POSIX shell syntax")
 	}
 	rt, root := newCodeToolsRuntime(t)
+	projectCtx := projectContextForTest(t, rt, root, fullProjectPermissionsForTest())
 	marker := filepath.Join(root, "must-not-be-created")
-	started, err := rt.Call(context.Background(), "exec_command", map[string]any{
+	started, err := rt.Call(projectCtx, "exec_command", map[string]any{
 		"cmd":            `sleep 1; printf done > "$MARKER"`,
 		"env":            map[string]any{"MARKER": marker},
 		"execution_mode": "async",
@@ -47,10 +47,11 @@ func TestRuntimeCloseCancelsForegroundCommandAndRejectsNewStarts(t *testing.T) {
 		t.Skip("test command uses POSIX shell syntax")
 	}
 	rt, root := newCodeToolsRuntime(t)
+	projectCtx := projectContextForTest(t, rt, root, fullProjectPermissionsForTest())
 	startedMarker := filepath.Join(root, "started")
 	callDone := make(chan error, 1)
 	go func() {
-		_, err := rt.Call(context.Background(), "exec_command", map[string]any{
+		_, err := rt.Call(projectCtx, "exec_command", map[string]any{
 			"cmd":            `printf started > "$STARTED_MARKER"; sleep 30`,
 			"env":            map[string]any{"STARTED_MARKER": startedMarker},
 			"execution_mode": "sync",
@@ -82,7 +83,7 @@ func TestRuntimeCloseCancelsForegroundCommandAndRejectsNewStarts(t *testing.T) {
 		t.Fatal("foreground command did not return after runtime close")
 	}
 
-	_, err := rt.Call(context.Background(), "exec_command", map[string]any{"cmd": "echo must-not-run"})
+	_, err := rt.Call(projectCtx, "exec_command", map[string]any{"cmd": "echo must-not-run"})
 	var toolErr *ToolError
 	if !errors.As(err, &toolErr) || toolErr.Code != "RUNTIME_CLOSING" {
 		t.Fatalf("post-close exec error = %#v, want RUNTIME_CLOSING", err)

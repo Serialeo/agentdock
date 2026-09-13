@@ -15,11 +15,6 @@ struct DesktopServiceStatusPayload: Decodable {
     }
 }
 
-struct DesktopUpdateRegistrationState {
-    let core: String
-    let tunnel: String
-}
-
 enum NexusConnectionState: Equatable {
     case unconfigured
     case connected
@@ -38,26 +33,22 @@ enum NexusConnectionState: Equatable {
 }
 
 struct DesktopUpdateCheck: Decodable {
-    let currentVersion: String?
-    let latestVersion: String?
     let updateAvailable: Bool
     let message: String
 
     private enum CodingKeys: String, CodingKey {
-        case currentVersion = "current_version"
-        case latestVersion = "latest_version"
         case updateAvailable = "update_available"
         case message
     }
 
     static func decode(_ output: String) throws -> DesktopUpdateCheck {
         guard let data = output.data(using: .utf8) else {
-            throw ValidationError(L10n.text("Unable to read the AgentDock update check result."))
+            throw ValidationError("无法读取 AgentDock 更新检查结果。")
         }
         do {
             return try JSONDecoder().decode(DesktopUpdateCheck.self, from: data)
         } catch {
-            throw ValidationError(L10n.text("Unable to parse the AgentDock update check result."))
+            throw ValidationError("无法解析 AgentDock 更新检查结果。")
         }
     }
 }
@@ -148,7 +139,7 @@ final class ServiceController: @unchecked Sendable {
         try registerCoreIfNeeded()
         guard let configuration = ServiceConfiguration.load(from: paths.environment),
               await waitForHealth(configuration: configuration) else {
-            throw ValidationError(L10n.text("AgentDock background service is enabled, but the health check did not pass."))
+            throw ValidationError("AgentDock 后台服务已启用，但健康检查没有通过。")
         }
     }
 
@@ -156,28 +147,11 @@ final class ServiceController: @unchecked Sendable {
         try unregister(service: coreService, label: Self.coreLabel)
     }
 
-    func unregisterManagedBackgroundServicesForUninstall() throws {
-        var failures: [String] = []
-        do {
-            try unregister(service: tunnelService, label: Self.tunnelLabel)
-        } catch {
-            failures.append("AgentDock Tunnel: \(error.localizedDescription)")
-        }
-        do {
-            try unregister(service: coreService, label: Self.coreLabel)
-        } catch {
-            failures.append("AgentDock Core: \(error.localizedDescription)")
-        }
-        if !failures.isEmpty {
-            throw ValidationError(failures.joined(separator: "\n"))
-        }
-    }
-
     func restart() async throws {
         try reregister(service: coreService, label: Self.coreLabel, displayName: "AgentDock Core")
         guard let configuration = ServiceConfiguration.load(from: paths.environment),
               await waitForHealth(configuration: configuration) else {
-            throw ValidationError(L10n.text("AgentDock Core was re-registered, but the health check did not pass."))
+            throw ValidationError("AgentDock Core 已重新注册，但健康检查没有通过。")
         }
     }
 
@@ -189,7 +163,7 @@ final class ServiceController: @unchecked Sendable {
         let endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let pairingCode = pairingCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !endpoint.isEmpty, !pairingCode.isEmpty else {
-            throw ValidationError(L10n.text("NexusDock address and one-time pairing code cannot be empty."))
+            throw ValidationError("NexusDock 地址和一次性配对码不能为空。")
         }
         let result = try await runInBackground {
             try runProcess(
@@ -198,7 +172,7 @@ final class ServiceController: @unchecked Sendable {
             )
         }
         guard result.status == 0 else {
-            throw ValidationError(commandError(result.output, action: L10n.text("NexusDock pairing")))
+            throw ValidationError(commandError(result.output, action: "NexusDock 配对"))
         }
         try await restart()
     }
@@ -243,7 +217,7 @@ final class ServiceController: @unchecked Sendable {
                 NSLog("AgentDock Tunnel 注册显示 enabled 但进程未稳定，开始自动重新注册。")
                 try restartTunnel()
                 guard await waitForTunnelProcess() else {
-                    throw ValidationError(L10n.text("AgentDock Tunnel was re-registered, but the background process did not start reliably."))
+                    throw ValidationError("AgentDock Tunnel 已重新注册，但后台进程没有稳定启动。")
                 }
             }
         }
@@ -278,35 +252,6 @@ final class ServiceController: @unchecked Sendable {
         }
     }
 
-    func restoreBackgroundServiceRegistrationsForUpdate(
-        coreEnabled: Bool,
-        tunnelEnabled: Bool
-    ) throws -> DesktopUpdateRegistrationState {
-        let coreState = try restoreRegistrationForUpdate(
-            service: coreService,
-            label: Self.coreLabel,
-            displayName: "AgentDock Core",
-            expectedEnabled: coreEnabled
-        )
-        let tunnelState: String
-        do {
-            tunnelState = try restoreRegistrationForUpdate(
-                service: tunnelService,
-                label: Self.tunnelLabel,
-                displayName: "AgentDock Tunnel",
-                expectedEnabled: tunnelEnabled
-            )
-        } catch {
-            // Tunnel availability depends on ServiceManagement policy plus external/network state.
-            // A broken Tunnel must not turn an otherwise healthy App/Core update into a rollback.
-            // Report an explicit non-ready state to the Arbiter; it commits with a warning, then
-            // AppDelegate's post-handoff reconciliation gets one more bounded recovery attempt.
-            NSLog("AgentDock Tunnel registration could not be restored during update handoff: %@", error.localizedDescription)
-            tunnelState = "unavailable"
-        }
-        return DesktopUpdateRegistrationState(core: coreState, tunnel: tunnelState)
-    }
-
     func recoverBackgroundServicesAfterUpdate(coreEnabled: Bool, tunnelEnabled: Bool) async -> [String] {
         // App Bundle 刚替换后，SMAppService 的注册状态可能已经生效，但 launchd 真正拉起
         // Core/Tunnel 仍需要更长时间。先给系统一个正常传播窗口，再做一次有界自愈；
@@ -315,7 +260,7 @@ final class ServiceController: @unchecked Sendable {
         if tunnelEnabled,
            tunnelService.status == .enabled,
            !(await waitForTunnelProcess()) {
-            warnings.append(L10n.text("AgentDock Tunnel background registration was restored, but the process is still starting."))
+            warnings.append("AgentDock Tunnel 已恢复后台注册，但进程仍在启动。")
         }
         if coreEnabled,
            coreService.status == .enabled,
@@ -328,10 +273,7 @@ final class ServiceController: @unchecked Sendable {
             do {
                 try await restart()
             } catch {
-                warnings.append(L10n.format(
-                    "AgentDock Core background registration was restored, but automatic restart still failed the health check: %@",
-                    error.localizedDescription
-                ))
+                warnings.append("AgentDock Core 已恢复后台注册，但自动重启仍未通过健康检查：\(error.localizedDescription)")
             }
         }
         return warnings
@@ -369,7 +311,7 @@ final class ServiceController: @unchecked Sendable {
         }
     }
 
-    func update(onProgress: @escaping (UpdateProgressEvent) -> Void) async throws -> String {
+    func update() async throws -> String {
         try validateServiceManagementReadiness()
 
         let check = try await runInBackground {
@@ -379,18 +321,13 @@ final class ServiceController: @unchecked Sendable {
                 environment: ["AGENTDOCK_DESKTOP_APP_PATH": self.paths.appBundle.path]
             )
             guard result.status == 0 else {
-                throw ValidationError(self.commandError(result.output, action: L10n.text("Check for updates")))
+                throw ValidationError(self.commandError(result.output, action: "检查更新"))
             }
             return try DesktopUpdateCheck.decode(result.output)
         }
         guard check.updateAvailable else {
             // 没有 pending update result 时这只能是上一次未完成流程留下的临时状态。
             DesktopUpdateServiceState.remove(at: paths.updateServiceState)
-            onProgress(.local(
-                type: .completed,
-                currentVersion: check.currentVersion,
-                targetVersion: check.latestVersion
-            ))
             return check.message
         }
 
@@ -408,13 +345,12 @@ final class ServiceController: @unchecked Sendable {
             output = try await runInBackground {
                 let result = try runUpdateProcess(
                     executable: self.paths.binary.path,
-                    arguments: ["update", "--progress-json"],
+                    arguments: ["update"],
                     environment: ["AGENTDOCK_DESKTOP_APP_PATH": self.paths.appBundle.path],
-                    outputURL: self.paths.updateLog,
-                    onProgress: onProgress
+                    outputURL: self.paths.updateLog
                 )
                 guard result.status == 0 else {
-                    throw ValidationError(self.commandError(result.output, action: L10n.text("Update")))
+                    throw ValidationError(self.commandError(result.output, action: "更新"))
                 }
                 return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             }
@@ -430,11 +366,7 @@ final class ServiceController: @unchecked Sendable {
                 }
                 DesktopUpdateServiceState.remove(at: paths.updateServiceState)
             } catch {
-                throw ValidationError(L10n.format(
-                    "The update was not applied, and restoring background services also failed: %@; %@",
-                    updateError.localizedDescription,
-                    error.localizedDescription
-                ))
+                throw ValidationError("更新没有应用，而且后台服务恢复失败：\(updateError.localizedDescription)；\(error.localizedDescription)")
             }
             throw updateError
         }
@@ -451,10 +383,7 @@ final class ServiceController: @unchecked Sendable {
             }
             DesktopUpdateServiceState.remove(at: paths.updateServiceState)
         } catch {
-            throw ValidationError(L10n.format(
-                "The update process returned, but restoring background services failed: %@",
-                error.localizedDescription
-            ))
+            throw ValidationError("更新进程已经返回，但后台服务恢复失败：\(error.localizedDescription)")
         }
         return output
     }
@@ -492,28 +421,19 @@ final class ServiceController: @unchecked Sendable {
         case .enabled:
             return
         case .requiresApproval:
-            throw ValidationError(L10n.format(
-                "%@ is registered, but you need to allow it to run in the background in System Settings → General → Login Items & Extensions.",
-                displayName
-            ))
+            throw ValidationError("\(displayName) 已注册，但需要你在“系统设置 → 通用 → 登录项与扩展”中允许后台运行。")
         case .notRegistered, .notFound:
             // SMAppService 在服务首次 register 前可能返回 .notFound，即使 Bundle 内 plist
             // 已经存在。定义是否完整由上面的 Bundle 文件校验负责，不用 status 猜测。
             try service.register()
         @unknown default:
-            throw ValidationError(L10n.format("Unable to determine background service status for %@.", displayName))
+            throw ValidationError("无法确认 \(displayName) 的后台服务状态。")
         }
         if service.status == .requiresApproval {
-            throw ValidationError(L10n.format(
-                "%@ requires permission to run in the background in System Settings → General → Login Items & Extensions.",
-                displayName
-            ))
+            throw ValidationError("\(displayName) 需要你在“系统设置 → 通用 → 登录项与扩展”中允许后台运行。")
         }
         guard service.status == .enabled else {
-            throw ValidationError(L10n.format(
-                "%@ registration completed, but the system did not mark it as runnable.",
-                displayName
-            ))
+            throw ValidationError("\(displayName) 注册完成，但系统没有将它标记为可运行。")
         }
     }
 
@@ -524,10 +444,7 @@ final class ServiceController: @unchecked Sendable {
         case .enabled, .requiresApproval:
             try service.unregister()
             guard waitUntilUnregistered(service: service, label: label, timeout: 5) else {
-                throw ValidationError(L10n.format(
-                    "Background service %@ did not converge to the unregistered state.",
-                    label
-                ))
+                throw ValidationError("后台服务 \(label) 注销后系统状态没有完成收敛。")
             }
         @unknown default:
             return
@@ -548,54 +465,19 @@ final class ServiceController: @unchecked Sendable {
         try register(service: service, plistName: plistName, displayName: displayName)
     }
 
-    private func restoreRegistrationForUpdate(
-        service: SMAppService,
-        label: String,
-        displayName: String,
-        expectedEnabled: Bool
-    ) throws -> String {
-        guard expectedEnabled else {
-            try unregister(service: service, label: label)
-            return "disabled"
-        }
-        do {
-            try restoreRegistration(service: service, label: label, displayName: displayName)
-        } catch {
-            // requiresApproval reflects user/system policy. It is a commit warning, not evidence
-            // that the newly installed App Bundle is invalid.
-            guard service.status == .requiresApproval else { throw error }
-        }
-        switch service.status {
-        case .enabled:
-            return "enabled"
-        case .requiresApproval:
-            return "requires_approval"
-        case .notRegistered, .notFound:
-            throw ValidationError(L10n.format(
-                "%@ background registration did not become available after the update.",
-                displayName
-            ))
-        @unknown default:
-            throw ValidationError(L10n.format(
-                "%@ background registration returned an unknown state after the update.",
-                displayName
-            ))
-        }
-    }
-
     private var serviceDomain: String { "gui/\(getuid())" }
 
     func validatePersistentAppLocation() throws {
         let path = paths.appBundle.resolvingSymlinksInPath().path
         if path == "/Volumes" || path.hasPrefix("/Volumes/") {
-            throw ValidationError(L10n.text("Move AgentDock to the Applications folder before enabling the background service."))
+            throw ValidationError("请先把 AgentDock 拖到“应用程序”文件夹，再启用后台服务。")
         }
     }
 
     func validateServiceManagementReadiness() throws {
         try validatePersistentAppLocation()
         if LegacyDesktopRuntimeMigration.isPresent(paths: paths) {
-            throw ValidationError(L10n.text("A legacy AgentDock background layout was detected. Apply the current settings in the main panel to complete migration first."))
+            throw ValidationError("检测到旧版 AgentDock 后台结构，请先在主面板应用当前设置完成迁移。")
         }
     }
 
@@ -606,10 +488,7 @@ final class ServiceController: @unchecked Sendable {
         guard let values = try? plist.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
               values.isRegularFile == true,
               values.isSymbolicLink != true else {
-            throw ValidationError(L10n.format(
-                "AgentDock.app is missing the background service definition for %@. Reinstall the application.",
-                displayName
-            ))
+            throw ValidationError("AgentDock.app 缺少 \(displayName) 的后台服务定义，请重新安装应用。")
         }
     }
 
@@ -725,7 +604,7 @@ final class ServiceController: @unchecked Sendable {
 
     private func commandError(_ output: String, action: String) -> String {
         let message = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return message.isEmpty ? L10n.format("AgentDock %@ failed.", action) : message
+        return message.isEmpty ? "AgentDock \(action)失败。" : message
     }
 
     func runInBackground<T>(_ operation: @escaping () throws -> T) async throws -> T {

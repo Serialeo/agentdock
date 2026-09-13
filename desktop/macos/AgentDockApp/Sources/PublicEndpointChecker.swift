@@ -17,7 +17,7 @@ final class PublicEndpointChecker: @unchecked Sendable {
         guard let healthURL = Self.healthURL(from: publicMCPURL) else {
             return PublicEndpointCheckResult(
                 isReachable: false,
-                message: L10n.text("Invalid public address"),
+                message: "公网地址格式无效",
                 latencyMilliseconds: nil
             )
         }
@@ -37,27 +37,27 @@ final class PublicEndpointChecker: @unchecked Sendable {
             guard let response = response as? HTTPURLResponse else {
                 return PublicEndpointCheckResult(
                     isReachable: false,
-                    message: L10n.text("The public address did not return an HTTP response"),
+                    message: "公网地址没有返回 HTTP 响应",
                     latencyMilliseconds: latency
                 )
             }
             guard response.statusCode == 200 else {
                 return PublicEndpointCheckResult(
                     isReachable: false,
-                    message: L10n.format("Public address returned HTTP %d", response.statusCode),
+                    message: "公网地址返回 HTTP \(response.statusCode)",
                     latencyMilliseconds: latency
                 )
             }
             guard let payload = try? JSONDecoder().decode(PublicHealthPayload.self, from: data), payload.ok else {
                 return PublicEndpointCheckResult(
                     isReachable: false,
-                    message: L10n.text("The public health check returned invalid data"),
+                    message: "公网健康检查返回无效数据",
                     latencyMilliseconds: latency
                 )
             }
             return PublicEndpointCheckResult(
                 isReachable: true,
-                message: L10n.text("Reachable"),
+                message: "可正常访问",
                 latencyMilliseconds: latency
             )
         } catch {
@@ -89,17 +89,17 @@ final class PublicEndpointChecker: @unchecked Sendable {
         }
         switch urlError.code {
         case .timedOut:
-            return L10n.text("Public access timed out")
+            return "公网访问超时"
         case .cannotFindHost, .dnsLookupFailed:
-            return L10n.text("Unable to resolve the public domain")
+            return "无法解析公网域名"
         case .cannotConnectToHost:
-            return L10n.text("Unable to connect to the public address")
+            return "无法连接公网地址"
         case .networkConnectionLost:
-            return L10n.text("Public connection was interrupted")
+            return "公网连接中断"
         case .notConnectedToInternet:
-            return L10n.text("This Mac is not connected to the network")
+            return "当前电脑未连接网络"
         case .cancelled:
-            return L10n.text("Check cancelled")
+            return "检测已取消"
         default:
             return urlError.localizedDescription
         }

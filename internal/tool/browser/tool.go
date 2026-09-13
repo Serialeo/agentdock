@@ -40,6 +40,9 @@ func (s *Service) HandleSession(ctx context.Context, args map[string]any) (toolc
 		if err != nil {
 			return browserFailure(err), nil
 		}
+		if err := s.requireProjectSessionOwner(ctx, sessionID); err != nil {
+			return browserFailure(err), nil
+		}
 		closed, err := s.closeSession(CloseRequest{SessionID: sessionID})
 		if err != nil {
 			return browserFailure(err), nil
@@ -58,7 +61,7 @@ func (s *Service) HandleSession(ctx context.Context, args map[string]any) (toolc
 		if err != nil {
 			return browserFailure(err), nil
 		}
-		cleaned := s.cleanupStale(CleanupRequest{MaxAge: maxAge})
+		cleaned := s.cleanupStale(ctx, CleanupRequest{MaxAge: maxAge})
 		result := browserResultMap(cleaned)
 		result["browser_ok"] = true
 		return result, nil
@@ -79,6 +82,9 @@ func (s *Service) HandleAct(ctx context.Context, args map[string]any) (toolcore.
 	if err != nil {
 		return browserFailure(err), nil
 	}
+	if err := s.requireProjectSessionOwner(ctx, options.sessionID); err != nil {
+		return browserFailure(err), nil
+	}
 
 	snapshot, err := s.act(ctx, ActRequest{
 		SessionID: options.sessionID, PageID: options.pageID, Actions: actions, FullPage: options.fullPage,
@@ -96,6 +102,9 @@ func (s *Service) HandleSnapshot(ctx context.Context, args map[string]any) (tool
 	}
 	options, err := parseSnapshotOptions(args)
 	if err != nil {
+		return browserFailure(err), nil
+	}
+	if err := s.requireProjectSessionOwner(ctx, options.sessionID); err != nil {
 		return browserFailure(err), nil
 	}
 

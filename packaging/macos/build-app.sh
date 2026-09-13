@@ -3,18 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="${0:A:h:h:h}"
 SOURCE_DIR="$ROOT_DIR/desktop/macos/AgentDockApp/Sources"
-LOCALIZATION_DIR="$ROOT_DIR/desktop/macos/AgentDockApp/Resources"
 LOGIN_HELPER_SOURCE="$ROOT_DIR/desktop/macos/AgentDockLoginHelper/main.swift"
 OUTPUT_DIR="${AGENTDOCK_MACOS_APP_OUTPUT_DIR:-$ROOT_DIR/dist/macos-app}"
-ARCH_LIST="${AGENTDOCK_MACOS_ARCHES:-$(uname -m)}"
+ARCH_LIST="arm64"
 OFFLINE_PAYLOAD_DIR="${AGENTDOCK_MACOS_OFFLINE_PAYLOAD_DIR:-}"
 MIN_VERSION="${AGENTDOCK_MACOS_MIN_VERSION:-13.0}"
 BUNDLE_ID="com.uvwt.agentdock"
 APP_ICON_SOURCE="$ROOT_DIR/packaging/assets/agentdock.png"
-CODESIGN_IDENTITY="${AGENTDOCK_CODESIGN_IDENTITY:-"-"}"
-CODESIGN_KEYCHAIN="${AGENTDOCK_CODESIGN_KEYCHAIN:-}"
-CODESIGN_KEYCHAIN_PASSWORD="${AGENTDOCK_CODESIGN_KEYCHAIN_PASSWORD:-}"
-CODESIGN_TIMESTAMP="${AGENTDOCK_CODESIGN_TIMESTAMP:-none}"
 
 usage() {
   cat <<'USAGE'
@@ -22,16 +17,10 @@ usage() {
   packaging/macos/build-app.sh [版本]
 
 环境变量：
-  AGENTDOCK_MACOS_ARCHES        逗号分隔架构，默认当前架构；Release 使用 arm64,x86_64
   AGENTDOCK_MACOS_APP_OUTPUT_DIR 输出目录，默认 dist/macos-app
   AGENTDOCK_MACOS_OFFLINE_PAYLOAD_DIR
-                               双架构离线载荷目录，构建 DMG 时必须提供
+                               arm64 离线载荷目录，构建 DMG 时必须提供
   AGENTDOCK_MACOS_MIN_VERSION   最低 macOS 版本，默认 13.0
-  AGENTDOCK_CODESIGN_IDENTITY   代码签名身份；默认 -（ad-hoc）
-  AGENTDOCK_CODESIGN_KEYCHAIN   可选，指定签名身份所在钥匙串
-  AGENTDOCK_CODESIGN_KEYCHAIN_PASSWORD
-                               可选，指定钥匙串解锁密码
-  AGENTDOCK_CODESIGN_TIMESTAMP  none 或 auto；默认 none
 USAGE
 }
 
@@ -45,29 +34,10 @@ if (( $# > 1 )); then
   exit 2
 fi
 
-for command_name in codesign ditto file go hdiutil iconutil lipo plutil shasum sips swiftc unzip xcrun; do
+for command_name in codesign ditto file hdiutil iconutil lipo plutil shasum sips swiftc unzip xcrun; do
   command -v "$command_name" >/dev/null 2>&1 || die "缺少命令：$command_name"
 done
-case "$CODESIGN_TIMESTAMP" in
-  none|auto) ;;
-  *) die "AGENTDOCK_CODESIGN_TIMESTAMP 只支持 none 或 auto" ;;
-esac
-if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
-  command -v security >/dev/null 2>&1 || die "缺少命令：security"
-  if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
-    [[ -f "$CODESIGN_KEYCHAIN" && ! -L "$CODESIGN_KEYCHAIN" ]] || die "代码签名钥匙串不存在或不是普通文件：$CODESIGN_KEYCHAIN"
-    security unlock-keychain -p "$CODESIGN_KEYCHAIN_PASSWORD" "$CODESIGN_KEYCHAIN" >/dev/null 2>&1 || \
-      die "无法解锁代码签名钥匙串：$CODESIGN_KEYCHAIN"
-    identity_output="$(security find-identity -v -p codesigning "$CODESIGN_KEYCHAIN")" || die "无法读取指定钥匙串中的签名身份"
-  else
-    identity_output="$(security find-identity -v -p codesigning)" || die "无法读取系统钥匙串中的签名身份"
-  fi
-  [[ "$identity_output" == *"$CODESIGN_IDENTITY"* ]] || die "找不到代码签名身份：$CODESIGN_IDENTITY"
-elif [[ -n "$CODESIGN_KEYCHAIN" ]]; then
-  die "设置 AGENTDOCK_CODESIGN_KEYCHAIN 时必须同时设置 AGENTDOCK_CODESIGN_IDENTITY"
-fi
 [[ -d "$SOURCE_DIR" ]] || die "缺少 macOS App 源码：$SOURCE_DIR"
-[[ -d "$LOCALIZATION_DIR" ]] || die "缺少 macOS App 本地化资源：$LOCALIZATION_DIR"
 [[ -f "$APP_ICON_SOURCE" && ! -L "$APP_ICON_SOURCE" ]] || die "缺少 macOS App 图标：$APP_ICON_SOURCE"
 [[ -f "$LOGIN_HELPER_SOURCE" && ! -L "$LOGIN_HELPER_SOURCE" ]] || die "缺少 macOS 登录代理源码：$LOGIN_HELPER_SOURCE"
 [[ -n "$OFFLINE_PAYLOAD_DIR" ]] || die "构建 macOS DMG 必须设置 AGENTDOCK_MACOS_OFFLINE_PAYLOAD_DIR"
@@ -86,10 +56,10 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$OUTPUT_DIR"
 rm -rf \
   "$OUTPUT_DIR/AgentDock.app" \
-  "$OUTPUT_DIR/AgentDock-macos-universal.dmg" \
-  "$OUTPUT_DIR/AgentDock-macos-universal.dmg.sha256" \
-  "$OUTPUT_DIR/AgentDock-macos-universal.zip" \
-  "$OUTPUT_DIR/AgentDock-macos-universal.zip.sha256"
+  "$OUTPUT_DIR/AgentDock-macos-arm64.dmg" \
+  "$OUTPUT_DIR/AgentDock-macos-arm64.dmg.sha256" \
+  "$OUTPUT_DIR/AgentDock-macos-arm64.zip" \
+  "$OUTPUT_DIR/AgentDock-macos-arm64.zip.sha256"
 
 IFS=',' read -rA architectures <<< "$ARCH_LIST"
 (( ${#architectures[@]} > 0 )) || die "没有可构建的架构"
@@ -100,8 +70,7 @@ for architecture in "${architectures[@]}"; do
   architecture="${architecture//[[:space:]]/}"
   case "$architecture" in
     arm64) release_architecture="arm64" ;;
-    x86_64) release_architecture="amd64" ;;
-    *) die "不支持的 App 架构：$architecture" ;;
+    *) die "仅支持 macOS arm64，当前请求架构：$architecture" ;;
   esac
   release_architectures+=("$release_architecture")
   binary="$TMP_DIR/AgentDock-$architecture"
@@ -136,11 +105,6 @@ HELPERS_DIR="$CONTENTS_DIR/Helpers"
 LAUNCH_AGENTS_DIR="$CONTENTS_DIR/Library/LaunchAgents"
 MENU_LOGIN_HELPER="$HELPERS_DIR/AgentDockLoginHelper"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$HELPERS_DIR" "$LAUNCH_AGENTS_DIR"
-for localization in en zh-Hans; do
-  source_lproj="$LOCALIZATION_DIR/$localization.lproj"
-  [[ -d "$source_lproj" && ! -L "$source_lproj" ]] || die "缺少 macOS 本地化目录：$source_lproj"
-  ditto "$source_lproj" "$RESOURCES_DIR/$localization.lproj"
-done
 
 if (( ${#compiled_binaries[@]} == 1 )); then
   cp -p "$compiled_binaries[1]" "$MACOS_DIR/AgentDock"
@@ -183,7 +147,6 @@ iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/AgentDock.icns"
 # 版本更新因此只替换一个 AgentDock.app，不再维护 ~/.local/bin 的第二套生产文件。
 helper_core_binaries=()
 helper_cloudflared_binaries=()
-helper_arbiter_binaries=()
 CORE_SKILL_BUNDLE="$RESOURCES_DIR/core-skills"
 for release_architecture in "${release_architectures[@]}"; do
   agentdock_archive="agentdock_darwin_${release_architecture}.tar.gz"
@@ -209,10 +172,7 @@ for release_architecture in "${release_architectures[@]}"; do
   [[ -f "$payload_check_dir/share/agentdock/core-skills/manifest.json" && ! -L "$payload_check_dir/share/agentdock/core-skills/manifest.json" ]] || \
     die "$agentdock_archive 缺少核心 Skill Bundle"
 
-  case "$release_architecture" in
-    arm64) expected_file_architecture="arm64" ;;
-    amd64) expected_file_architecture="x86_64" ;;
-  esac
+  expected_file_architecture="arm64"
   # pipefail 下避免让早退的匹配命令截断 file 输出，否则上游可能收到 SIGPIPE(141)。
   agentdock_file_output="$(file "$payload_check_dir/bin/agentdock")"
   [[ "$agentdock_file_output" == *"$expected_file_architecture"* ]] || \
@@ -223,16 +183,6 @@ for release_architecture in "${release_architectures[@]}"; do
 
   helper_core_binaries+=("$payload_check_dir/bin/agentdock")
   helper_cloudflared_binaries+=("$OFFLINE_PAYLOAD_DIR/$cloudflared_binary")
-  arbiter_binary="$TMP_DIR/agentdock-arbiter-$release_architecture"
-  (
-    cd "$ROOT_DIR"
-    CGO_ENABLED=0 GOOS=darwin GOARCH="$release_architecture" \
-      go build -trimpath -ldflags '-s -w' -o "$arbiter_binary" ./cmd/agentdock-arbiter
-  )
-  arbiter_file_output="$(file "$arbiter_binary")"
-  [[ "$arbiter_file_output" == *"$expected_file_architecture"* ]] || \
-    die "agentdock-arbiter 架构不匹配，期望 $expected_file_architecture"
-  helper_arbiter_binaries+=("$arbiter_binary")
   if [[ ! -d "$CORE_SKILL_BUNDLE" ]]; then
     ditto "$payload_check_dir/share/agentdock/core-skills" "$CORE_SKILL_BUNDLE"
   elif ! diff -qr "$payload_check_dir/share/agentdock/core-skills" "$CORE_SKILL_BUNDLE" >/dev/null; then
@@ -243,13 +193,11 @@ done
 if (( ${#helper_core_binaries[@]} == 1 )); then
   cp -p "$helper_core_binaries[1]" "$HELPERS_DIR/agentdock"
   cp -p "$helper_cloudflared_binaries[1]" "$HELPERS_DIR/cloudflared"
-  cp -p "$helper_arbiter_binaries[1]" "$HELPERS_DIR/agentdock-arbiter"
 else
   lipo -create "${helper_core_binaries[@]}" -output "$HELPERS_DIR/agentdock"
   lipo -create "${helper_cloudflared_binaries[@]}" -output "$HELPERS_DIR/cloudflared"
-  lipo -create "${helper_arbiter_binaries[@]}" -output "$HELPERS_DIR/agentdock-arbiter"
 fi
-chmod 0755 "$HELPERS_DIR/agentdock" "$HELPERS_DIR/cloudflared" "$HELPERS_DIR/agentdock-arbiter"
+chmod 0755 "$HELPERS_DIR/agentdock" "$HELPERS_DIR/cloudflared"
 find "$CORE_SKILL_BUNDLE" -type d -exec chmod 0755 {} +
 find "$CORE_SKILL_BUNDLE" -type f -exec chmod 0644 {} +
 [[ -f "$CORE_SKILL_BUNDLE/manifest.json" && ! -L "$CORE_SKILL_BUNDLE/manifest.json" ]] || \
@@ -339,7 +287,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>
-  <string>en</string>
+  <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
   <string>AgentDock</string>
   <key>CFBundleExecutable</key>
@@ -365,7 +313,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSAppleEventsUsageDescription</key>
-  <string>AgentDock needs to control System Events and Finder to perform desktop automation tasks you request.</string>
+  <string>AgentDock 需要控制 System Events 和 Finder，以执行你发起的桌面自动化任务。</string>
   <key>NSHumanReadableCopyright</key>
   <string>Copyright © AgentDock contributors</string>
 </dict>
@@ -373,39 +321,16 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
 
-sign_macos_code() {
-  local identifier="$1"
-  local target="$2"
-  local args=(--force --sign "$CODESIGN_IDENTITY" --identifier "$identifier")
-  if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
-    args+=(--options runtime)
-    if [[ "$CODESIGN_TIMESTAMP" == "auto" ]]; then
-      args+=(--timestamp)
-    else
-      args+=(--timestamp=none)
-    fi
-    if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
-      args+=(--keychain "$CODESIGN_KEYCHAIN")
-    fi
-  fi
-  codesign "${args[@]}" "$target"
-}
-
-if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
-  print -- "==> ad-hoc 签名 AgentDock.app"
-else
-  print -- "==> 使用指定身份签名 AgentDock.app"
-fi
-sign_macos_code "com.uvwt.agentdock.login-helper" "$MENU_LOGIN_HELPER"
-sign_macos_code "com.uvwt.agentdock.core" "$HELPERS_DIR/agentdock"
-sign_macos_code "com.uvwt.agentdock.cloudflared" "$HELPERS_DIR/cloudflared"
-sign_macos_code "com.uvwt.agentdock.arbiter" "$HELPERS_DIR/agentdock-arbiter"
+print -- "==> ad-hoc 签名 AgentDock.app"
+codesign --force --sign - --identifier "com.uvwt.agentdock.login-helper" "$MENU_LOGIN_HELPER"
+codesign --force --sign - --identifier "com.uvwt.agentdock.core" "$HELPERS_DIR/agentdock"
+codesign --force --sign - --identifier "com.uvwt.agentdock.cloudflared" "$HELPERS_DIR/cloudflared"
 # 嵌套代码先分别签名，再签外层 App。不要用 --deep 做签名操作，否则会重新签
 # Core/cloudflared 并破坏它们的稳定代码身份；--deep 只用于最终递归验证。
-sign_macos_code "$BUNDLE_ID" "$APP_DIR"
+codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 
-ZIP_PATH="$OUTPUT_DIR/AgentDock-macos-universal.zip"
+ZIP_PATH="$OUTPUT_DIR/AgentDock-macos-arm64.zip"
 print -- "==> 创建 AgentDock App 更新 ZIP"
 ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
 unzip -tq "$ZIP_PATH" >/dev/null
@@ -415,7 +340,7 @@ unzip -tq "$ZIP_PATH" >/dev/null
 )
 
 DMG_STAGE_DIR="$TMP_DIR/dmg-root"
-DMG_PATH="$OUTPUT_DIR/AgentDock-macos-universal.dmg"
+DMG_PATH="$OUTPUT_DIR/AgentDock-macos-arm64.dmg"
 mkdir -p "$DMG_STAGE_DIR"
 ditto "$APP_DIR" "$DMG_STAGE_DIR/AgentDock.app"
 ln -s /Applications "$DMG_STAGE_DIR/Applications"

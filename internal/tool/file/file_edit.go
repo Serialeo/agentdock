@@ -12,40 +12,33 @@ import (
 )
 
 func (svc *Service) Edit(ctx context.Context, request EditRequest) (Result, error) {
-	selection, err := selectFileRuntime(request.RuntimeOptions)
-	if err != nil {
-		return nil, err
-	}
-	if selection.isWSL() {
-		return svc.fileEditWSL(ctx, request, selection)
-	}
-
 	action := strings.ToLower(strings.TrimSpace(request.Action))
 	if action == "" {
 		return nil, toolErrorDetails("MISSING_ACTION", "file_edit requires action", "validation", map[string]any{"allowed": []string{"replace", "patch", "add", "delete", "move"}})
 	}
 	var result Result
+	var err error
 	switch action {
 	case "patch":
 		result, err = svc.applyPatch(ctx, request)
 	case "replace":
-		result, err = svc.editFile(request)
+		result, err = svc.editFile(ctx, request)
 	case "add":
-		result, err = svc.fileEditAdd(request)
+		result, err = svc.fileEditAdd(ctx, request)
 	case "delete":
-		result, err = svc.fileEditDelete(request)
+		result, err = svc.fileEditDelete(ctx, request)
 	case "move":
-		result, err = svc.fileEditMove(request)
+		result, err = svc.fileEditMove(ctx, request)
 	default:
 		return nil, toolErrorDetails("INVALID_ACTION", "unsupported file_edit action", "validation", map[string]any{"action": action, "allowed": []string{"replace", "patch", "add", "delete", "move"}})
 	}
 	if result != nil {
 		result["action"] = action
 	}
-	return addFileRuntimeResult(result, selection), err
+	return result, err
 }
 
-func (svc *Service) fileEditAdd(request EditRequest) (Result, error) {
+func (svc *Service) fileEditAdd(ctx context.Context, request EditRequest) (Result, error) {
 	path := request.Path
 	if path == "" {
 		return nil, toolError("INVALID_ARGUMENT", "path is required", "validation")
@@ -54,7 +47,7 @@ func (svc *Service) fileEditAdd(request EditRequest) (Result, error) {
 	dryRun := request.DryRun
 	overwrite := request.Overwrite
 
-	p, err := svc.ws.ResolveForWrite(path)
+	p, err := svc.ws.ResolveForWriteContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -116,14 +109,14 @@ func (svc *Service) fileEditAdd(request EditRequest) (Result, error) {
 	return result, nil
 }
 
-func (svc *Service) fileEditDelete(request EditRequest) (Result, error) {
+func (svc *Service) fileEditDelete(ctx context.Context, request EditRequest) (Result, error) {
 	path := request.Path
 	if path == "" {
 		return nil, toolError("INVALID_ARGUMENT", "path is required", "validation")
 	}
 	dryRun := request.DryRun
 	recursive := request.Recursive
-	p, err := svc.ws.ResolveExisting(path)
+	p, err := svc.ws.ResolveExistingContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +177,7 @@ func deletePathSafely(path string, expected fileSnapshot, recursive bool, rename
 	return cleanup()
 }
 
-func (svc *Service) fileEditMove(request EditRequest) (Result, error) {
+func (svc *Service) fileEditMove(ctx context.Context, request EditRequest) (Result, error) {
 	path := request.Path
 	newPath := request.NewPath
 	if path == "" || newPath == "" {
@@ -192,11 +185,11 @@ func (svc *Service) fileEditMove(request EditRequest) (Result, error) {
 	}
 	dryRun := request.DryRun
 	overwrite := request.Overwrite
-	src, err := svc.ws.ResolveExisting(path)
+	src, err := svc.ws.ResolveExistingContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	dest, err := svc.ws.ResolveForWrite(newPath)
+	dest, err := svc.ws.ResolveForWriteContext(ctx, newPath)
 	if err != nil {
 		return nil, err
 	}

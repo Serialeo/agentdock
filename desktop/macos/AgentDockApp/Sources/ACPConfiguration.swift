@@ -23,7 +23,7 @@ enum ACPAgentPreset: String, CaseIterable {
         case .codex: return "Codex"
         case .claude: return "Claude"
         case .grok: return "Grok Build"
-        case .custom: return L10n.text("Custom")
+        case .custom: return "自定义"
         }
     }
 
@@ -56,12 +56,12 @@ enum ACPAgentPreset: String, CaseIterable {
 
     var missingAdapterMessage: String {
         if self == .custom {
-            return L10n.text("Enter the absolute path to an executable ACP Adapter")
+            return "请填写可执行的 ACP Adapter 绝对路径"
         }
         guard let nodePackage else {
-            return L10n.format("Could not find %@", executableNames[0])
+            return "未找到 \(executableNames[0])"
         }
-        return L10n.format("Could not find %@ or %@", executableNames[0], nodePackage.name)
+        return "未找到 \(executableNames[0]) 或 \(nodePackage.name)"
     }
 
     static func parse(_ raw: String) -> ACPAgentPreset? {
@@ -85,7 +85,7 @@ enum ACPAgentPreset: String, CaseIterable {
                 available: false,
                 command: "",
                 arguments: [],
-                message: L10n.format("Not configured · %@", missingAdapterMessage)
+                message: "未配置 · \(missingAdapterMessage)"
             )
         }
 
@@ -121,7 +121,7 @@ enum ACPAgentPreset: String, CaseIterable {
                     available: true,
                     command: node.path,
                     arguments: resolvedArguments,
-                    message: L10n.format("Detected · %@ · %@", node.path, entry.path)
+                    message: "已检测到 · \(node.path) · \(entry.path)"
                 )
                 break
             }
@@ -143,7 +143,7 @@ enum ACPAgentPreset: String, CaseIterable {
             available: false,
             command: "",
             arguments: [],
-            message: L10n.format("Not installed · %@", missingAdapterMessage)
+            message: "未安装 · \(missingAdapterMessage)"
         )
     }
 
@@ -201,14 +201,14 @@ enum ACPAgentPreset: String, CaseIterable {
                 available: true,
                 command: node.path,
                 arguments: [executable.path] + resolvedArguments,
-                message: L10n.format("Detected · %@ · %@", node.path, executable.path)
+                message: "已检测到 · \(node.path) · \(executable.path)"
             )
         }
         return ACPAdapterResolution(
             available: true,
             command: executable.path,
             arguments: resolvedArguments,
-            message: L10n.format("Detected · %@", executable.path)
+            message: "已检测到 · \(executable.path)"
         )
     }
 
@@ -354,7 +354,7 @@ struct ACPDesktopConfiguration {
     static func encodeArguments(_ arguments: [String]) throws -> String {
         let data = try JSONEncoder().encode(arguments)
         guard let value = String(data: data, encoding: .utf8) else {
-            throw ValidationError(L10n.text("Unable to encode Coding Agent startup arguments."))
+            throw ValidationError("无法编码 Coding Agent 启动参数。")
         }
         return value
     }
@@ -364,7 +364,7 @@ struct ACPDesktopConfiguration {
         guard !value.isEmpty else { return [] }
         guard let data = value.data(using: .utf8),
               let arguments = try? JSONDecoder().decode([String].self, from: data) else {
-            throw ValidationError(L10n.text("Coding Agent startup arguments must be a JSON string array, for example [\"--flag\",\"value\"]."))
+            throw ValidationError("Coding Agent 启动参数必须是 JSON 字符串数组，例如 [\"--flag\",\"value\"]。")
         }
         return arguments
     }

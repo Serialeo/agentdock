@@ -69,11 +69,11 @@ func TestTypedToolRequestFieldsMatchPublishedSchemas(t *testing.T) {
 		exact      bool
 		allowExtra []string
 	}{
-		{name: toolfile.ToolReadFile, request: toolfile.ReadRequest{}, exact: true, allowExtra: []string{"runtime", "wsl_distribution"}},
-		{name: toolfile.ToolListDir, request: toolfile.ListRequest{}, exact: true, allowExtra: []string{"runtime", "wsl_distribution"}},
-		{name: toolfile.ToolSearchText, request: toolfile.SearchRequest{}, exact: true, allowExtra: []string{"runtime", "wsl_distribution"}},
-		{name: toolfile.ToolFileEdit, request: toolfile.EditRequest{}, exact: true, allowExtra: []string{"runtime", "wsl_distribution"}},
-		{name: toolcommand.ToolExecCommand, request: toolcommand.ExecRequest{}, exact: true, allowExtra: []string{"runtime", "wsl_distribution"}},
+		{name: toolfile.ToolReadFile, request: toolfile.ReadRequest{}, exact: true},
+		{name: toolfile.ToolListDir, request: toolfile.ListRequest{}, exact: true},
+		{name: toolfile.ToolSearchText, request: toolfile.SearchRequest{}, exact: true},
+		{name: toolfile.ToolFileEdit, request: toolfile.EditRequest{}, exact: true},
+		{name: toolcommand.ToolExecCommand, request: toolcommand.ExecRequest{}, exact: true},
 		{name: toolcommand.ToolSessionObserve, request: toolcommand.SessionObserveRequest{}, exact: true},
 		{name: toolcommand.ToolSessionAct, request: toolcommand.SessionActRequest{}, exact: true},
 		{name: tooltask.ToolTaskManage, request: tooltask.ManageRequest{}, exact: true},
@@ -88,7 +88,6 @@ func TestTypedToolRequestFieldsMatchPublishedSchemas(t *testing.T) {
 		{name: toolmcp.ToolInspect, request: toolmcp.InspectRequest{}, exact: true},
 		{name: toolmcp.ToolCall, request: toolmcp.CallRequest{}, exact: true},
 		{name: toolmedia.ToolViewImage, request: toolmedia.ViewImageRequest{}, exact: true},
-		{name: toolmedia.ToolFilePublish, request: toolmedia.FilePublishRequest{}, exact: true},
 		{name: "recall_search", request: toolrecall.SearchRequest{}},
 		{name: "recall_read", request: toolrecall.ReadRequest{}},
 		{name: "recall_write", request: toolrecall.WriteRequest{}},

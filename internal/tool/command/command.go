@@ -34,7 +34,7 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 	if request.Cmd == "" {
 		return nil, toolError("INVALID_ARGUMENT", "cmd is required", "validation")
 	}
-	invocation, err := svc.prepareCommandInvocation(request)
+	invocation, err := svc.prepareCommandInvocation(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -79,12 +79,8 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 	// 如果子进程绑定到单次 MCP 请求 ctx，请求结束时 git push / npm install 等长任务会被杀掉。
 	// 因此长任务只受 timeout_ms 和 session_act action=kill/kill_all 控制。
 	s, sandboxStatus, err := invocation.start(commandCtx, timeout, tty, func(command *exec.Cmd) (func(), session.PreparationStatus) {
-		// AgentDock 不额外过滤命令，实际权限边界由所选运行环境决定。
-		privilegeWarning := "exec_command runs with the AgentDock process OS user privileges"
-		if invocation.execution.Runtime == "wsl" {
-			privilegeWarning = "runtime=wsl executes with the selected distribution's default Linux user privileges"
-		}
-		return func() {}, session.PreparationStatus{Enabled: false, Mode: "none", Policy: "no_command_content_filtering", Warnings: []string{privilegeWarning, "use Docker volumes, service users, file permissions, and network policy as the security boundary"}}
+		// AgentDock 不额外过滤命令，实际权限边界由 Host OS 用户决定。
+		return func() {}, session.PreparationStatus{Enabled: false, Mode: "none", Policy: "no_command_content_filtering", Warnings: []string{"exec_command runs with the AgentDock process OS user privileges", "use Docker volumes, service users, file permissions, and network policy as the security boundary"}}
 	})
 	// 只有 invocation.start 完整返回后，runner、平台进程控制器以及 cmdCtx 取消监听才都已经建立。
 	// Runtime.Close 会等待这个启动窗口排空，再取消 commandCtx，避免在半启动状态抢占进程。
@@ -208,14 +204,15 @@ func snapshotResult(snapshot session.Snapshot) Result {
 		result["exit_code"] = snapshot.ExitCode
 		result["command_ok"] = snapshot.CommandOK
 	}
-	if snapshot.Runtime != "" {
-		result["runtime"] = snapshot.Runtime
-	}
-	if snapshot.WSLDistribution != "" {
-		result["wsl_distribution"] = snapshot.WSLDistribution
-	}
 	if snapshot.Workdir != "" {
 		result["workdir"] = snapshot.Workdir
+	}
+	if snapshot.TargetID != "" {
+		result["work_session_id"] = snapshot.WorkSessionID
+		result["target_id"] = snapshot.TargetID
+		result["project_id"] = snapshot.ProjectID
+		result["deployment_id"] = snapshot.DeploymentID
+		result["node_id"] = snapshot.NodeID
 	}
 	return result
 }
@@ -234,10 +231,17 @@ func preparationStatusResult(status session.PreparationStatus) map[string]any {
 	return result
 }
 
-func (svc *Service) writeStdin(request SessionActRequest) (Result, error) {
+func (svc *Service) writeStdin(ctx context.Context, request SessionActRequest) (Result, error) {
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
 		return nil, toolError("SESSION_NOT_FOUND", "session not found", "not_found")
+	}
+	execution, err := requireSessionOwner(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSessionStdinPermission(execution); err != nil {
+		return nil, err
 	}
 	maxBytes := commandOutputLimit(request.MaxOutputBytes)
 	select {
@@ -280,11 +284,14 @@ func (svc *Service) consumeCompletedSession(s *session.Session, maxBytes int) Re
 	return result
 }
 
-func (svc *Service) killSession(request SessionActRequest) (Result, error) {
+func (svc *Service) killSession(ctx context.Context, request SessionActRequest) (Result, error) {
 	started := time.Now()
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
 		return nil, toolError("SESSION_NOT_FOUND", "session not found", "not_found")
+	}
+	if _, err := requireSessionOwner(ctx, s); err != nil {
+		return nil, err
 	}
 	select {
 	case <-s.Done:
@@ -317,12 +324,16 @@ func (svc *Service) killSession(request SessionActRequest) (Result, error) {
 	return result, nil
 }
 
-func (svc *Service) killAll() (Result, error) {
+func (svc *Service) killAll(ctx context.Context) (Result, error) {
 	sessions := svc.sessions.List()
+	execution, scoped := projectExecution(ctx)
 	running := make([]*session.Session, 0, len(sessions))
 	items := make([]map[string]any, 0, len(sessions))
 	killFailures := make([]map[string]any, 0)
 	for _, s := range sessions {
+		if scoped && !sessionOwnedByExecution(execution, s.ExecutionContext()) {
+			continue
+		}
 		select {
 		case <-s.Done:
 			summary := s.Summary()
@@ -398,10 +409,13 @@ func waitForSessionsCompletion(sessions []*session.Session, timeout time.Duratio
 	return completed, timedOut
 }
 
-func (svc *Service) sessionStatus(request SessionObserveRequest) (Result, error) {
+func (svc *Service) sessionStatus(ctx context.Context, request SessionObserveRequest) (Result, error) {
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
 		return nil, toolError("SESSION_NOT_FOUND", "session not found", "not_found")
+	}
+	if _, err := requireSessionOwner(ctx, s); err != nil {
+		return nil, err
 	}
 	maxBytes := commandOutputLimit(request.MaxOutputBytes)
 	select {
@@ -418,22 +432,27 @@ func (svc *Service) storeReservedSession(s *session.Session) {
 	svc.sessions.PruneCompletedToLimit(maxRetainedCommandSessions)
 }
 
-func (svc *Service) listSessions() (Result, error) {
+func (svc *Service) listSessions(ctx context.Context) (Result, error) {
 	// list 是只读观察入口，不能消费刚完成命令的最终输出。完成结果保留一小时，
 	// 由 status 正常读取后删除；无人领取的旧结果再在这里统一淘汰。
 	svc.sessions.PruneCompletedBefore(time.Now().Add(-completedSessionRetention))
+	execution, scoped := projectExecution(ctx)
 	items := make([]map[string]any, 0)
 	for _, s := range svc.sessions.List() {
+		if scoped && !sessionOwnedByExecution(execution, s.ExecutionContext()) {
+			continue
+		}
 		summary := s.Summary()
 		item := map[string]any{"session_id": summary.ID, "status": summary.Status, "elapsed_ms": summary.ElapsedMS, "timed_out": summary.TimedOut}
-		if summary.Runtime != "" {
-			item["runtime"] = summary.Runtime
-		}
-		if summary.Distribution != "" {
-			item["wsl_distribution"] = summary.Distribution
-		}
 		if summary.Workdir != "" {
 			item["workdir"] = summary.Workdir
+		}
+		if summary.TargetID != "" {
+			item["work_session_id"] = summary.WorkSessionID
+			item["target_id"] = summary.TargetID
+			item["project_id"] = summary.ProjectID
+			item["deployment_id"] = summary.DeploymentID
+			item["node_id"] = summary.NodeID
 		}
 		items = append(items, item)
 	}

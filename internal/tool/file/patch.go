@@ -1,6 +1,7 @@
 package file
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,9 @@ func patchPathInBase(basePath, rawPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if filepath.IsAbs(cleanRaw) || strings.HasPrefix(cleanRaw, "~") {
+		return cleanRaw, nil
+	}
 	cleanBase, err := workspacepkg.Clean(basePath)
 	if err != nil {
 		return "", err
@@ -24,7 +28,7 @@ func patchPathInBase(basePath, rawPath string) (string, error) {
 	return filepath.ToSlash(filepath.Join(filepath.FromSlash(cleanBase), filepath.FromSlash(cleanRaw))), nil
 }
 
-func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath string) (Result, error) {
+func (svc *Service) applyEnvelopePatch(ctx context.Context, patch string, dryRun bool, basePath workspacepkg.Path) (Result, error) {
 	operations, err := parseEnvelopePatch(patch)
 	if err != nil {
 		return nil, err
@@ -36,11 +40,11 @@ func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath strin
 	for _, op := range operations {
 		switch op.Kind {
 		case "add":
-			targetPath, err := patchPathInBase(basePath, op.Path)
+			targetPath, err := patchPathInBase(basePath.Abs, op.Path)
 			if err != nil {
 				return nil, err
 			}
-			target, err := svc.ws.ResolveForWrite(targetPath)
+			target, err := svc.ws.ResolveForWriteContext(ctx, targetPath)
 			if err != nil {
 				return nil, err
 			}
@@ -55,11 +59,11 @@ func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath strin
 			affected = append(affected, map[string]any{"path": target.Display, "operation": "add"})
 			summaries = append(summaries, "A "+target.Display)
 		case "delete":
-			targetPath, err := patchPathInBase(basePath, op.Path)
+			targetPath, err := patchPathInBase(basePath.Abs, op.Path)
 			if err != nil {
 				return nil, err
 			}
-			target, err := svc.ws.ResolveExisting(targetPath)
+			target, err := svc.ws.ResolveExistingContext(ctx, targetPath)
 			if err != nil {
 				return nil, err
 			}
@@ -74,11 +78,11 @@ func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath strin
 			affected = append(affected, map[string]any{"path": target.Display, "operation": "delete"})
 			summaries = append(summaries, "D "+target.Display)
 		case "update":
-			sourcePath, err := patchPathInBase(basePath, op.Path)
+			sourcePath, err := patchPathInBase(basePath.Abs, op.Path)
 			if err != nil {
 				return nil, err
 			}
-			source, err := svc.ws.ResolveExisting(sourcePath)
+			source, err := svc.ws.ResolveExistingContext(ctx, sourcePath)
 			if err != nil {
 				return nil, err
 			}
@@ -94,7 +98,7 @@ func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath strin
 				content := string(original)
 				current = stagedPatchFile{Abs: source.Abs, Display: source.Display, Content: &content, Mode: info.Mode().Perm(), Original: original, OriginalExists: true}
 			}
-			updated, err := applyUpdateHunks(*current.Content, op.Chunks, source.Display)
+			updated, err := applyUpdateHunks(*current.Content, op.Hunks, source.Display)
 			if err != nil {
 				return nil, err
 			}
@@ -106,11 +110,11 @@ func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath strin
 				continue
 			}
 
-			destPath, err := patchPathInBase(basePath, op.MoveTo)
+			destPath, err := patchPathInBase(basePath.Abs, op.MoveTo)
 			if err != nil {
 				return nil, err
 			}
-			dest, err := svc.ws.ResolveForWrite(destPath)
+			dest, err := svc.ws.ResolveForWriteContext(ctx, destPath)
 			if err != nil {
 				return nil, err
 			}
@@ -145,7 +149,7 @@ func (svc *Service) applyEnvelopePatch(patch string, dryRun bool, basePath strin
 			return nil, err
 		}
 	}
-	return Result{"dry_run": dryRun, "workdir": basePath, "affected_files": affected, "summary": strings.Join(summaries, "\n"), "diff_preview": diffPreview, "truncated": diffTruncated, "files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions}, nil
+	return Result{"dry_run": dryRun, "workdir": basePath.Display, "affected_files": affected, "summary": strings.Join(summaries, "\n"), "diff_preview": diffPreview, "truncated": diffTruncated, "files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions}, nil
 }
 
 func ensurePatchPathUnused(staged map[string]stagedPatchFile, absPath, displayPath string) error {

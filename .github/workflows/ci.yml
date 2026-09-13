@@ -21,6 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -107,6 +112,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -134,4 +144,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build and verify images
+        env:
+          PRIVATE_GO_READ_TOKEN: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
         run: ./scripts/test/test-docker-images.sh

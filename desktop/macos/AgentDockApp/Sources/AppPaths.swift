@@ -23,8 +23,6 @@ struct AppPaths {
     var updateResult: URL { appSupport.appendingPathComponent("update-result.json") }
     var updateServiceState: URL { appSupport.appendingPathComponent("update-services.json") }
     var updateHandoff: URL { appSupport.appendingPathComponent("update-handoff.json") }
-    var updateTransaction: URL { appSupport.appendingPathComponent("update/transaction.json") }
-    var updateTerminalResult: URL { appSupport.appendingPathComponent("update/result.json") }
     var updateLog: URL { appSupport.appendingPathComponent("update.log") }
     var logs: URL { home.appendingPathComponent("Library/Logs/AgentDock") }
     var workDirectory: URL { home.appendingPathComponent("AgentDock") }
@@ -161,7 +159,7 @@ struct NexusDeviceStatus {
             let identity = try JSONDecoder().decode(NexusDeviceIdentity.self, from: Data(contentsOf: path))
             guard !identity.endpoint.isEmpty, !identity.nodeID.isEmpty,
                   !identity.deviceID.isEmpty, !identity.deviceToken.isEmpty else {
-                throw ValidationError(L10n.text("Device identity file is invalid. Pair again."))
+                throw ValidationError("设备身份文件无效，请重新配对。")
             }
             return NexusDeviceStatus(
                 paired: true,
@@ -176,7 +174,7 @@ struct NexusDeviceStatus {
                 endpoint: "",
                 nodeID: "",
                 deviceTokenStored: false,
-                error: L10n.format("Unable to read device identity: %@", error.localizedDescription)
+                error: "无法读取设备身份：\(error.localizedDescription)"
             )
         }
     }

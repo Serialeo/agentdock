@@ -5,30 +5,16 @@ struct DesktopUpdateHandoff: Codable {
     static let schemaVersion = 1
 
     let schemaVersion: Int
-    let transactionID: String?
     let targetVersion: String
-    let coreRegistration: String?
-    let tunnelRegistration: String?
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
-        case transactionID = "transaction_id"
         case targetVersion = "target_version"
-        case coreRegistration = "core_registration"
-        case tunnelRegistration = "tunnel_registration"
     }
 
-    init(
-        targetVersion: String,
-        transactionID: String? = nil,
-        coreRegistration: String? = nil,
-        tunnelRegistration: String? = nil
-    ) {
+    init(targetVersion: String) {
         schemaVersion = Self.schemaVersion
-        self.transactionID = transactionID
         self.targetVersion = targetVersion
-        self.coreRegistration = coreRegistration
-        self.tunnelRegistration = tunnelRegistration
     }
 
     func write(to path: URL) throws {
@@ -42,14 +28,11 @@ struct DesktopUpdateHandoff: Codable {
         let temporary = directory.appendingPathComponent(".\(path.lastPathComponent).tmp.\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: temporary) }
         guard fileManager.createFile(atPath: temporary.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            throw ValidationError(L10n.text("Unable to create AgentDock update handoff confirmation."))
+            throw ValidationError("无法创建 AgentDock 更新接管确认。")
         }
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
         if Darwin.rename(temporary.path, path.path) != 0 {
-            throw ValidationError(L10n.format(
-                "Unable to save AgentDock update handoff confirmation: %@",
-                String(cString: strerror(errno))
-            ))
+            throw ValidationError("无法保存 AgentDock 更新接管确认：\(String(cString: strerror(errno)))")
         }
     }
 

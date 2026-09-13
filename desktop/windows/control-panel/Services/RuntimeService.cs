@@ -18,7 +18,6 @@ public sealed class RuntimeService : IDisposable
     private const string OAuthPasswordEntropy = "agentdock.oauth.password.v1";
     private const string TunnelTokenEntropy = "agentdock.cloudflare.tunnel.v1";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string UpdateUiHandoffEnvironment = "AGENTDOCK_UPDATE_UI_HANDOFF";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -89,7 +88,7 @@ public sealed class RuntimeService : IDisposable
         {
             version = await ReadCoreVersionAsync(binaryPath, cancellationToken);
         }
-        var coreRunning = health.Healthy || await ReadCoreRunningAsync(binaryPath, cancellationToken);
+        var coreRunning = health.Healthy || IsProcessRunningAtPath("agentdock", binaryPath);
         var nexus = ReadNexusDeviceStatus();
         var nexusConnected = includeNexusConnection && coreRunning && nexus.Paired && string.IsNullOrWhiteSpace(nexus.Error)
             && await ReadNexusConnectionAsync(binaryPath, cancellationToken);
@@ -156,7 +155,7 @@ public sealed class RuntimeService : IDisposable
                 }
                 break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(action), action, UiText.Get("UnsupportedRuntimeAction"));
+                throw new ArgumentOutOfRangeException(nameof(action), action, "不支持的运行时操作。");
         }
     }
 
@@ -170,11 +169,11 @@ public sealed class RuntimeService : IDisposable
         try
         {
             return JsonSerializer.Deserialize<UpdateCheckResult>(output, JsonOptions)
-                ?? throw new JsonException(UiText.Get("EmptyUpdateCheckResult"));
+                ?? throw new JsonException("更新检查结果为空");
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException(UiText.Get("ParseUpdateCheckFailed"), ex);
+            throw new InvalidOperationException("无法解析 AgentDock 更新检查结果。", ex);
         }
     }
 
@@ -185,134 +184,7 @@ public sealed class RuntimeService : IDisposable
         var binaryPath = await ResolveCoreBinaryAsync(cancellationToken);
         var startInfo = CreateRedirectedProcessStartInfo(binaryPath);
         startInfo.ArgumentList.Add("update");
-        startInfo.ArgumentList.Add("--progress-json");
-        startInfo.Environment[UpdateUiHandoffEnvironment] = "1";
         return await RunUpdateProcessAsync(startInfo, progress, cancellationToken);
-    }
-
-    internal async Task<UpdateTransactionState?> ReadUpdateUiHandoffTransactionAsync(
-        CancellationToken cancellationToken = default)
-    {
-        var transaction = await ReadJsonAsync<UpdateTransactionState>(
-            Path.Combine(RuntimeRoot, "update", "transaction.json"),
-            cancellationToken);
-        if (transaction is null ||
-            transaction.SchemaVersion != 1 ||
-            !string.Equals(transaction.Platform, "windows", StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(transaction.TransactionId) ||
-            transaction.Windows?.ProgressUiHandoff != true)
-        {
-            return null;
-        }
-
-        var acknowledgement = await ReadJsonAsync<UpdateUiHandoffAck>(
-            Path.Combine(RuntimeRoot, "update", "ui-handoff-ack.json"),
-            cancellationToken);
-        if (acknowledgement is not null &&
-            acknowledgement.SchemaVersion == 1 &&
-            string.Equals(
-                acknowledgement.TransactionId,
-                transaction.TransactionId,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return transaction.State.ToLowerInvariant() switch
-        {
-            "staged" or "trial" or "rolling_back" or "committed" or "rolled_back" or "failed" => transaction,
-            _ => null
-        };
-    }
-
-    internal async Task<UpdateTerminalResult?> ReadUpdateTerminalResultAsync(
-        string transactionId,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(transactionId))
-        {
-            return null;
-        }
-        var result = await ReadJsonAsync<UpdateTerminalResult>(
-            Path.Combine(RuntimeRoot, "update", "result.json"),
-            cancellationToken);
-        if (result is null ||
-            result.SchemaVersion != 1 ||
-            !string.Equals(result.Platform, "windows", StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(result.TransactionId, transactionId, StringComparison.OrdinalIgnoreCase))
-        {
-            // transaction.json is the durable commit point. result.json is a projection and
-            // can legitimately lag it if the machine stops between the two atomic writes.
-            // A terminal transaction contains the same fields this UI needs, so fall back to
-            // the journal instead of reporting a false four-minute result timeout.
-            result = await ReadJsonAsync<UpdateTerminalResult>(
-                Path.Combine(RuntimeRoot, "update", "transaction.json"),
-                cancellationToken);
-        }
-        if (result is null ||
-            result.SchemaVersion != 1 ||
-            !string.Equals(result.Platform, "windows", StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(result.TransactionId, transactionId, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        return result.State.ToLowerInvariant() switch
-        {
-            "committed" or "rolled_back" or "failed" => result,
-            _ => null
-        };
-    }
-
-    internal async Task AcknowledgeUpdateUiHandoffAsync(
-        string transactionId,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(transactionId))
-        {
-            return;
-        }
-
-        string? temporaryPath = null;
-        try
-        {
-            var updateDirectory = Path.Combine(RuntimeRoot, "update");
-            Directory.CreateDirectory(updateDirectory);
-            var acknowledgementPath = Path.Combine(updateDirectory, "ui-handoff-ack.json");
-            temporaryPath = acknowledgementPath + $".tmp.{Guid.NewGuid():N}";
-            var acknowledgement = new UpdateUiHandoffAck
-            {
-                TransactionId = transactionId.Trim()
-            };
-            await File.WriteAllTextAsync(
-                temporaryPath,
-                JsonSerializer.Serialize(acknowledgement, JsonOptions),
-                new UTF8Encoding(false),
-                cancellationToken);
-            File.Move(temporaryPath, acknowledgementPath, overwrite: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // UI acknowledgement is best-effort. If it cannot be persisted, the next Tray launch
-            // may show the terminal result again, which is safer than hiding a completed transaction.
-        }
-        finally
-        {
-            if (!string.IsNullOrWhiteSpace(temporaryPath))
-            {
-                try
-                {
-                    File.Delete(temporaryPath);
-                }
-                catch (IOException)
-                {
-                    // The atomic move already succeeded or another cleanup can retry later.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // Keep the terminal result visible even if best-effort temp cleanup is denied.
-                }
-            }
-        }
     }
 
     public async Task SetTunnelModeAsync(
@@ -375,7 +247,7 @@ public sealed class RuntimeService : IDisposable
         pairingCode = pairingCode.Trim();
         if (endpoint.Length == 0 || pairingCode.Length == 0)
         {
-            throw new InvalidOperationException(UiText.Get("NexusPairingRequired"));
+            throw new InvalidOperationException("NexusDock 地址和一次性配对码不能为空。");
         }
 
         var binaryPath = await ResolveCoreBinaryAsync(cancellationToken);
@@ -392,7 +264,7 @@ public sealed class RuntimeService : IDisposable
     {
         if (component is not ("core" or "tray"))
         {
-            throw new ArgumentOutOfRangeException(nameof(component), component, UiText.Get("UnsupportedStartupComponent"));
+            throw new ArgumentOutOfRangeException(nameof(component), component, "不支持的开机启动组件。");
         }
         return RunNativeAgentDockAsync(
             "service",
@@ -403,7 +275,7 @@ public sealed class RuntimeService : IDisposable
     public async Task SetPrivilegeModeAsync(bool elevated, CancellationToken cancellationToken = default)
     {
         var manifest = await ReadRuntimeManifestAsync(cancellationToken)
-            ?? throw new InvalidOperationException(UiText.Get("RuntimeJsonMissing"));
+            ?? throw new InvalidOperationException("找不到 AgentDock runtime.json。");
         var wasElevated = string.Equals(manifest.PrivilegeMode, "elevated", StringComparison.OrdinalIgnoreCase);
         if (wasElevated == elevated)
         {
@@ -473,7 +345,7 @@ public sealed class RuntimeService : IDisposable
             }
             catch (Exception rollbackError)
             {
-                throw new AggregateException(UiText.Get("PrivilegeSwitchRollbackFailed"), transitionError, rollbackError);
+                throw new AggregateException("切换 AgentDock 管理员模式失败，且回滚未完成。", transitionError, rollbackError);
             }
             throw;
         }
@@ -494,7 +366,7 @@ public sealed class RuntimeService : IDisposable
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            return new UrlTestResult(false, null, TimeSpan.Zero, UiText.Get("InvalidPublicAddress"));
+            return new UrlTestResult(false, null, TimeSpan.Zero, "地址无效");
         }
 
         var healthUri = new UriBuilder(uri) { Path = "/healthz", Query = "", Fragment = "" }.Uri;
@@ -509,12 +381,12 @@ public sealed class RuntimeService : IDisposable
                 success,
                 (int)response.StatusCode,
                 stopwatch.Elapsed,
-                success ? UiText.Format("AccessSuccess", (int)response.StatusCode, stopwatch.ElapsedMilliseconds) : UiText.Format("AccessFailed", (int)response.StatusCode));
+                success ? $"访问正常 · {(int)response.StatusCode} · {stopwatch.ElapsedMilliseconds} ms" : $"访问失败 · {(int)response.StatusCode}");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             stopwatch.Stop();
-            return new UrlTestResult(false, null, stopwatch.Elapsed, ex is TaskCanceledException ? UiText.Get("AccessTimeout") : ex.Message);
+            return new UrlTestResult(false, null, stopwatch.Elapsed, ex is TaskCanceledException ? "访问超时" : ex.Message);
         }
     }
 
@@ -648,7 +520,7 @@ public sealed class RuntimeService : IDisposable
         var binaryPath = ResolveCoreBinaryPath(manifest);
         if (!File.Exists(binaryPath))
         {
-            throw new FileNotFoundException(UiText.Format("CoreBinaryMissing", binaryPath), binaryPath);
+            throw new FileNotFoundException($"找不到 AgentDock 核心程序（{binaryPath}），请运行 Setup.exe 修复安装。", binaryPath);
         }
         return binaryPath;
     }
@@ -672,39 +544,30 @@ public sealed class RuntimeService : IDisposable
         string backupDirectory,
         CancellationToken cancellationToken)
     {
-        var taskName = string.IsNullOrWhiteSpace(manifest.AgentDockTaskName)
-            ? "AgentDock"
-            : manifest.AgentDockTaskName.Trim();
         var trayBinary = string.IsNullOrWhiteSpace(manifest.TrayBinaryPath)
             ? Path.Combine(RuntimeRoot, "bin", "agentdock-tray.exe")
             : manifest.TrayBinaryPath;
         if (!File.Exists(trayBinary))
         {
-            throw new FileNotFoundException(UiText.Format("ManagementBinaryMissing", trayBinary), trayBinary);
+            throw new FileNotFoundException($"找不到 AgentDock 管理程序（{trayBinary}）。", trayBinary);
         }
 
         var arguments = new List<string>
         {
             "--task-admin", action,
-            "--task-name", taskName,
             "--backup-directory", backupDirectory,
             "--runtime-root", RuntimeRoot
         };
         if (action == "prepare-elevated")
         {
-            var stableCoreEntry = ResolveCoreBinaryPath(manifest);
-            if (!File.Exists(stableCoreEntry))
-            {
-                throw new FileNotFoundException(UiText.Format("ManagementBinaryMissing", stableCoreEntry), stableCoreEntry);
-            }
             using var identity = WindowsIdentity.GetCurrent();
             var userSid = identity.User?.Value;
             if (string.IsNullOrWhiteSpace(userSid) || string.IsNullOrWhiteSpace(identity.Name))
             {
-                throw new InvalidOperationException(UiText.Get("CurrentWindowsIdentityUnavailable"));
+                throw new InvalidOperationException("无法读取当前 Windows 用户身份。");
             }
             arguments.AddRange([
-                "--launcher-path", stableCoreEntry,
+                "--launcher-path", trayBinary,
                 "--user-sid", userSid,
                 "--user-name", identity.Name
             ]);
@@ -716,7 +579,7 @@ public sealed class RuntimeService : IDisposable
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            throw new InvalidOperationException(UiText.Get("AdminSwitchCancelled"), ex);
+            throw new InvalidOperationException("已取消 AgentDock 管理员权限切换。", ex);
         }
     }
 
@@ -724,7 +587,7 @@ public sealed class RuntimeService : IDisposable
     {
         var text = await File.ReadAllTextAsync(ManifestPath, cancellationToken);
         var manifest = JsonNode.Parse(text) as JsonObject
-            ?? throw new InvalidOperationException(UiText.Get("RuntimeJsonInvalid"));
+            ?? throw new InvalidOperationException("AgentDock runtime.json 格式无效。");
         manifest["privilege_mode"] = elevated ? "elevated" : "standard";
         manifest["agentdock_task_name"] = elevated ? "AgentDock" : "";
 
@@ -754,7 +617,7 @@ public sealed class RuntimeService : IDisposable
     {
         var valueName = string.IsNullOrWhiteSpace(manifest.StartupValueName) ? "AgentDock" : manifest.StartupValueName;
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
-            ?? throw new InvalidOperationException(UiText.Get("StartupRegistryUnavailable"));
+            ?? throw new InvalidOperationException("无法打开 Windows 开机启动注册表。");
         if (!enabled)
         {
             key.DeleteValue(valueName, throwOnMissingValue: false);
@@ -766,7 +629,7 @@ public sealed class RuntimeService : IDisposable
             : manifest.TrayBinaryPath;
         if (!File.Exists(trayBinary))
         {
-            throw new FileNotFoundException(UiText.Format("TrayBinaryMissing", trayBinary), trayBinary);
+            throw new FileNotFoundException($"找不到 AgentDock 托盘程序（{trayBinary}）。", trayBinary);
         }
         var command = $"\"{trayBinary}\" --start-core --runtime-root \"{RuntimeRoot}\"";
         key.SetValue(valueName, command, RegistryValueKind.String);
@@ -778,7 +641,7 @@ public sealed class RuntimeService : IDisposable
         var binaryPath = ResolveCoreBinaryPath(manifest);
         if (!File.Exists(binaryPath))
         {
-            throw new FileNotFoundException(UiText.Format("CoreBinaryMissing", binaryPath), binaryPath);
+            throw new FileNotFoundException($"找不到 AgentDock 核心程序（{binaryPath}）。", binaryPath);
         }
 
         var workingDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AgentDock");
@@ -800,7 +663,7 @@ public sealed class RuntimeService : IDisposable
         // Highest 计划任务运行 WinExe 托管进程，再由它无控制台启动核心并持续等待。
         // Core 加入 KILL_ON_JOB_CLOSE Job Object，确保 Task Scheduler 强制结束 host 时不会留下孤儿进程。
         using var job = KillOnCloseJob.Create();
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException(UiText.Get("CoreStartFailed"));
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 AgentDock 核心程序。");
         try
         {
             job.Assign(process);
@@ -825,7 +688,7 @@ public sealed class RuntimeService : IDisposable
     {
         if (action is not ("start" or "stop" or "restart"))
         {
-            throw new ArgumentOutOfRangeException(nameof(action), action, UiText.Get("UnsupportedCoreServiceAction"));
+            throw new ArgumentOutOfRangeException(nameof(action), action, "不支持的核心服务操作。");
         }
         return RunNativeAgentDockAsync("service", [action], cancellationToken);
     }
@@ -834,7 +697,7 @@ public sealed class RuntimeService : IDisposable
     {
         if (action is not ("start" or "stop" or "restart" or "regenerate"))
         {
-            throw new ArgumentOutOfRangeException(nameof(action), action, UiText.Get("UnsupportedTunnelAction"));
+            throw new ArgumentOutOfRangeException(nameof(action), action, "不支持的 Tunnel 操作。");
         }
         return RunNativeAgentDockAsync("tunnel", [action], cancellationToken);
     }
@@ -888,11 +751,11 @@ public sealed class RuntimeService : IDisposable
             startInfo.ArgumentList.Add(argument);
         }
 
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException(UiText.Get("ManagerStartFailed"));
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 AgentDock 管理程序。");
         await process.WaitForExitAsync(cancellationToken);
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException(UiText.Format("ManagerFailedWithExitCode", process.ExitCode));
+            throw new InvalidOperationException($"AgentDock 管理程序执行失败，退出码：{process.ExitCode}。");
         }
     }
 
@@ -947,19 +810,19 @@ public sealed class RuntimeService : IDisposable
                 string.IsNullOrWhiteSpace(identity.NodeId) || string.IsNullOrWhiteSpace(identity.DeviceId) ||
                 string.IsNullOrWhiteSpace(identity.DeviceToken))
             {
-                return new NexusDeviceStatus(false, "", "", "", false, UiText.Get("DeviceIdentityInvalid"));
+                return new NexusDeviceStatus(false, "", "", "", false, "设备身份文件无效，请重新配对。");
             }
             return new NexusDeviceStatus(true, identity.Endpoint, identity.NodeId, identity.DeviceId, true);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            return new NexusDeviceStatus(false, "", "", "", false, UiText.Format("DeviceIdentityReadFailed", ex.Message));
+            return new NexusDeviceStatus(false, "", "", "", false, $"无法读取设备身份：{ex.Message}");
         }
     }
 
     private static async Task<string> RunProcessAsync(ProcessStartInfo startInfo, CancellationToken cancellationToken)
     {
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException(UiText.Format("ProcessStartFailed", startInfo.FileName));
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"无法启动 {startInfo.FileName}。");
         var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
@@ -982,7 +845,7 @@ public sealed class RuntimeService : IDisposable
         IProgress<UpdateProgress>? progress,
         CancellationToken cancellationToken)
     {
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException(UiText.Format("ProcessStartFailed", startInfo.FileName));
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"无法启动 {startInfo.FileName}。");
         var output = new StringBuilder();
         var error = new StringBuilder();
         var outputTask = ReadProcessLinesAsync(process.StandardOutput, output, progress, cancellationToken);
@@ -996,9 +859,11 @@ public sealed class RuntimeService : IDisposable
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(errorText) ? outputText : errorText);
         }
 
-        var completedMessage = UiText.Get("UpdateCompleted");
-        progress?.Report(new UpdateProgress(100, false, completedMessage));
-        return completedMessage;
+        var result = string.IsNullOrWhiteSpace(outputText)
+            ? errorText
+            : string.IsNullOrWhiteSpace(errorText) ? outputText : outputText + Environment.NewLine + errorText;
+        progress?.Report(new UpdateProgress(100, LastNonEmptyLine(result, "更新完成。")));
+        return result;
     }
 
     private static async Task ReadProcessLinesAsync(
@@ -1012,70 +877,26 @@ public sealed class RuntimeService : IDisposable
             buffer.AppendLine(line);
             if (!string.IsNullOrWhiteSpace(line))
             {
-                var updateProgress = ParseUpdateProgress(line);
-                if (updateProgress is not null)
-                {
-                    progress?.Report(updateProgress);
-                }
+                progress?.Report(MapUpdateProgress(line));
             }
         }
     }
 
-    private static UpdateProgress? ParseUpdateProgress(string line)
+    private static UpdateProgress MapUpdateProgress(string line)
     {
-        UpdateProgressEvent? updateEvent;
-        try
+        var message = line.Trim();
+        var percentage = message switch
         {
-            updateEvent = JsonSerializer.Deserialize<UpdateProgressEvent>(line, JsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        if (updateEvent is null || updateEvent.SchemaVersion != 1)
-        {
-            return null;
-        }
-        if (string.Equals(updateEvent.Type, "completed", StringComparison.Ordinal))
-        {
-            return new UpdateProgress(100, false, UiText.Get("UpdateCompleted"));
-        }
-        if (string.Equals(updateEvent.Type, "failed", StringComparison.Ordinal))
-        {
-            return new UpdateProgress(null, false, string.IsNullOrWhiteSpace(updateEvent.Error) ? UiText.Get("UpdateFailed") : updateEvent.Error);
-        }
-        if (string.Equals(updateEvent.Stage, "downloading", StringComparison.Ordinal) && updateEvent.BytesRead is long bytesRead)
-        {
-            var totalBytes = updateEvent.TotalBytes.GetValueOrDefault(-1);
-            if (totalBytes > 0)
-            {
-                var percentage = (int)Math.Clamp(bytesRead * 100 / totalBytes, 0, 100);
-                return new UpdateProgress(percentage, false, UiText.Format("UpdateDownloadingProgress", FormatBytes(bytesRead), FormatBytes(totalBytes)));
-            }
-            return new UpdateProgress(null, true, UiText.Format("UpdateDownloadingUnknownSize", FormatBytes(bytesRead)));
-        }
-        var message = updateEvent.Stage switch
-        {
-            "checking" => UiText.Get("UpdateStageChecking"),
-            "downloading" => UiText.Get("UpdateStageDownloading"),
-            "verifying" => UiText.Get("UpdateStageVerifying"),
-            "extracting" => UiText.Get("UpdateStageExtracting"),
-            "installing" => UiText.Get("UpdateStageInstalling"),
-            "updating_skills" => UiText.Get("UpdateStageUpdatingSkills"),
-            "restarting" => UiText.Get("UpdateStageRestarting"),
-            _ => UiText.Get("PleaseWaitUpdating")
+            var value when value.Contains("正在下载", StringComparison.Ordinal) => 20,
+            var value when value.Contains("文件校验通过", StringComparison.Ordinal) => 50,
+            var value when value.Contains("正在备份并安装", StringComparison.Ordinal) => 70,
+            var value when value.Contains("交给辅助进程", StringComparison.Ordinal) => 80,
+            var value when value.Contains("正在更新官方核心 Skill", StringComparison.Ordinal) => 90,
+            var value when value.Contains("更新完成", StringComparison.Ordinal) => 100,
+            var value when value.Contains("当前已是最新版本", StringComparison.Ordinal) => 100,
+            _ => 10
         };
-        return new UpdateProgress(null, true, message);
-    }
-
-    private static string FormatBytes(long value)
-    {
-        if (value < 1024) return $"{value} B";
-        var kib = value / 1024d;
-        if (kib < 1024) return $"{kib:0.0} KiB";
-        var mib = kib / 1024d;
-        if (mib < 1024) return $"{mib:0.0} MiB";
-        return $"{mib / 1024d:0.0} GiB";
+        return new UpdateProgress(percentage, message);
     }
 
     private static string LastNonEmptyLine(string value, string fallback)
@@ -1094,7 +915,7 @@ public sealed class RuntimeService : IDisposable
             "claude" => "claude",
             "grok" => "grok",
             "custom" => "custom",
-            var unsupported => throw new InvalidOperationException(UiText.Format("UnsupportedCodingAgentValue", unsupported ?? "<null>"))
+            var unsupported => throw new InvalidOperationException($"不支持的 Coding Agent: {unsupported ?? "<null>"}")
         };
     }
 
@@ -1117,18 +938,6 @@ public sealed class RuntimeService : IDisposable
         if (!string.IsNullOrWhiteSpace(parent) && File.Exists(Path.Combine(parent, "runtime.json")))
         {
             return parent;
-        }
-
-        // generation Tray 位于 <root>\versions\<version>。运行时状态仍只属于稳定安装根，
-        // 不能在 generation 目录旁再生成第二份 runtime.json。
-        var versionsDirectory = executableDirectory.Parent;
-        var generationRoot = versionsDirectory?.Parent?.FullName;
-        if (versionsDirectory is not null &&
-            string.Equals(versionsDirectory.Name, "versions", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(generationRoot) &&
-            File.Exists(Path.Combine(generationRoot, "runtime.json")))
-        {
-            return generationRoot;
         }
 
         // 安装器会先启动 bin 中的托盘，再写入 runtime.json；此时仍应绑定当前安装目录。
@@ -1195,33 +1004,6 @@ public sealed class RuntimeService : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception or JsonException)
         {
             return "";
-        }
-    }
-
-    private async Task<bool> ReadCoreRunningAsync(string binaryPath, CancellationToken cancellationToken)
-    {
-        if (!File.Exists(binaryPath))
-        {
-            return false;
-        }
-
-        var startInfo = CreateRedirectedProcessStartInfo(binaryPath);
-        startInfo.ArgumentList.Add("service");
-        startInfo.ArgumentList.Add("status");
-        startInfo.ArgumentList.Add("--runtime-root");
-        startInfo.ArgumentList.Add(RuntimeRoot);
-        try
-        {
-            var output = await RunProcessAsync(startInfo, cancellationToken);
-            return JsonSerializer.Deserialize<NativeServiceStatus>(output, JsonOptions)?.Running == true;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception or JsonException)
-        {
-            return false;
         }
     }
 

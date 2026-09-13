@@ -11,7 +11,7 @@ func ManageInputSchema(cfg config.Config) map[string]any {
 	stringProp := toolcontract.String
 	boundedIntProp := toolcontract.BoundedInteger
 	props := map[string]any{
-		"action":                map[string]any{"type": "string", "description": "Task lifecycle action. Use checkpoint to update live step progress.", "enum": []string{"create", "list", "get", "checkpoint", "block", "resume", "final_review", "complete"}},
+		"action":                map[string]any{"type": "string", "description": "Task lifecycle action.", "enum": []string{"create", "list", "get", "checkpoint", "block", "resume", "final_review", "complete"}},
 		"task_id":               stringProp("Persistent task id for get, checkpoint, block, resume, final_review, or complete."),
 		"title":                 stringProp("Short task title. Required for action=create."),
 		"goal":                  stringProp("Fixed task goal. Required for action=create."),
@@ -36,16 +36,16 @@ func ManageInputSchema(cfg config.Config) map[string]any {
 		return taskManageInputObject(props)
 	}
 
-	props["project"] = stringProp("Optional project identifier used to hard-scope Evolution guidance and evidence candidates. Omit only for global tasks.")
+	props["project"] = stringProp("Optional project identifier used to hard-scope Evolution guidance and evidence candidates. An absent project denotes global scope.")
 	props["device"] = stringProp("Optional device identifier used to hard-scope device-specific Evolution guidance and evidence candidates.")
 	props["steps"] = map[string]any{
 		"type": "array", "maxItems": 12, "description": "Concrete task steps. Required when composing multiple source templates.",
 		"items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "title"}, "properties": map[string]any{"id": stringProp("Stable step id."), "title": stringProp("Human-readable step title.")}},
 	}
 	props["template_id"] = stringProp("Single active workflow template to apply. Its current active version is resolved automatically.")
-	props["source_template_ids"] = map[string]any{"type": "array", "minItems": 2, "maxItems": 3, "items": map[string]any{"type": "string"}, "description": "Two or three templates already composed by the model into steps and completion_conditions."}
+	props["source_template_ids"] = map[string]any{"type": "array", "minItems": 2, "maxItems": 3, "items": map[string]any{"type": "string"}, "description": "Two or three source template ids. When present, steps and completion_conditions are required."}
 	props["learning_checks"] = map[string]any{
-		"type": "array", "maxItems": 3, "description": "Advanced create-only blinded validation checks. Bind these Evolution ids before Guidance is generated; support-bearing targets are withheld from this Task's Guidance and may be assessed only from its frozen final_review.",
+		"type": "array", "maxItems": 3, "description": "Advanced create-only blinded validation checks. The server rejects new bindings after task execution starts; support-bearing targets are withheld from this Task's Guidance and are assessed from the frozen final_review.",
 		"items": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"evolution_id", "on_success", "on_failure"},
 			"properties": map[string]any{
@@ -76,19 +76,17 @@ func ManageOutputSchema(cfg config.Config) map[string]any {
 	arrayProp := toolcontract.ObjectArray
 	objectProp := toolcontract.OpenObject
 	props := map[string]any{
-		"action":               stringProp("Completed task action."),
-		"task_id":              stringProp("Persistent task id returned by create and usable with task lifecycle actions."),
-		"task":                 objectProp("Full persistent task state returned only by get."),
-		"task_summary":         objectProp("Compact task summary returned by task lifecycle actions."),
-		"review_status":        stringProp("Final review status when present: not_started, pass, or failed."),
-		"final_review":         objectProp("Compact final review state with status and counts."),
-		"tasks":                arrayProp("Compact task summaries ordered by most recent update."),
-		"count":                intProp("Returned item count."),
-		"state_dir":            stringProp("Local AgentDock task state directory."),
-		"next_required_action": stringProp("Concise guidance for checkpoint progress or final review."),
+		"action":        stringProp("Completed task action."),
+		"task_id":       stringProp("Persistent task id returned by create and usable with task lifecycle actions."),
+		"task":          objectProp("Full persistent task state returned only by get."),
+		"task_summary":  objectProp("Compact task summary returned by task lifecycle actions."),
+		"review_status": stringProp("Final review status when present: not_started, pass, or failed."),
+		"final_review":  objectProp("Compact final review state with status and counts."),
+		"tasks":         arrayProp("Compact task summaries ordered by most recent update."),
+		"count":         intProp("Returned item count."),
+		"state_dir":     stringProp("Local AgentDock task state directory."),
 	}
 	if cfg.NexusEndpoint != "" {
-		props["next_required_action"] = stringProp("Concise guidance for checkpoint progress, template composition, or final review.")
 		props["guidance_context"] = arrayProp("Mature evolution records automatically recalled before task execution.")
 		props["review_revision"] = stringProp("Immutable final_review revision used to bind evolution evidence.")
 		props["evolution_candidates"] = arrayProp("Read-only candidate experiences that the saved final_review may verify.")

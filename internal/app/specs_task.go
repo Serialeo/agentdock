@@ -13,7 +13,7 @@ func taskManageToolSpecs() []ToolSpec {
 }
 
 func workflowToolSpecs() []ToolSpec {
-	return []ToolSpec{{Name: "workflow_template_manage", Contract: canonicalToolContract, Title: "Manage workflow templates", Description: "List, get, get multiple, publish, retire, or match AgentDock workflow templates. publish validates and activates a complete immutable template version; get_many requires the model to compose the returned templates before task creation.", Availability: requiresNexus, Handler: typedToolHandler("workflow_template_manage", func(ctx context.Context, r *Runtime, request tooltask.WorkflowRequest) (Result, error) {
+	return []ToolSpec{{Name: "workflow_template_manage", Contract: canonicalToolContract, Title: "Manage workflow templates", Description: "List, get, get multiple, publish, retire, or match AgentDock workflow templates. publish validates and activates a complete immutable template version; get_many returns multiple active templates with composition_required=true.", Availability: requiresNexus, Handler: typedToolHandler("workflow_template_manage", func(ctx context.Context, r *Runtime, request tooltask.WorkflowRequest) (Result, error) {
 		return r.taskTools.WorkflowManage(ctx, request)
 	})}}
 }

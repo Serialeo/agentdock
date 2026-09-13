@@ -18,8 +18,7 @@ func InputSchema(name string) (map[string]any, bool) {
 	switch name {
 	case ToolExecCommand:
 		props["cmd"] = stringProp("Command to run.")
-		props["workdir"] = stringProp(WorkdirDescription())
-		AddRuntimeProperties(props)
+		props["workdir"] = stringProp("Host working directory. Relative paths resolve from ~/AgentDock.")
 		props["skill"] = stringProp("Optional active Skill context. When workdir is omitted, the command runs from the active installed Skill root and loads that Skill isolated environment.")
 		props["skill_env"] = stringProp("Optional Skill name whose isolated environment is loaded without changing workdir. Kept for environment-only compatibility.")
 		props["env"] = map[string]any{"type": "object", "description": "Explicit command environment values. These override the selected Skill environment.", "additionalProperties": map[string]any{"type": "string"}}
@@ -51,20 +50,18 @@ func OutputSchema(name string) (map[string]any, bool) {
 	boolProp := toolcontract.Boolean
 	arrayProp := toolcontract.ObjectArray
 	props := map[string]any{
-		"sessions":         arrayProp("Command session summaries returned by list or bulk session actions."),
-		"count":            intProp("Command session count when a list or bulk action returns multiple sessions."),
-		"session_id":       stringProp("Command session id."),
-		"status":           stringProp("Session status."),
-		"runtime":          stringProp("Command runtime when reported by the host, such as windows or wsl."),
-		"wsl_distribution": stringProp("WSL distribution selected for the command when explicitly configured."),
-		"workdir":          stringProp("Logical command working directory in the selected runtime."),
-		"stdout":           stringProp("Captured stdout segment."),
-		"stderr":           stringProp("Captured stderr segment."),
-		"command_ok":       boolProp("Whether a completed command exited successfully. Omitted while the command is still running."),
-		"command_error":    stringProp("Command process error when execution did not succeed."),
-		"exit_code":        intProp("Process exit code, when available."),
-		"elapsed_ms":       intProp("Session elapsed milliseconds."),
-		"timed_out":        boolProp("Whether the command timed out."),
+		"sessions":      arrayProp("Command session summaries returned by list or bulk session actions."),
+		"count":         intProp("Command session count when a list or bulk action returns multiple sessions."),
+		"session_id":    stringProp("Command session id."),
+		"status":        stringProp("Session status."),
+		"workdir":       stringProp("Logical command working directory in the selected runtime."),
+		"stdout":        stringProp("Captured stdout segment."),
+		"stderr":        stringProp("Captured stderr segment."),
+		"command_ok":    boolProp("Whether a completed command exited successfully. Omitted while the command is still running."),
+		"command_error": stringProp("Command process error when execution did not succeed."),
+		"exit_code":     intProp("Process exit code, when available."),
+		"elapsed_ms":    intProp("Session elapsed milliseconds."),
+		"timed_out":     boolProp("Whether the command timed out."),
 	}
 	switch name {
 	case ToolExecCommand:
@@ -75,4 +72,8 @@ func OutputSchema(name string) (map[string]any, bool) {
 		return nil, false
 	}
 	return toolcontract.OutputObject(props), true
+}
+
+func Description() string {
+	return "Run a bounded command on the Host OS. Bind an active Skill with skill to use its installed root and isolated environment for this command; explicit workdir and env values override those defaults."
 }

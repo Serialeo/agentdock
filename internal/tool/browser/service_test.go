@@ -134,7 +134,7 @@ func TestCleanupStaleOnlyRemovesOldCurrentProcessSessions(t *testing.T) {
 	service.sessions["fresh"] = &session{id: "fresh", lastActivity: now.Add(-time.Hour), profileID: "fresh-profile", pages: map[target.ID]*pageState{}}
 	service.profiles["fresh-profile"] = "fresh"
 
-	got := service.cleanupStale(CleanupRequest{})
+	got := service.cleanupStale(context.Background(), CleanupRequest{})
 	if got.RemovedCount != 1 || len(got.RemovedSessions) != 1 || got.RemovedSessions[0] != "old" {
 		t.Fatalf("CleanupStale() = %#v", got)
 	}

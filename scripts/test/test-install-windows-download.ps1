@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ExpectedInstallerPath,
     [Parameter(Mandatory = $true)]
-    [string] $OutputPath
+    [string] $OutputPath,
+    [hashtable] $Headers = @{}
 )
 
 Set-StrictMode -Version Latest
@@ -16,7 +17,7 @@ $resolvedExpected = Resolve-Path -LiteralPath $ExpectedInstallerPath
 $downloaded = $false
 for ($attempt = 1; $attempt -le 10; $attempt++) {
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutputPath
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -Headers $Headers -OutFile $OutputPath
         $downloaded = $true
         break
     } catch {

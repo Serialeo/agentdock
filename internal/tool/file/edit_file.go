@@ -1,16 +1,17 @@
 package file
 
 import (
+	"context"
 	"strings"
 	"unicode/utf8"
 )
 
-func (svc *Service) editFile(request EditRequest) (Result, error) {
+func (svc *Service) editFile(ctx context.Context, request EditRequest) (Result, error) {
 	path := request.Path
 	if path == "" {
 		return nil, toolError("INVALID_ARGUMENT", "path is required", "validation")
 	}
-	p, err := svc.ws.ResolveExisting(path)
+	p, err := svc.ws.ResolveExistingContext(ctx, path)
 	if err != nil {
 		return nil, err
 	}

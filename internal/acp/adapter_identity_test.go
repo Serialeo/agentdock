@@ -7,7 +7,7 @@ func TestManagerScopesPersistentSessionsToConfiguredAgent(t *testing.T) {
 	workspace := t.TempDir()
 
 	first := newStoreOnlyManager(t, home, "adapter-a")
-	createdByFirst, err := first.persistNewSession(sessionLifecycleResponse{SessionID: "shared-remote-id"}, workspace, nil)
+	createdByFirst, err := first.persistNewSession(sessionLifecycleResponse{SessionID: "shared-remote-id"}, workspace, nil, SessionOwnership{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestManagerScopesPersistentSessionsToConfiguredAgent(t *testing.T) {
 		t.Fatalf("adapter-b inspected adapter-a session: %#v", err)
 	}
 
-	createdBySecond, err := second.persistNewSession(sessionLifecycleResponse{SessionID: "shared-remote-id"}, workspace, nil)
+	createdBySecond, err := second.persistNewSession(sessionLifecycleResponse{SessionID: "shared-remote-id"}, workspace, nil, SessionOwnership{})
 	if err != nil {
 		t.Fatalf("different adapters must be able to reuse remote session ids: %v", err)
 	}

@@ -24,18 +24,12 @@ func (r *Runtime) AgentDockLocalContext(ctx context.Context) (Result, error) {
 
 func (r *Runtime) agentDockContext(ctx context.Context, nexusLocalOnly bool) (Result, error) {
 	skills, skillErr := r.skillCapabilityIndex()
-	commonSkills, commonSkillErr := commonSkillCapabilityIndex()
+	commonSkills, commonSkillErr := commonSkillCapabilityIndex(skills)
 	contextResult := capabilityContext{
 		Skills:            skills,
 		CommonSkills:      commonSkills,
 		DynamicMCP:        r.dynamicMCPCapabilityIndex(),
 		WorkflowTemplates: []capabilityTemplateItem{},
-		Rules: []string{
-			"需要真实执行命令或检查环境时，先用 exec_command 查看现状，再修改，修改后真实验证。",
-			"先根据 Skill 索引的 name 和 description 选择相关 Skill，再用 read_file 读取其 file 指向的 SKILL.md；Skill 只提供流程与约束，实际操作使用命令、文件、浏览器或 MCP 工具。",
-			"选择 Skill 时优先使用 skills 中的 AgentDock Skill；common_skills 是低优先级通用 Skill 索引，同名时始终优先 skills。若 common_skills.truncated=true 且当前索引未命中，可直接 list_dir 查看 common_skills.root，再用 read_file 读取对应 SKILL.md。",
-			"AgentDock 自带工具直接调用；动态 MCP 工具先用 mcp_tool_search 查找、mcp_tool_inspect 读取 schema，再用 mcp_tool_call 执行。",
-		},
 	}
 	if !nexusLocalOnly {
 		// runtime 只保留模型操作主机所需的稳定环境事实；Nexus Bridge 已通过 Hello 持有这些节点事实，
@@ -50,41 +44,28 @@ func (r *Runtime) agentDockContext(ctx context.Context, nexusLocalOnly bool) (Re
 		contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "skills", Message: "Skill 索引暂不可用。"})
 	}
 	if commonSkillErr != nil {
-		contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "common_skills", Message: "通用 Skill 索引暂不可用；需要时可直接检查 ~/.agents/skills。"})
+		contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "common_skills", Message: "通用 Skill 索引暂不可用。"})
 	}
 
 	if requiresACP(r.cfg) {
 		contextResult.ACP = &capabilityACPContext{
-			Enabled: true,
-			Agent:   r.cfg.ACPAgentName,
-			Description: "本机 Coding Agent 通道（Agent Client Protocol）。仅当用户明确要求时使用，可用来获取独特见解与编排任务；" +
-				"不是动态 MCP，不要用 mcp_tool_*。",
+			Enabled:     true,
+			Agent:       r.cfg.ACPAgentName,
+			Description: "本机 Coding Agent 通道（Agent Client Protocol）。",
 		}
 	}
 
 	if requiresNexus(r.cfg) && !nexusLocalOnly {
 		templates, templateErr := r.templateCapabilityIndex(ctx)
 		if templateErr != nil {
-			contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "workflow_templates", Message: "工作流模板索引暂不可用；多步骤任务仍应先 workflow_template_manage match。"})
+			contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "workflow_templates", Message: "工作流模板索引暂不可用。"})
 		}
 		memoryItems, memoryErr := r.memoryCapabilityIndex(ctx)
 		if memoryErr != nil {
-			contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "recall", Message: "记忆精简摘要暂不可用；需要项目事实时调用 recall_search/recall_read 精确确认。"})
+			contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "recall", Message: "记忆精简摘要暂不可用。"})
 		}
 		contextResult.WorkflowTemplates = templates
 		contextResult.Recall = &capabilityRecallContext{Enabled: true, Items: memoryItems}
-		contextResult.Rules = append(contextResult.Rules,
-			"涉及多步骤开发、部署、排障、迁移、Docker、VPS 或 Git 提交推送时，先 workflow_template_manage match；无合适模板时创建普通可恢复任务。",
-			"当多个工作流模板同时适合当前任务时，调用 workflow_template_manage get_many 读取详情；模型必须结合用户目标裁剪、去重、排序并生成最终 steps 和 completion_conditions，再用 source_template_ids 创建任务，服务端不会自动拼接模板。",
-			"普通项目记忆走 recall_*；private_note_manage 只在用户明确要求私密笔记，或内容明显包含 secret、凭据、个人敏感信息时使用。私密检索只返回名称、简介、标签、分类和路径等元数据；正文必须显式 read，Git 只备份 age 密文。",
-		)
-	}
-
-	contextResult.Rules = append(contextResult.Rules, "任务执行过程中，在形成有恢复价值的断点时调用 task_manage checkpoint；可用 completed_step_ids/current_step_id 原子批量更新，final_review=pass 不会自动补全未完成步骤。")
-	if requiresNexus(r.cfg) && !nexusLocalOnly {
-		contextResult.Rules = append(contextResult.Rules,
-			"记忆启动索引只提供紧凑背景与资料入口；索引已给出具体 path 时优先 recall_read 该条目，只有索引未覆盖且任务依赖具体历史事实时才 recall_search，索引信息已足够时不要机械检索。",
-		)
 	}
 
 	var result Result
@@ -106,7 +87,6 @@ type capabilityContext struct {
 	ACP               *capabilityACPContext       `json:"acp,omitempty"`
 	WorkflowTemplates []capabilityTemplateItem    `json:"workflow_templates"`
 	Recall            *capabilityRecallContext    `json:"recall,omitempty"`
-	Rules             []string                    `json:"rules"`
 	Warnings          []capabilityWarning         `json:"warnings,omitempty"`
 }
 
@@ -130,6 +110,8 @@ type capabilitySkillItem struct {
 type capabilityCommonSkillIndex struct {
 	Root      string                      `json:"root"`
 	Total     int                         `json:"total"`
+	Effective int                         `json:"effective"`
+	Shadowed  int                         `json:"shadowed"`
 	Truncated bool                        `json:"truncated"`
 	Items     []capabilityCommonSkillItem `json:"items"`
 }

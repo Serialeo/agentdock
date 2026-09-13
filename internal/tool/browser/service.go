@@ -176,6 +176,9 @@ func (s *Service) start(ctx context.Context, req StartRequest) (StartResult, err
 			pageContexts:     make(map[target.ID]*pageContext),
 		}
 	}
+	if owner, ok := projectOwnerFromContext(ctx); ok {
+		sess.projectOwner = owner
+	}
 	chromedp.ListenBrowser(sess.browserCtx, func(ev any) { sess.recordTargetEvent(ev) })
 
 	launchCtx, cancel := context.WithTimeout(ctx, req.Timeout)

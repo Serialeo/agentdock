@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,19 +18,24 @@ func (s *Service) closeSession(req CloseRequest) (CloseResult, error) {
 	return CloseResult{SessionID: req.SessionID, Closed: true}, nil
 }
 
-func (s *Service) cleanupStale(req CleanupRequest) CleanupResult {
+func (s *Service) cleanupStale(ctx context.Context, req CleanupRequest) CleanupResult {
 	maxAge := req.MaxAge
 	if maxAge <= 0 {
 		maxAge = defaultStaleAge
 	}
 	cutoff := s.now().Add(-maxAge)
+	owner, scoped := projectOwnerFromContext(ctx)
 
 	s.mu.Lock()
 	var stale []*session
 	for id, sess := range s.sessions {
 		sess.mu.Lock()
 		lastActivity := sess.lastActivity
+		sessionOwner := sess.projectOwner
 		sess.mu.Unlock()
+		if scoped && !owner.matches(sessionOwner) {
+			continue
+		}
 		if lastActivity.After(cutoff) {
 			continue
 		}

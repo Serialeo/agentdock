@@ -16,19 +16,11 @@ struct PermissionCheckerTests {
         }
 
         let unchecked = FileAccessPermissionChecker.uncheckedStandardLocations(home: root)
-        precondition(unchecked.map(\.title) == [
-            L10n.text("Desktop"),
-            L10n.text("Documents"),
-            L10n.text("Downloads"),
-        ])
+        precondition(unchecked.map(\.title) == ["桌面", "文稿", "下载"])
         precondition(unchecked.allSatisfy { $0.state == .notChecked })
 
         let standard = FileAccessPermissionChecker.standardLocations(home: root)
-        precondition(standard.map(\.title) == [
-            L10n.text("Desktop"),
-            L10n.text("Documents"),
-            L10n.text("Downloads"),
-        ])
+        precondition(standard.map(\.title) == ["桌面", "文稿", "下载"])
         precondition(standard.allSatisfy { $0.state == .accessible })
 
         let missing = FileAccessPermissionChecker.check(

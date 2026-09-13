@@ -2,17 +2,24 @@ package nexusbridge
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/gorilla/websocket"
-	protocol "github.com/uvwt/agentdock-protocol"
+	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/mcp"
 	"github.com/uvwt/agentdock/internal/publicartifacts"
+	"github.com/uvwt/agentdock/internal/runtimeapi"
 )
 
 func TestBridgeToolDescriptorsPreservePresentationBinding(t *testing.T) {
@@ -176,6 +183,242 @@ func TestBridgeWebSocketInvokeRecoveryAndShutdown(t *testing.T) {
 	}
 }
 
+func TestBridgeV4ToolCallRejectsMissingProjectExecutionContextBeforeHostAccess(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{AgentDockHome: filepath.Join(root, ".agentdock"), AgentDockDefaultDir: filepath.Join(root, "work")}
+	if err := cfg.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := app.NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	nodeServer := mcp.NewServer(runtime, cfg)
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	responseCh := make(chan protocol.Message, 1)
+	serverErr := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		socket, upgradeErr := upgrader.Upgrade(w, r, nil)
+		if upgradeErr != nil {
+			serverErr <- upgradeErr
+			return
+		}
+		defer socket.Close()
+		var hello protocol.Message
+		if readErr := socket.ReadJSON(&hello); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if writeErr := socket.WriteJSON(protocol.Message{Type: protocol.MessageNodeReady, ProtocolVersion: protocol.ConnectionProtocolVersion, HeartbeatMS: 60_000}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+		arguments, marshalErr := json.Marshal(protocol.ToolCallRequest{Tool: "read_file", Arguments: map[string]any{"path": "missing.txt"}})
+		if marshalErr != nil {
+			serverErr <- marshalErr
+			return
+		}
+		if writeErr := socket.WriteJSON(protocol.Message{
+			Type: protocol.MessageToolInvoke, RequestID: "missing-context", Operation: protocol.OperationToolCall, Arguments: arguments,
+		}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+		var response protocol.Message
+		if readErr := socket.ReadJSON(&response); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		responseCh <- response
+		for {
+			if _, _, readErr := socket.ReadMessage(); readErr != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	client := NewClient(
+		Identity{Endpoint: server.URL, NodeID: "node-test", DeviceID: "device-test", DeviceToken: "test-device-token"},
+		nodeServer,
+		runtime,
+		publicartifacts.Store{},
+		&ConnectionState{},
+	)
+	done := make(chan struct{})
+	go func() {
+		client.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case response := <-responseCh:
+		if response.Type != protocol.MessageToolError || response.Error == nil || response.Error.Code != protocol.ErrorExecutionContextRequired {
+			t.Fatalf("missing execution_context response = %#v", response)
+		}
+	case err := <-serverErr:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for missing execution_context rejection")
+	}
+	if _, statErr := os.Stat(filepath.Join(cfg.AgentDockDefaultDir, "missing.txt")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("missing-context read unexpectedly touched/created host path: %v", statErr)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge did not stop after missing-context test")
+	}
+}
+
+func TestBridgeV4ProjectPromptLoadReturnsCompleteApplicableAgentsChain(t *testing.T) {
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.MkdirAll(filepath.Join(work, "backend", "auth"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "AGENTS.md"), []byte("root rules\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "backend", "AGENTS.md"), []byte("backend rules\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{AgentDockHome: filepath.Join(root, ".agentdock"), AgentDockDefaultDir: work}
+	if err := cfg.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := app.NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	nodeServer := mcp.NewServer(runtime, cfg)
+
+	deployment := protocol.Deployment{
+		ID: "deployment-prompt", ProjectID: "project-prompt", NodeID: "node-test", WorkingFolder: work,
+		Role: "test", Purpose: "Bridge Project Prompt test",
+		Permissions:     protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly},
+		DesiredRevision: "rev-1", AppliedRevision: "rev-1", Enabled: true, ApplyStatus: protocol.DeploymentApplyApplied,
+	}
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	resultCh := make(chan protocol.ProjectPromptLoadResult, 1)
+	serverErr := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		socket, upgradeErr := upgrader.Upgrade(w, r, nil)
+		if upgradeErr != nil {
+			serverErr <- upgradeErr
+			return
+		}
+		defer socket.Close()
+		var hello protocol.Message
+		if readErr := socket.ReadJSON(&hello); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if writeErr := socket.WriteJSON(protocol.Message{Type: protocol.MessageNodeReady, ProtocolVersion: protocol.ConnectionProtocolVersion, HeartbeatMS: 60_000}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+
+		applyArgs, marshalErr := json.Marshal(deployment)
+		if marshalErr != nil {
+			serverErr <- marshalErr
+			return
+		}
+		if writeErr := socket.WriteJSON(protocol.Message{Type: protocol.MessageToolInvoke, RequestID: "apply", Operation: protocol.OperationProjectDeploymentApply, Arguments: applyArgs}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+		var applyResponse protocol.Message
+		if readErr := socket.ReadJSON(&applyResponse); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if applyResponse.Type != protocol.MessageToolResult {
+			serverErr <- errors.New("Project Deployment apply did not return tool.result")
+			return
+		}
+
+		promptArgs, marshalErr := json.Marshal(protocol.ProjectPromptLoadRequest{DeploymentID: deployment.ID, DeploymentRevision: deployment.AppliedRevision, CWDRel: "backend/auth"})
+		if marshalErr != nil {
+			serverErr <- marshalErr
+			return
+		}
+		if writeErr := socket.WriteJSON(protocol.Message{Type: protocol.MessageToolInvoke, RequestID: "prompt", Operation: protocol.OperationProjectPromptLoad, Arguments: promptArgs}); writeErr != nil {
+			serverErr <- writeErr
+			return
+		}
+		var promptResponse protocol.Message
+		if readErr := socket.ReadJSON(&promptResponse); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if promptResponse.Type != protocol.MessageToolResult {
+			serverErr <- errors.New("Project Prompt load did not return tool.result")
+			return
+		}
+		var promptResult protocol.ProjectPromptLoadResult
+		if decodeErr := json.Unmarshal(promptResponse.Result, &promptResult); decodeErr != nil {
+			serverErr <- decodeErr
+			return
+		}
+		resultCh <- promptResult
+		for {
+			if _, _, readErr := socket.ReadMessage(); readErr != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	client := NewClient(
+		Identity{Endpoint: server.URL, NodeID: "node-test", DeviceID: "device-test", DeviceToken: "test-device-token"},
+		nodeServer,
+		runtime,
+		publicartifacts.Store{},
+		&ConnectionState{},
+	)
+	done := make(chan struct{})
+	go func() {
+		client.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case result := <-resultCh:
+		if result.DeploymentID != deployment.ID || result.CWDRel != "backend/auth" || !result.Prompt.Complete {
+			t.Fatalf("Project Prompt result = %#v", result)
+		}
+		if len(result.Prompt.Sources) != 2 {
+			t.Fatalf("Project Prompt sources = %#v, want root and backend", result.Prompt.Sources)
+		}
+		if result.Prompt.Sources[0].Path != "AGENTS.md" || result.Prompt.Sources[0].Content != "root rules\n" || result.Prompt.Sources[1].Path != "backend/AGENTS.md" || result.Prompt.Sources[1].Content != "backend rules\n" {
+			t.Fatalf("Project Prompt source chain = %#v", result.Prompt.Sources)
+		}
+		for _, source := range result.Prompt.Sources {
+			if source.Scope == "" || source.Bytes != len(source.Content) || !strings.HasPrefix(source.SHA256, "sha256:") {
+				t.Fatalf("Project Prompt source metadata = %#v", source)
+			}
+		}
+	case err := <-serverErr:
+		t.Fatal(err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Project Prompt Bridge result")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge did not stop after Project Prompt test")
+	}
+}
+
 func TestBridgeRunReturnsAfterCanceledDialContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -195,5 +438,31 @@ func TestBridgeRunReturnsAfterCanceledDialContext(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("bridge Run did not return for canceled context")
+	}
+}
+
+func TestBridgeRetiredDirectInstructionsRouteHasNoSpecialBudgetOrFallback(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Config{AgentDockHome: filepath.Join(home, ".agentdock"), AgentDockDefaultDir: filepath.Join(home, "work")}
+	if err := cfg.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := app.NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	client := NewClient(Identity{}, nil, runtime, publicartifacts.Store{}, &ConnectionState{})
+
+	body := []byte(strings.Repeat("x", 64*1024+1))
+	if _, err := client.dispatchRuntimeRequest(t.Context(), runtimeapi.Request{
+		Method: http.MethodPost, Path: "/internal/runtime/direct-instructions", Body: body,
+	}); err == nil {
+		t.Fatal("retired Direct Instructions route retained a special large-body budget")
+	}
+	if _, err := client.dispatchRuntimeRequest(t.Context(), runtimeapi.Request{
+		Method: http.MethodGet, Path: "/internal/runtime/direct-instructions",
+	}); err == nil {
+		t.Fatal("retired Direct Instructions route unexpectedly remained available through Bridge runtime request")
 	}
 }

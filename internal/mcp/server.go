@@ -9,8 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/uvwt/agentdock/internal/app"
@@ -21,28 +23,16 @@ import (
 type Server struct {
 	runtime     *app.Runtime
 	cfg         config.Config
+	sdkMu       sync.Mutex
 	sdk         *mcpsdk.Server
 	httpHandler http.Handler
 }
 
 func NewServer(runtime *app.Runtime, cfg config.Config) *Server {
 	server := &Server{runtime: runtime, cfg: cfg}
-	serverOptions := &mcpsdk.ServerOptions{
-		Capabilities: &mcpsdk.ServerCapabilities{},
-		Instructions: serverInstructions(cfg.NexusEndpoint != "", cfg.Instructions),
-	}
-	server.sdk = mcpsdk.NewServer(
-		&mcpsdk.Implementation{Name: config.ServerName, Version: buildinfo.Version},
-		serverOptions,
-	)
-	if runtime != nil {
-		server.registerAppResources()
-		for _, definition := range runtime.ToolDefinitions() {
-			server.registerTool(definition)
-		}
-	}
+	_ = server.currentSDK()
 	server.httpHandler = mcpsdk.NewStreamableHTTPHandler(
-		func(*http.Request) *mcpsdk.Server { return server.sdk },
+		func(*http.Request) *mcpsdk.Server { return server.currentSDK() },
 		&mcpsdk.StreamableHTTPOptions{
 			// 仅在显式配置公网 URL 且启用认证时放宽 SDK 的 localhost Host 校验。
 			// 反代或 Tunnel 会保留公网 Host，入口仍由静态 Token 或 OAuth resource 绑定保护。
@@ -54,6 +44,30 @@ func NewServer(runtime *app.Runtime, cfg config.Config) *Server {
 		},
 	)
 	return server
+}
+
+func (s *Server) currentSDK() *mcpsdk.Server {
+	if s == nil {
+		return nil
+	}
+	s.sdkMu.Lock()
+	defer s.sdkMu.Unlock()
+	if s.sdk != nil {
+		return s.sdk
+	}
+	s.sdk = mcpsdk.NewServer(
+		&mcpsdk.Implementation{Name: config.ServerName, Version: buildinfo.Version},
+		&mcpsdk.ServerOptions{
+			Capabilities: &mcpsdk.ServerCapabilities{},
+		},
+	)
+	if s.runtime != nil {
+		s.registerAppResources()
+		for _, definition := range s.runtime.ToolDefinitions() {
+			s.registerTool(definition)
+		}
+	}
+	return s.sdk
 }
 
 func (s *Server) AgentDockContext(ctx context.Context) (app.Result, error) {
@@ -68,6 +82,117 @@ func (s *Server) AgentDockLocalContext(ctx context.Context) (map[string]any, err
 	}
 	result, err := s.runtime.AgentDockLocalContext(ctx)
 	return toolEnvelope("agentdock_context", result, err), nil
+}
+
+func (s *Server) PrepareProjectExecution(ctx context.Context, executionContext *protocol.ExecutionContext) (context.Context, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	return s.runtime.PrepareProjectExecution(ctx, executionContext)
+}
+
+func (s *Server) PrepareProjectSessionControlExecution(ctx context.Context, executionContext *protocol.ExecutionContext) (context.Context, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	return s.runtime.PrepareProjectSessionControlExecution(ctx, executionContext)
+}
+
+func (s *Server) ApplyProjectDeployment(deployment protocol.Deployment) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	applied, err := s.runtime.ApplyProjectDeployment(deployment)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"deployment": applied}, nil
+}
+
+func (s *Server) RemoveProjectDeployment(deploymentID string) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	if err := s.runtime.RemoveProjectDeployment(deploymentID); err != nil {
+		return nil, err
+	}
+	return map[string]any{"deployment_id": deploymentID, "removed": true}, nil
+}
+
+func (s *Server) LoadProjectPrompt(request protocol.ProjectPromptLoadRequest) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	result, err := s.runtime.LoadProjectPrompt(request)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode Project Prompt result: %w", err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(encoded, &output); err != nil {
+		return nil, fmt.Errorf("normalize Project Prompt result: %w", err)
+	}
+	return output, nil
+}
+
+func (s *Server) WriteProjectPrompt(request protocol.ProjectPromptWriteRequest) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	result, err := s.runtime.WriteProjectPrompt(request)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("encode Project Prompt write result: %w", err)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(encoded, &output); err != nil {
+		return nil, fmt.Errorf("normalize Project Prompt write result: %w", err)
+	}
+	return output, nil
+}
+
+func (s *Server) BindProjectTarget(request protocol.ProjectTargetBindRequest) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	binding, err := s.runtime.BindProjectTarget(request)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"target": binding}, nil
+}
+
+func (s *Server) RebindProjectTarget(request protocol.ProjectTargetRebindRequest) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	binding, err := s.runtime.RebindProjectTarget(request)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"target": binding}, nil
+}
+
+func (s *Server) RevokeProjectTarget(targetID string) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	s.runtime.RevokeProjectTarget(targetID)
+	return map[string]any{"target_id": targetID, "revoked": true}, nil
+}
+
+func (s *Server) RevokeProjectSession(workSessionID string) (map[string]any, error) {
+	if s == nil || s.runtime == nil {
+		return nil, errors.New("AgentDock runtime is not initialized")
+	}
+	s.runtime.RevokeProjectSession(workSessionID)
+	return map[string]any{"work_session_id": workSessionID, "revoked": true}, nil
 }
 
 func (s *Server) ToolNames() []string {
@@ -105,10 +230,11 @@ func (s *Server) HTTPHandler() http.Handler {
 }
 
 func (s *Server) ServeStdio(in io.Reader, out io.Writer) error {
-	if s == nil || s.sdk == nil {
+	server := s.currentSDK()
+	if server == nil {
 		return errors.New("MCP server is not initialized")
 	}
-	return s.sdk.Run(context.Background(), &mcpsdk.IOTransport{
+	return server.Run(context.Background(), &mcpsdk.IOTransport{
 		Reader: readCloser{Reader: in},
 		Writer: writeCloser{Writer: out},
 	})

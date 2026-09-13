@@ -12,22 +12,26 @@ on:
         type: string
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
   build-linux:
-    name: Build Linux ${{ matrix.goarch }}
+    name: Build Linux amd64
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        goarch: [amd64, arm64]
+        goarch: [amd64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -63,17 +67,22 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: Build macOS ${{ matrix.goarch }}
+    name: Build macOS arm64
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        goarch: [amd64, arm64]
+        goarch: [arm64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -118,6 +127,11 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -136,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p payload
-          for architecture in amd64 arm64; do
+          for architecture in arm64; do
             archive="$RUNNER_TEMP/cloudflared-darwin-$architecture.tgz"
             extract_dir="$RUNNER_TEMP/cloudflared-$architecture"
             curl -fL --retry 5 --retry-delay 2 \
@@ -151,7 +165,6 @@ jobs:
             install -m 0755 "$extract_dir/cloudflared" "$output"
             case "$architecture" in
               arm64) expected_file_architecture='arm64' ;;
-              amd64) expected_file_architecture='x86_64' ;;
             esac
             file_output="$(file "$output")"
             [[ "$file_output" == *"$expected_file_architecture"* ]]
@@ -164,18 +177,15 @@ jobs:
 
           (
             cd payload
-            shasum -a 256 -c agentdock_darwin_amd64.tar.gz.sha256
             shasum -a 256 -c agentdock_darwin_arm64.tar.gz.sha256
-            shasum -a 256 -c cloudflared_darwin_amd64.sha256
             shasum -a 256 -c cloudflared_darwin_arm64.sha256
           )
 
       - name: Validate menu app
         run: ./scripts/test/test-macos-app.sh
 
-      - name: Build universal menu app
+      - name: Build arm64 menu app
         env:
-          AGENTDOCK_MACOS_ARCHES: arm64,x86_64
           AGENTDOCK_MACOS_APP_OUTPUT_DIR: dist/macos-app
           AGENTDOCK_MACOS_OFFLINE_PAYLOAD_DIR: ${{ github.workspace }}/payload
         run: packaging/macos/build-app.sh
@@ -185,24 +195,29 @@ jobs:
         with:
           name: agentdock-macos-dmg
           path: |
-            dist/macos-app/AgentDock-macos-universal.dmg
-            dist/macos-app/AgentDock-macos-universal.dmg.sha256
-            dist/macos-app/AgentDock-macos-universal.zip
-            dist/macos-app/AgentDock-macos-universal.zip.sha256
+            dist/macos-app/AgentDock-macos-arm64.dmg
+            dist/macos-app/AgentDock-macos-arm64.dmg.sha256
+            dist/macos-app/AgentDock-macos-arm64.zip
+            dist/macos-app/AgentDock-macos-arm64.zip.sha256
           if-no-files-found: error
 
   build-windows:
-    name: Build Windows ${{ matrix.goarch }}
+    name: Build Windows amd64
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        goarch: [amd64, arm64]
+        goarch: [amd64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Configure private Go module access
+        uses: ./.github/actions/setup-private-go
+        with:
+          token: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -263,13 +278,9 @@ jobs:
           $buildDate = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
           $sourceCommit = (git rev-parse HEAD).Trim()
           $ldflags = "-s -w -X github.com/uvwt/agentdock/internal/buildinfo.Commit=$sourceCommit -X github.com/uvwt/agentdock/internal/buildinfo.BuildDate=$buildDate"
-          $runtimeIdentifier = if ($env:GOARCH -eq 'arm64') { 'win-arm64' } else { 'win-x64' }
+          $runtimeIdentifier = 'win-x64'
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           go build -trimpath -ldflags $ldflags -o dist/agentdock.exe ./cmd/agentdock
-          go build -trimpath -ldflags '-s -w' -o dist/agentdock-arbiter.exe ./cmd/agentdock-arbiter
-          go build -trimpath -ldflags '-s -w' -o dist/agentdock-shim.exe ./cmd/agentdock-shim
-          go build -trimpath -ldflags '-s -w -H=windowsgui' -o dist/agentdock-tray-shim.exe ./cmd/agentdock-shim
-          & .\packaging\windows\build-wsl-helper-payload.ps1 -OutputDirectory .\dist\wsl-helper
           dotnet publish .\desktop\windows\control-panel\AgentDock.ControlPanel.csproj `
             -c Release `
             -r $runtimeIdentifier `
@@ -293,10 +304,7 @@ jobs:
         run: |
           .\packaging\windows\sign-windows.ps1 -Path @(
             '.\dist\agentdock.exe',
-            '.\dist\agentdock-tray.exe',
-            '.\dist\agentdock-arbiter.exe',
-            '.\dist\agentdock-shim.exe',
-            '.\dist\agentdock-tray-shim.exe'
+            '.\dist\agentdock-tray.exe'
           )
 
       - name: Package
@@ -309,7 +317,7 @@ jobs:
           python .\packaging\build-core-skill-bundle.py --output dist\share\agentdock\core-skills
           Copy-Item .\packaging\windows\assets\agentdock.ico dist\agentdock.ico -Force
           Copy-Item .\scripts\install\manage-windows.ps1 dist\manage-windows.ps1 -Force
-          Compress-Archive -Path dist\agentdock.exe, dist\agentdock-tray.exe, dist\agentdock-arbiter.exe, dist\agentdock-shim.exe, dist\agentdock-tray-shim.exe, dist\agentdock.ico, dist\manage-windows.ps1, dist\share, dist\wsl-helper -DestinationPath $asset -Force
+          Compress-Archive -Path dist\agentdock.exe, dist\agentdock-tray.exe, dist\agentdock.ico, dist\manage-windows.ps1, dist\share -DestinationPath $asset -Force
           $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$asset.sha256", "$hash  $asset`n", [Text.UTF8Encoding]::new($false))
 
@@ -323,13 +331,13 @@ jobs:
           if-no-files-found: error
 
   build-windows-setup:
-    name: Build signed Windows offline Setup ${{ matrix.goarch }}
+    name: Build signed Windows offline Setup amd64
     needs: build-windows
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        goarch: [amd64, arm64]
+        goarch: [amd64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -399,6 +407,8 @@ jobs:
     name: Publish GitHub Release
     needs: [build-linux, build-macos, build-macos-app, build-windows, build-windows-setup]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -461,8 +471,7 @@ jobs:
               uninstall-macos.sh \
               install.ps1 \
               uninstall-windows.ps1 \
-              AgentDockSetup-amd64.exe \
-              AgentDockSetup-arm64.exe; do
+              AgentDockSetup-amd64.exe; do
               shasum -a 256 "$file" > "$file.sha256"
             done
           )
@@ -471,11 +480,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f dist/AgentDock-macos-universal.dmg
-          test -f dist/AgentDock-macos-universal.dmg.sha256
-          test -f dist/AgentDock-macos-universal.zip
-          test -f dist/AgentDock-macos-universal.zip.sha256
-          (cd dist && shasum -a 256 -c AgentDock-macos-universal.zip.sha256)
+          test -f dist/AgentDock-macos-arm64.dmg
+          test -f dist/AgentDock-macos-arm64.dmg.sha256
+          test -f dist/AgentDock-macos-arm64.zip
+          test -f dist/AgentDock-macos-arm64.zip.sha256
+          (cd dist && shasum -a 256 -c AgentDock-macos-arm64.zip.sha256)
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -500,6 +509,11 @@ jobs:
     name: Publish container (${{ matrix.variant }})
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PRIVATE_GO_READ_TOKEN: ${{ secrets.PRIVATE_GO_READ_TOKEN }}
     strategy:
       fail-fast: false
       # 三个多架构镜像并发推送会触发 GHCR secondary rate limit，发布阶段串行执行。
@@ -524,9 +538,6 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -537,19 +548,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Prepare image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            agentdockio/agentdock
+          images: ghcr.io/serialeo/agentdock
           flavor: latest=false
           tags: |
             type=raw,value=${{ matrix.tag_prefix }}${{ github.event.inputs.tag || github.ref_name }},priority=1000
@@ -568,13 +571,15 @@ jobs:
           context: .
           file: Dockerfile
           target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BUILD_COMMIT=${{ steps.build.outputs.commit }}
             BUILD_DATE=${{ steps.build.outputs.date }}
+          secret-envs: |
+            github_token=PRIVATE_GO_READ_TOKEN
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }},ignore-error=true
 
@@ -587,9 +592,23 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          release_base="https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG"
+          release_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$release_dir"
+          gh release download "$RELEASE_TAG" --repo "${{ github.repository }}" --dir "$release_dir"
+          release_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          python3 -m http.server "$release_port" --bind 127.0.0.1 --directory "$release_dir" >"$RUNNER_TEMP/release-http.log" 2>&1 &
+          release_server_pid=$!
+          trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
+          release_base="http://127.0.0.1:$release_port"
           installer="$RUNNER_TEMP/install.sh"
           installer_tmp="$RUNNER_TEMP/installer"
           install_dir="$RUNNER_TEMP/agentdock-install"
@@ -620,7 +639,7 @@ jobs:
           "$install_dir/bin/agentdock" --help >/dev/null 2>&1
 
           test -f "$data_dir/.agentdock/skill-store/bundled-skills.json"
-          for skill in skill-authoring skill-installation; do
+          for skill in skill-authoring skill-installation skill-vetter-runtime; do
             state="$data_dir/.agentdock/skill-store/state/$skill.json"
             version="$(jq -r .active_version "$state")"
             test -n "$version"
@@ -649,14 +668,29 @@ jobs:
     steps:
       - name: Download and run published installer
         shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag='${{ github.event.inputs.tag || github.ref_name }}'
-          release_base="https://github.com/${{ github.repository }}/releases/download/$tag"
+          release_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$release_dir"
+          gh release download "$tag" --repo "${{ github.repository }}" --dir "$release_dir"
+          release_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(('127.0.0.1', 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          python3 -m http.server "$release_port" --bind 127.0.0.1 --directory "$release_dir" >"$RUNNER_TEMP/release-http.log" 2>&1 &
+          release_server_pid=$!
+          trap 'kill "$release_server_pid" >/dev/null 2>&1 || true' EXIT
+          release_base="http://127.0.0.1:$release_port"
           installer="$RUNNER_TEMP/install.sh"
           uninstaller="$RUNNER_TEMP/uninstall-macos.sh"
-          dmg="$RUNNER_TEMP/AgentDock-macos-universal.dmg"
-          zip="$RUNNER_TEMP/AgentDock-macos-universal.zip"
+          dmg="$RUNNER_TEMP/AgentDock-macos-arm64.dmg"
+          zip="$RUNNER_TEMP/AgentDock-macos-arm64.zip"
           zip_dir="$RUNNER_TEMP/agentdock-zip"
           mount_dir="$RUNNER_TEMP/agentdock-dmg"
           dmg_mounted=false
@@ -667,14 +701,14 @@ jobs:
           }
           trap cleanup EXIT
 
-          curl -fL "$release_base/AgentDock-macos-universal.dmg" -o "$dmg"
-          curl -fL "$release_base/AgentDock-macos-universal.dmg.sha256" -o "$dmg.sha256"
-          curl -fL "$release_base/AgentDock-macos-universal.zip" -o "$zip"
-          curl -fL "$release_base/AgentDock-macos-universal.zip.sha256" -o "$zip.sha256"
+          curl -fL "$release_base/AgentDock-macos-arm64.dmg" -o "$dmg"
+          curl -fL "$release_base/AgentDock-macos-arm64.dmg.sha256" -o "$dmg.sha256"
+          curl -fL "$release_base/AgentDock-macos-arm64.zip" -o "$zip"
+          curl -fL "$release_base/AgentDock-macos-arm64.zip.sha256" -o "$zip.sha256"
           (
             cd "$RUNNER_TEMP"
-            shasum -a 256 -c AgentDock-macos-universal.dmg.sha256
-            shasum -a 256 -c AgentDock-macos-universal.zip.sha256
+            shasum -a 256 -c AgentDock-macos-arm64.dmg.sha256
+            shasum -a 256 -c AgentDock-macos-arm64.zip.sha256
           )
           mkdir -p "$zip_dir"
           ditto -x -k "$zip" "$zip_dir"
@@ -693,10 +727,10 @@ jobs:
           helper_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/Helpers/AgentDockLoginHelper")"
           core_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/Helpers/agentdock")"
           cloudflared_arches="$(lipo -archs "$mount_dir/AgentDock.app/Contents/Helpers/cloudflared")"
-          [[ "$app_arches" == *arm64* && "$app_arches" == *x86_64* ]]
-          [[ "$helper_arches" == *arm64* && "$helper_arches" == *x86_64* ]]
-          [[ "$core_arches" == *arm64* && "$core_arches" == *x86_64* ]]
-          [[ "$cloudflared_arches" == *arm64* && "$cloudflared_arches" == *x86_64* ]]
+          [[ "$app_arches" == "arm64" ]]
+          [[ "$helper_arches" == "arm64" ]]
+          [[ "$core_arches" == "arm64" ]]
+          [[ "$cloudflared_arches" == "arm64" ]]
           cmp \
             "$zip_dir/AgentDock.app/Contents/MacOS/AgentDock" \
             "$mount_dir/AgentDock.app/Contents/MacOS/AgentDock"
@@ -739,7 +773,7 @@ jobs:
             sh "$installer" --version "$tag"
           "$RUNNER_TEMP/bin/agentdock" --help >/dev/null 2>&1
           test -f "$RUNNER_TEMP/home/.agentdock/skill-store/bundled-skills.json"
-          for skill in skill-authoring skill-installation; do
+          for skill in skill-authoring skill-installation skill-vetter-runtime; do
             state="$RUNNER_TEMP/home/.agentdock/skill-store/state/$skill.json"
             version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["active_version"])' "$state")"
             test -f "$RUNNER_TEMP/home/.agentdock/skill-store/installed/$skill/$version/SKILL.md"
@@ -757,23 +791,39 @@ jobs:
 
       - name: Download published installer
         shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
           $tag = '${{ github.event.inputs.tag || github.ref_name }}'
-          $downloadedInstaller = Join-Path $env:RUNNER_TEMP 'install-release.ps1'
-          $installerUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/install.ps1"
-          & .\scripts\test\test-install-windows-download.ps1 `
-            -Url $installerUrl `
-            -ExpectedInstallerPath .\scripts\install\install.ps1 `
-            -OutputPath $downloadedInstaller
-          "DOWNLOADED_INSTALLER=$downloadedInstaller" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
-          $setup = Join-Path $env:RUNNER_TEMP 'AgentDockSetup-amd64.exe'
-          Invoke-WebRequest `
-            -UseBasicParsing `
-            -Uri "https://github.com/${{ github.repository }}/releases/download/$tag/AgentDockSetup-amd64.exe" `
-            -OutFile $setup
-          "PUBLISHED_SETUP=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+          $releaseDir = Join-Path $env:RUNNER_TEMP 'release-assets'
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+          "RELEASE_ASSET_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+          gh release download $tag --repo '${{ github.repository }}' --dir $releaseDir
+          $port = [int](python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+          $server = Start-Process -FilePath 'python' -ArgumentList @('-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $releaseDir) -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 1
+            $releaseBase = "http://127.0.0.1:$port"
+            $downloadedInstaller = Join-Path $env:RUNNER_TEMP 'install-release.ps1'
+            $installerUrl = "$releaseBase/install.ps1"
+            & .\scripts\test\test-install-windows-download.ps1 `
+              -Url $installerUrl `
+              -ExpectedInstallerPath .\scripts\install\install.ps1 `
+              -OutputPath $downloadedInstaller
+            "DOWNLOADED_INSTALLER=$downloadedInstaller" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+            "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+            $setup = Join-Path $env:RUNNER_TEMP 'AgentDockSetup-amd64.exe'
+            Invoke-WebRequest `
+              -UseBasicParsing `
+              -Uri "$releaseBase/AgentDockSetup-amd64.exe" `
+              -OutFile $setup
+            "PUBLISHED_SETUP=$setup" | Out-File -FilePath $env:GITHUB_ENV -Encoding ascii -Append
+          } finally {
+            if ($null -ne $server -and -not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force
+            }
+          }
 
       - name: Verify published Setup signature
         shell: pwsh
@@ -795,14 +845,27 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\scripts\test\run-windows-installer-e2e-as-standard-user.ps1 `
-            -InstallerPath $env:DOWNLOADED_INSTALLER `
-            -Version $env:RELEASE_TAG
+          $port = [int](python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+          $server = Start-Process -FilePath 'python' -ArgumentList @('-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $env:RELEASE_ASSET_DIR) -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 1
+            & .\scripts\test\run-windows-installer-e2e-as-standard-user.ps1 `
+              -InstallerPath $env:DOWNLOADED_INSTALLER `
+              -Version $env:RELEASE_TAG `
+              -ReleaseBaseUrl "http://127.0.0.1:$port"
+          } finally {
+            if ($null -ne $server -and -not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force
+            }
+          }
 
   verify-container:
     name: Verify published containers
     needs: publish-container
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -816,28 +879,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Run published GHCR images
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
           AGENTDOCK_TEST_BUILD: "false"
-          AGENTDOCK_TEST_RUNTIME_IMAGE: ghcr.io/${{ github.repository }}:${{ github.event.inputs.tag || github.ref_name }}
-          AGENTDOCK_TEST_DEV_IMAGE: ghcr.io/${{ github.repository }}:dev-${{ github.event.inputs.tag || github.ref_name }}
-          AGENTDOCK_TEST_BROWSER_IMAGE: ghcr.io/${{ github.repository }}:browser-${{ github.event.inputs.tag || github.ref_name }}
-          AGENTDOCK_EXPECT_IMAGE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
-        run: ./scripts/test/test-docker-images.sh
-
-      - name: Run published Docker Hub images
-        env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-          AGENTDOCK_TEST_BUILD: "false"
-          AGENTDOCK_TEST_RUNTIME_IMAGE: agentdockio/agentdock:${{ github.event.inputs.tag || github.ref_name }}
-          AGENTDOCK_TEST_DEV_IMAGE: agentdockio/agentdock:dev-${{ github.event.inputs.tag || github.ref_name }}
-          AGENTDOCK_TEST_BROWSER_IMAGE: agentdockio/agentdock:browser-${{ github.event.inputs.tag || github.ref_name }}
+          AGENTDOCK_TEST_RUNTIME_IMAGE: ghcr.io/serialeo/agentdock:${{ github.event.inputs.tag || github.ref_name }}
+          AGENTDOCK_TEST_DEV_IMAGE: ghcr.io/serialeo/agentdock:dev-${{ github.event.inputs.tag || github.ref_name }}
+          AGENTDOCK_TEST_BROWSER_IMAGE: ghcr.io/serialeo/agentdock:browser-${{ github.event.inputs.tag || github.ref_name }}
           AGENTDOCK_EXPECT_IMAGE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: ./scripts/test/test-docker-images.sh

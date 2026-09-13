@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	protocol "github.com/uvwt/agentdock-protocol"
+	protocol "github.com/Serialeo/agentdock-protocol"
 )
 
 func TestPublishFileCreatesImmutableSignedSnapshot(t *testing.T) {

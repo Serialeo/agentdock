@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/uvwt/agentdock/internal/app"
+	toolfile "github.com/uvwt/agentdock/internal/tool/file"
+	toolskill "github.com/uvwt/agentdock/internal/tool/skill"
 )
 
 // MethodAllowed 返回指定 Runtime API 路径允许当前方法与否。
@@ -24,7 +26,7 @@ func MethodAllowed(method, path string) bool {
 		_, ok := runtimeTaskID(cleanPath)
 		return ok
 	}
-	return method == http.MethodPost && (cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" || cleanPath == "/internal/runtime/evolve")
+	return method == http.MethodPost && (cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" || cleanPath == "/internal/runtime/evolve" || cleanPath == "/internal/runtime/skills/manage")
 }
 
 func AllowHeader(path string) string {
@@ -34,6 +36,9 @@ func AllowHeader(path string) string {
 	}
 	if cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" {
 		return "GET, POST"
+	}
+	if cleanPath == "/internal/runtime/skills/manage" {
+		return "POST"
 	}
 	if cleanPath == "/internal/runtime/evolve" {
 		return "POST"
@@ -57,8 +62,22 @@ func Dispatch(ctx context.Context, runtime Runtime, request Request) (map[string
 		refresh := strings.EqualFold(request.queryValue("refresh"), "true") || method == http.MethodPost
 		result, err := runtime.RuntimeCapabilities(ctx, refresh)
 		return map[string]any(result), err
+	case path == "/internal/runtime/files":
+		browseRequest, err := decodeRuntimeBrowseRequest(request)
+		if err != nil {
+			return nil, err
+		}
+		result, err := runtime.RuntimeBrowseFiles(ctx, browseRequest)
+		return map[string]any(result), err
 	case path == "/internal/runtime/skills":
 		result, err := runtime.RuntimeSkills()
+		return map[string]any(result), err
+	case path == "/internal/runtime/skills/manage" && method == http.MethodPost:
+		request, err := decodeRuntimeSkillManageRequest(request.Body)
+		if err != nil {
+			return nil, err
+		}
+		result, err := runtime.RuntimeSkillManage(ctx, request)
 		return map[string]any(result), err
 	case strings.HasPrefix(path, "/internal/runtime/skills/"):
 		skill, filePath, action, ok := runtimeSkillRoute(path)
@@ -103,11 +122,11 @@ func Dispatch(ctx context.Context, runtime Runtime, request Request) (map[string
 		result, err := runtime.RuntimeMCPServer(ctx, name)
 		return map[string]any(result), err
 	case path == "/internal/runtime/tasks":
-		limit, err := parseRuntimeTaskLimit(request.queryValue("limit"))
+		options, err := decodeRuntimeTaskQuery(request)
 		if err != nil {
 			return nil, err
 		}
-		result, err := runtime.RuntimeTasks(request.queryValue("status"), limit)
+		result, err := runtime.RuntimeTasks(options)
 		return map[string]any(result), err
 	case isTaskPath && method == http.MethodDelete:
 		result, err := runtime.RuntimeTaskDelete(taskID)
@@ -118,6 +137,99 @@ func Dispatch(ctx context.Context, runtime Runtime, request Request) (map[string
 	default:
 		return nil, &app.ToolError{Code: "NOT_FOUND", Message: "runtime API route not found", Category: "not_found"}
 	}
+}
+
+func decodeRuntimeBrowseRequest(request Request) (toolfile.BrowseRequest, error) {
+	for key, values := range request.Query {
+		switch key {
+		case "path", "offset", "limit", "include_hidden":
+		default:
+			return toolfile.BrowseRequest{}, &app.ToolError{Code: "INVALID_FILE_BROWSE_QUERY", Message: "unsupported file browse query parameter", Category: "validation"}
+		}
+		if len(values) > 1 {
+			return toolfile.BrowseRequest{}, &app.ToolError{Code: "INVALID_FILE_BROWSE_QUERY", Message: "file browse query parameters must not be repeated", Category: "validation"}
+		}
+	}
+
+	browse := toolfile.BrowseRequest{Path: request.queryValue("path")}
+	if raw := strings.TrimSpace(request.queryValue("offset")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || value > toolfile.MaxBrowseOffset {
+			return toolfile.BrowseRequest{}, &app.ToolError{Code: "INVALID_FILE_BROWSE_QUERY", Message: "offset must be a bounded non-negative integer", Category: "validation"}
+		}
+		browse.Offset = &value
+	}
+	if raw := strings.TrimSpace(request.queryValue("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > toolfile.MaxBrowseLimit {
+			return toolfile.BrowseRequest{}, &app.ToolError{Code: "INVALID_FILE_BROWSE_QUERY", Message: "limit is outside the allowed range", Category: "validation"}
+		}
+		browse.Limit = &value
+	}
+	if raw := strings.TrimSpace(request.queryValue("include_hidden")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return toolfile.BrowseRequest{}, &app.ToolError{Code: "INVALID_FILE_BROWSE_QUERY", Message: "include_hidden must be a boolean", Category: "validation"}
+		}
+		browse.IncludeHidden = value
+	}
+	return browse, nil
+}
+
+type runtimeSkillManageRequest struct {
+	Action  string  `json:"action"`
+	Skill   string  `json:"skill"`
+	Version string  `json:"version,omitempty"`
+	Key     string  `json:"key,omitempty"`
+	Value   *string `json:"value,omitempty"`
+}
+
+func decodeRuntimeSkillManageRequest(body []byte) (toolskill.PackageRequest, error) {
+	if len(body) > 64*1024 {
+		return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "Skill settings request body is too large", Category: "validation"}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var request runtimeSkillManageRequest
+	if err := decoder.Decode(&request); err != nil {
+		return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "invalid Skill settings request body", Category: "validation"}
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "request body must contain exactly one JSON value", Category: "validation"}
+	}
+	request.Action = strings.ToLower(strings.TrimSpace(request.Action))
+	request.Skill = strings.TrimSpace(request.Skill)
+	request.Version = strings.TrimSpace(request.Version)
+	request.Key = strings.TrimSpace(request.Key)
+	if request.Skill == "" {
+		return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "skill is required", Category: "validation"}
+	}
+	switch request.Action {
+	case "activate":
+		if request.Version == "" || request.Key != "" || request.Value != nil {
+			return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "activate requires version and does not accept environment fields", Category: "validation"}
+		}
+	case "rollback":
+		if request.Version != "" || request.Key != "" || request.Value != nil {
+			return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "rollback accepts only skill", Category: "validation"}
+		}
+	case "env_list":
+		if request.Version != "" || request.Key != "" || request.Value != nil {
+			return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "env_list accepts only skill", Category: "validation"}
+		}
+	case "env_set":
+		if request.Key == "" || request.Value == nil || request.Version != "" {
+			return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "env_set requires key and an explicit value", Category: "validation"}
+		}
+	case "env_unset":
+		if request.Key == "" || request.Value != nil || request.Version != "" {
+			return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "env_unset requires key and no value", Category: "validation"}
+		}
+	default:
+		return toolskill.PackageRequest{}, &app.ToolError{Code: "INVALID_SKILL_REQUEST", Message: "action must be activate, rollback, env_list, env_set, or env_unset", Category: "validation"}
+	}
+	return toolskill.PackageRequest{Action: request.Action, Skill: request.Skill, Version: request.Version, Key: request.Key, Value: request.Value}, nil
 }
 
 type runtimeMCPRequest struct {
@@ -261,18 +373,4 @@ func runtimeTaskID(path string) (string, bool) {
 		return "", false
 	}
 	return id, true
-}
-
-func parseRuntimeTaskLimit(raw string) (int, error) {
-	if strings.TrimSpace(raw) == "" {
-		return 0, nil
-	}
-	limit, err := strconv.Atoi(raw)
-	if err != nil || limit < 0 || limit > 200 {
-		return 0, &app.ToolError{
-			Code: "INVALID_LIMIT", Message: "limit must be an integer between 0 and 200", Category: "validation",
-			Details: map[string]any{"limit": raw, "minimum": 0, "maximum": 200},
-		}
-	}
-	return limit, nil
 }

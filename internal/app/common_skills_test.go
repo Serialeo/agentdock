@@ -24,11 +24,11 @@ func TestCommonSkillCapabilityIndexListsValidSkillsInStableOrder(t *testing.T) {
 	writeCommonSkillForTest(t, root, "a-dir", "a-skill", strings.Repeat("A", commonSkillDescriptionBytes+40))
 	writeCommonSkillFileForTest(t, filepath.Join(root, "invalid", "SKILL.md"), "---\nname: invalid\ndescription:\n---\n\n# Invalid\n")
 
-	index, err := commonSkillCapabilityIndex()
+	index, err := commonSkillCapabilityIndex(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if index.Root != root || index.Total != 2 || index.Truncated || len(index.Items) != 2 {
+	if index.Root != root || index.Total != 2 || index.Effective != 2 || index.Shadowed != 0 || index.Truncated || len(index.Items) != 2 {
 		t.Fatalf("unexpected common Skill index: %#v", index)
 	}
 	if index.Items[0].Name != "a-skill" || index.Items[1].Name != "z-skill" {
@@ -51,11 +51,11 @@ func TestCommonSkillCapabilityIndexTruncatesWithoutDroppingTotal(t *testing.T) {
 		writeCommonSkillForTest(t, root, name, name, "Common skill.")
 	}
 
-	got, err := commonSkillCapabilityIndex()
+	got, err := commonSkillCapabilityIndex(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Total != commonSkillIndexLimit+3 || !got.Truncated || len(got.Items) != commonSkillIndexLimit {
+	if got.Total != commonSkillIndexLimit+3 || got.Effective != commonSkillIndexLimit+3 || got.Shadowed != 0 || !got.Truncated || len(got.Items) != commonSkillIndexLimit {
 		t.Fatalf("unexpected truncated index: %#v", got)
 	}
 	if got.Items[0].Name != "skill-00" || got.Items[len(got.Items)-1].Name != "skill-49" {
@@ -67,11 +67,11 @@ func TestCommonSkillCapabilityIndexMissingRootIsEmpty(t *testing.T) {
 	home := t.TempDir()
 	setUserHomeForTest(t, home)
 
-	index, err := commonSkillCapabilityIndex()
+	index, err := commonSkillCapabilityIndex(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if index.Total != 0 || index.Truncated || len(index.Items) != 0 {
+	if index.Total != 0 || index.Effective != 0 || index.Shadowed != 0 || index.Truncated || len(index.Items) != 0 {
 		t.Fatalf("missing common Skill root should be an empty index: %#v", index)
 	}
 }
@@ -89,5 +89,46 @@ func writeCommonSkillFileForTest(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCommonSkillCapabilityIndexShadowsInstalledSkillBeforeTruncation(t *testing.T) {
+	home := t.TempDir()
+	setUserHomeForTest(t, home)
+	root := filepath.Join(home, ".agents", "skills")
+	writeCommonSkillForTest(t, root, "shadow", "foo", "Common shadow.")
+	writeCommonSkillForTest(t, root, "keep", "bar", "Common bar.")
+
+	got, err := commonSkillCapabilityIndex([]capabilitySkillItem{{Name: "foo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != 2 || got.Effective != 1 || got.Shadowed != 1 || got.Truncated || len(got.Items) != 1 || got.Items[0].Name != "bar" {
+		t.Fatalf("shadowed common skill index = %#v", got)
+	}
+}
+
+func TestCommonSkillCapabilityIndexDeduplicatesNormalizedCommonNames(t *testing.T) {
+	home := t.TempDir()
+	setUserHomeForTest(t, home)
+	root := filepath.Join(home, ".agents", "skills")
+	writeCommonSkillForTest(t, root, "z-package", "foo", "Later duplicate.")
+	writeCommonSkillForTest(t, root, "a-package", "foo", "Stable winner.")
+
+	got, err := commonSkillCapabilityIndex(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != 2 || got.Effective != 1 || got.Shadowed != 1 || got.Truncated || len(got.Items) != 1 {
+		t.Fatalf("deduplicated common Skill index = %#v", got)
+	}
+	if got.Items[0].Name != "foo" || got.Items[0].File != filepath.Join(root, "a-package", "SKILL.md") {
+		t.Fatalf("common duplicate winner is not stable: %#v", got.Items)
+	}
+}
+
+func TestNormalizedSkillNameUsesNFKCAndCaseFolding(t *testing.T) {
+	if got := normalizedSkillName("  ＦＯＯ  "); got != "foo" {
+		t.Fatalf("normalizedSkillName() = %q, want foo", got)
 	}
 }

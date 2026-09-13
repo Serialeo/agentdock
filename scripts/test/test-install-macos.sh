@@ -8,14 +8,12 @@ trap 'PATH="$TEST_PATH" rm -rf "$TMP_ROOT"' EXIT
 
 case "$(uname -m)" in
   arm64|aarch64) release_arch="arm64" ;;
-  x86_64|amd64) release_arch="amd64" ;;
-  *) print -u2 -- "unsupported test architecture: $(uname -m)"; exit 1 ;;
+  *) print -u2 -- "仅支持 macOS arm64，当前架构：$(uname -m)"; exit 1 ;;
 esac
 
 release_dir="$TMP_ROOT/release files"
 build_dir="$TMP_ROOT/build files"
 home_dir="$TMP_ROOT/home with spaces"
-no_app_path="$TMP_ROOT/no AgentDock.app"
 asset="agentdock_darwin_${release_arch}.tar.gz"
 mkdir -p "$release_dir" "$build_dir/bin" "$home_dir"
 release_url="$(python3 - "$release_dir" <<'PYURI'
@@ -115,9 +113,16 @@ test -x "$binary"
 "$binary" --help >/dev/null 2>&1
 test -d "$state_dir"
 test -f "$state_dir/skill-store/bundled-skills.json"
-test -f "$state_dir/skill-store/installed/agentdock-user-guide/1.1.0/SKILL.md"
-test -f "$state_dir/skill-store/installed/skill-authoring/1.2.0/SKILL.md"
-test -f "$state_dir/skill-store/installed/skill-installation/1.2.1/SKILL.md"
+python3 - "$build_dir/share/agentdock/core-skills/manifest.json" "$state_dir" <<'PYSKILLS'
+import json
+from pathlib import Path
+import sys
+
+manifest = json.loads(Path(sys.argv[1]).read_text())
+for skill in manifest["skills"]:
+    document = Path(sys.argv[2]) / "skill-store" / "installed" / skill["name"] / skill["version"] / "SKILL.md"
+    assert document.is_file(), f"bundled Skill was not installed: {document}"
+PYSKILLS
 test -d "$backup_dir"
 test -d "$work_dir"
 test -d "$app_support"
@@ -808,59 +813,8 @@ test "$(sha256_of "$service_plist")" = "$old_plist_sha"
 assert_file_contains "$fake_state/curl.calls" 'http://127.0.0.1:18767/healthz'
 assert_file_not_contains "$fake_state/curl.calls" 'http://127.0.0.8:18888/healthz'
 
-# App-managed 布局必须先调用 Bundle 自己的 SMAppService 注销入口；失败时不能先删配置。
-app_uninstall_home="$TMP_ROOT/app uninstall home"
-fake_app="$TMP_ROOT/fake AgentDock.app"
-app_helper_calls="$TMP_ROOT/app-helper.calls"
-app_helper_fail="$TMP_ROOT/app-helper.fail"
-app_fake_state="$TMP_ROOT/app fake launchctl state"
-mkdir -p "$app_fake_state"
-mkdir -p "$app_uninstall_home/Library/Application Support/AgentDock" \
-  "$app_uninstall_home/.agentdock" \
-  "$app_uninstall_home/AgentDock" \
-  "$fake_app/Contents/MacOS"
-print -r -- 'keep' > "$app_uninstall_home/Library/Application Support/AgentDock/keep.txt"
-print -r -- 'state' > "$app_uninstall_home/.agentdock/preserve.txt"
-print -r -- 'workspace' > "$app_uninstall_home/AgentDock/preserve.txt"
-cat > "$fake_app/Contents/MacOS/AgentDock" <<'SCRIPT'
-#!/bin/zsh
-set -euo pipefail
-print -r -- "$*" >> "$APP_HELPER_CALLS"
-[[ ! -f "$APP_HELPER_FAIL" ]] || exit 17
-SCRIPT
-chmod +x "$fake_app/Contents/MacOS/AgentDock"
-: > "$app_helper_fail"
-if env -i \
-  HOME="$app_uninstall_home" \
-  PATH="$fake_bin:$TEST_PATH" \
-  TEST_LAUNCHCTL_STATE="$app_fake_state" \
-  AGENTDOCK_APP_PATH="$fake_app" \
-  APP_HELPER_CALLS="$app_helper_calls" \
-  APP_HELPER_FAIL="$app_helper_fail" \
-  zsh "$ROOT_DIR/scripts/install/uninstall-macos.sh" >/dev/null 2>&1; then
-  print -u2 -- "uninstaller ignored an App-managed background-service unregister failure"
-  exit 1
-fi
-test -f "$app_uninstall_home/Library/Application Support/AgentDock/keep.txt"
-test -d "$fake_app"
-assert_file_contains "$app_helper_calls" '--unregister-background-services'
-rm -f "$app_helper_fail"
-env -i \
-  HOME="$app_uninstall_home" \
-  PATH="$fake_bin:$TEST_PATH" \
-  TEST_LAUNCHCTL_STATE="$app_fake_state" \
-  AGENTDOCK_APP_PATH="$fake_app" \
-  APP_HELPER_CALLS="$app_helper_calls" \
-  APP_HELPER_FAIL="$app_helper_fail" \
-  zsh "$ROOT_DIR/scripts/install/uninstall-macos.sh" >/dev/null
-test ! -e "$app_uninstall_home/Library/Application Support/AgentDock"
-test ! -e "$fake_app"
-test -f "$app_uninstall_home/.agentdock/preserve.txt"
-test -f "$app_uninstall_home/AgentDock/preserve.txt"
-
 # 无法停止已加载服务时，卸载器必须保留全部运行文件。
 if env -i HOME="$service_home" PATH="$fake_bin:$TEST_PATH" TEST_LAUNCHCTL_STATE="$fake_state" \
-  AGENTDOCK_APP_PATH="$no_app_path" \
   zsh "$ROOT_DIR/scripts/install/uninstall-macos.sh" >/dev/null 2>&1; then
   print -u2 -- "uninstaller ignored a launchctl bootout failure"
   exit 1
@@ -872,23 +826,18 @@ test ! -e "$service_home/Library/Application Support/AgentDock/start-agentdock.s
 test -f "$service_plist"
 rm -f "$fake_state/fail-bootout"
 
-# 默认卸载删除程序运行时，保留业务状态和工作目录；launchctl 仍使用替身。
+# 默认卸载只删服务，保留二进制、状态和工作目录；launchctl 仍使用替身。
 env -i HOME="$home_dir" PATH="$fake_bin:$TEST_PATH" TEST_LAUNCHCTL_STATE="$fake_state" \
-  AGENTDOCK_APP_PATH="$no_app_path" \
   zsh "$ROOT_DIR/scripts/install/uninstall-macos.sh"
-test ! -e "$binary"
+test -x "$binary"
 test -d "$state_dir"
 test -d "$work_dir"
 test ! -e "$app_support"
 test ! -e "$plist"
 test ! -e "$log_dir"
 
-# 旧 --remove-binary 参数继续兼容，语义与默认卸载一致。
-mkdir -p "$home_dir/.local/bin"
-: > "$binary"
-chmod +x "$binary"
+# 显式删除二进制仍保留数据。
 env -i HOME="$home_dir" PATH="$fake_bin:$TEST_PATH" TEST_LAUNCHCTL_STATE="$fake_state" \
-  AGENTDOCK_APP_PATH="$no_app_path" \
   zsh "$ROOT_DIR/scripts/install/uninstall-macos.sh" --remove-binary
 test ! -e "$binary"
 test -d "$state_dir"
@@ -898,7 +847,6 @@ test -d "$work_dir"
 mkdir -p "$home_dir/.local/bin" "$state_dir" "$work_dir"
 : > "$binary"
 env -i HOME="$home_dir" PATH="$fake_bin:$TEST_PATH" TEST_LAUNCHCTL_STATE="$fake_state" \
-  AGENTDOCK_APP_PATH="$no_app_path" \
   zsh "$ROOT_DIR/scripts/install/uninstall-macos.sh" --purge-data
 test ! -e "$binary"
 test ! -e "$state_dir"

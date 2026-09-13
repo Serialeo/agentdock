@@ -49,7 +49,6 @@ func (s *Service) WorkflowManage(ctx context.Context, request WorkflowRequest) (
 		}
 		return Result{
 			"action": input.Action, "templates": templates, "count": len(templates), "composition_required": true,
-			"next_required_action": "Combine these templates for the current user goal: prune irrelevant steps, deduplicate, order the remaining steps, and merge completion conditions. Then call task_manage create with source_template_ids, composed steps, and completion_conditions.",
 		}, nil
 	case "list":
 		path := "/v1/workflow-templates"

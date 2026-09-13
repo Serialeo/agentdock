@@ -5,8 +5,20 @@ FROM golang:1.26.5-bookworm@sha256:18aedc16aa19b3fd7ded7245fc14b109e054d65d22ed5
 ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
 
+ENV GOPRIVATE=github.com/Serialeo/* \
+    GONOSUMDB=github.com/Serialeo/*
+
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN --mount=type=secret,id=github_token,required=true \
+    set -eu; \
+    private_home="$(mktemp -d)"; \
+    trap 'rm -rf "$private_home"' EXIT; \
+    token="$(cat /run/secrets/github_token)"; \
+    test -n "$token"; \
+    printf 'machine github.com login x-access-token password %s\n' "$token" > "$private_home/.netrc"; \
+    chmod 0600 "$private_home/.netrc"; \
+    HOME="$private_home" go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 
@@ -109,10 +121,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/go /usr/local/go
 COPY --from=build /src /src
-ENV PATH=/usr/local/go/bin:$PATH
+ENV PATH=/usr/local/go/bin:$PATH \
+    GOPRIVATE=github.com/Serialeo/* \
+    GONOSUMDB=github.com/Serialeo/*
 WORKDIR /src
 USER agentdock:agentdock
-RUN CGO_ENABLED=0 xvfb-run -a env AGENTDOCK_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
-    go test -tags browser_integration ./internal/tool/browser ./internal/app -count=1
+# Go module directories are read-only; restore owner write permission only for cleanup.
+RUN --mount=type=secret,id=github_token,required=true,uid=10001,gid=10001,mode=0400 \
+    set -eu; \
+    private_home="$(mktemp -d)"; \
+    trap 'chmod -R u+w "$private_home"; rm -rf "$private_home"' EXIT; \
+    token="$(cat /run/secrets/github_token)"; \
+    test -n "$token"; \
+    printf 'machine github.com login x-access-token password %s\n' "$token" > "$private_home/.netrc"; \
+    chmod 0600 "$private_home/.netrc"; \
+    HOME="$private_home" CGO_ENABLED=0 xvfb-run -a env AGENTDOCK_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium \
+      go test -tags browser_integration ./internal/tool/browser ./internal/app -count=1
 
 FROM runtime-base AS runtime

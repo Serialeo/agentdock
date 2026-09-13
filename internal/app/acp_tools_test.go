@@ -45,6 +45,7 @@ func TestACPToolsAreFeatureGatedAndUseStrictSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runtime.Close() }()
+	projectCtx := projectContextForTest(t, runtime, root, fullProjectPermissionsForTest())
 
 	for _, name := range []string{"acp_session", "acp_prompt", "acp_interaction"} {
 		found := false
@@ -83,7 +84,7 @@ func TestACPToolsAreFeatureGatedAndUseStrictSchemas(t *testing.T) {
 		}
 	}
 
-	result, err := runtime.Call(context.Background(), "acp_session", map[string]any{"action": "list"})
+	result, err := runtime.Call(projectCtx, "acp_session", map[string]any{"action": "list"})
 	if err != nil {
 		t.Fatal(err)
 	}

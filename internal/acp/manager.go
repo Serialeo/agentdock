@@ -224,6 +224,14 @@ func (m *Manager) run(id string) (*Run, error) {
 	return run, nil
 }
 
+func (m *Manager) RunSessionID(id string) (string, error) {
+	run, err := m.run(id)
+	if err != nil {
+		return "", err
+	}
+	return run.SessionID, nil
+}
+
 func newID(prefix string) (string, error) {
 	var random [12]byte
 	if _, err := rand.Read(random[:]); err != nil {

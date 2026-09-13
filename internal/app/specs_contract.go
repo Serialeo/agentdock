@@ -1,7 +1,7 @@
 package app
 
 import (
-	mcpcontract "github.com/uvwt/agentdock-protocol/mcpcontract"
+	mcpcontract "github.com/Serialeo/agentdock-protocol/mcpcontract"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/evolution"
 	toolacp "github.com/uvwt/agentdock/internal/tool/acp"

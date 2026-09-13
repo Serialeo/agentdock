@@ -25,7 +25,7 @@ struct TunnelTokenStore {
             try persist(active)
             return active
         }
-        throw ValidationError(L10n.text("Enter the Cloudflare Tunnel Token. Leave it blank to reuse a previously saved token."))
+        throw ValidationError("请填写 Cloudflare Tunnel Token；此前保存过 Token 时可以留空复用。")
     }
 
     func persist(_ token: String) throws {
@@ -40,12 +40,12 @@ struct TunnelTokenStore {
         if fileManager.fileExists(atPath: paths.tunnelTokenStore.path) {
             let values = try paths.tunnelTokenStore.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             guard values.isRegularFile == true, values.isSymbolicLink != true else {
-                throw ValidationError(L10n.text("The saved Tunnel Token path is not a secure regular file."))
+                throw ValidationError("已保存的 Tunnel Token 路径不是安全的普通文件。")
             }
         }
 
         guard let data = token.data(using: .utf8) else {
-            throw ValidationError(L10n.text("Unable to encode the Cloudflare Tunnel Token."))
+            throw ValidationError("无法编码 Cloudflare Tunnel Token。")
         }
         try data.write(to: paths.tunnelTokenStore, options: .atomic)
         try fileManager.setAttributes(
@@ -59,17 +59,17 @@ struct TunnelTokenStore {
         guard fileManager.fileExists(atPath: paths.tunnelTokenStore.path) else { return nil }
         let values = try paths.tunnelTokenStore.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true else {
-            throw ValidationError(L10n.text("The saved Tunnel Token path is not a secure regular file."))
+            throw ValidationError("已保存的 Tunnel Token 路径不是安全的普通文件。")
         }
         let attributes = try fileManager.attributesOfItem(atPath: paths.tunnelTokenStore.path)
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
         guard permissions & 0o077 == 0 else {
-            throw ValidationError(L10n.text("The saved Tunnel Token permissions are unsafe; only the current user should be able to read it."))
+            throw ValidationError("已保存的 Tunnel Token 权限不安全，应仅允许当前用户读取。")
         }
         let data = try Data(contentsOf: paths.tunnelTokenStore)
         guard data.count <= Self.maximumTokenBytes,
               let value = String(data: data, encoding: .utf8) else {
-            throw ValidationError(L10n.text("The saved Tunnel Token format is invalid."))
+            throw ValidationError("已保存的 Tunnel Token 格式无效。")
         }
         return try validated(value)
     }
@@ -87,13 +87,13 @@ struct TunnelTokenStore {
     private func validated(_ rawToken: String) throws -> String {
         let token = rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
-            throw ValidationError(L10n.text("Cloudflare Tunnel Token cannot be empty."))
+            throw ValidationError("Cloudflare Tunnel Token 不能为空。")
         }
         guard !token.contains("\n"), !token.contains("\r") else {
-            throw ValidationError(L10n.text("Cloudflare Tunnel Token must be a single line of text."))
+            throw ValidationError("Cloudflare Tunnel Token 必须是单行文本。")
         }
         guard token.utf8.count <= Self.maximumTokenBytes else {
-            throw ValidationError(L10n.text("Cloudflare Tunnel Token has an invalid length."))
+            throw ValidationError("Cloudflare Tunnel Token 长度异常。")
         }
         return token
     }

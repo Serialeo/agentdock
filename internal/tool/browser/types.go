@@ -275,6 +275,7 @@ type session struct {
 	profileDir       string
 	temporaryProfile bool
 	external         bool
+	projectOwner     projectOwner
 	ownedTargets     map[target.ID]struct{}
 	createdAt        time.Time
 	lastActivity     time.Time

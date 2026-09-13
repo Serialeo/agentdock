@@ -82,8 +82,9 @@ func TestDynamicMCPToolsStaySeparateAndAppearLightweightInContext(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer runtime.Close()
+	projectCtx := projectContextForTest(t, runtime, cfg.AgentDockDefaultDir, fullProjectPermissionsForTest())
 
-	added, err := runtime.Call(context.Background(), "mcp_manage", map[string]any{
+	added, err := runtime.Call(projectCtx, "mcp_manage", map[string]any{
 		"action":      "add",
 		"name":        "demo",
 		"description": "Demo external capabilities",
@@ -118,14 +119,8 @@ func TestDynamicMCPToolsStaySeparateAndAppearLightweightInContext(t *testing.T) 
 			t.Fatalf("agentdock_context leaked %q: %s", forbidden, encodedContext)
 		}
 	}
-	rules := strings.Join(contextData.Rules, "\n")
-	for _, required := range []string{"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} {
-		if !strings.Contains(rules, required) {
-			t.Fatalf("agentdock_context rules missing %q: %s", required, rules)
-		}
-	}
 
-	search, err := runtime.Call(context.Background(), "mcp_tool_search", map[string]any{
+	search, err := runtime.Call(projectCtx, "mcp_tool_search", map[string]any{
 		"server": "demo",
 		"query":  "echo text",
 	})
@@ -148,7 +143,7 @@ func TestDynamicMCPToolsStaySeparateAndAppearLightweightInContext(t *testing.T) 
 	}
 	assertToolResultMatchestestOutputSchema(t, "mcp_tool_search", search)
 
-	inspect, err := runtime.Call(context.Background(), "mcp_tool_inspect", map[string]any{"name": "demo:echo"})
+	inspect, err := runtime.Call(projectCtx, "mcp_tool_inspect", map[string]any{"name": "demo:echo"})
 	if err != nil {
 		t.Fatalf("mcp_tool_inspect: %v", err)
 	}
@@ -162,7 +157,7 @@ func TestDynamicMCPToolsStaySeparateAndAppearLightweightInContext(t *testing.T) 
 		}
 	}
 
-	called, err := runtime.Call(context.Background(), "mcp_tool_call", map[string]any{
+	called, err := runtime.Call(projectCtx, "mcp_tool_call", map[string]any{
 		"name":      "demo:echo",
 		"arguments": map[string]any{"text": "hello"},
 	})
@@ -193,15 +188,16 @@ func TestAgentDockContextReportsDynamicMCPRefreshErrorCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
+	projectCtx := projectContextForTest(t, runtime, cfg.AgentDockDefaultDir, fullProjectPermissionsForTest())
 
-	if _, err := runtime.Call(context.Background(), "mcp_manage", map[string]any{
+	if _, err := runtime.Call(projectCtx, "mcp_manage", map[string]any{
 		"action": "add", "name": "broken", "description": "Missing required host environment",
 		"transport": "stdio", "command": os.Args[0],
 		"env_from_env": map[string]any{"REQUIRED": "AGENTDOCK_TEST_MISSING_MCP_ENV"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Call(context.Background(), "mcp_tool_search", map[string]any{"server": "broken", "query": "anything"}); err == nil {
+	if _, err := runtime.Call(projectCtx, "mcp_tool_search", map[string]any{"server": "broken", "query": "anything"}); err == nil {
 		t.Fatal("mcp_tool_search succeeded with a missing required environment variable")
 	}
 

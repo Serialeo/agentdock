@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"encoding/json"
 	"github.com/uvwt/agentdock/internal/config"
+	"github.com/uvwt/agentdock/internal/envstore"
+	toolskill "github.com/uvwt/agentdock/internal/tool/skill"
 )
 
 func TestRuntimeAvailableToolInputsAreStrictAtRoot(t *testing.T) {
@@ -30,7 +33,6 @@ func TestRuntimeCallRejectsUnknownArgumentsForFormerlyPermissiveTools(t *testing
 		{tool: "task_manage", args: map[string]any{"action": "list", "future_field": true}},
 		{tool: "skill_package", args: map[string]any{"action": "env_list", "future_field": true}},
 		{tool: "view_image", args: map[string]any{"path": "missing.png", "future_field": true}},
-		{tool: "file_publish", args: map[string]any{"path": "missing.txt", "future_field": true}},
 	} {
 		t.Run(test.tool, func(t *testing.T) {
 			assertInvalidToolArguments(t, runtime, test.tool, test.args)
@@ -187,4 +189,39 @@ func newRuntimeValidationTestRuntime(t *testing.T) *Runtime {
 		}
 	})
 	return runtime
+}
+
+func TestRuntimeSkillManageEnvironmentDoesNotReturnSecretValue(t *testing.T) {
+	cfg := config.Config{AgentDockHome: filepath.Join(t.TempDir(), ".agentdock"), AgentDockDefaultDir: t.TempDir()}
+	if err := cfg.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+
+	empty := ""
+	if _, err := runtime.RuntimeSkillManage(t.Context(), toolskill.PackageRequest{Action: "env_set", Skill: "agentdock-user-guide", Key: "EMPTY_VALUE", Value: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := runtime.RuntimeSkillManage(t.Context(), toolskill.PackageRequest{Action: "env_list", Skill: "agentdock-user-guide"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(listed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"value"`) || strings.Contains(string(encoded), "secret") {
+		t.Fatalf("Skill environment listing leaked value material: %s", encoded)
+	}
+	items, ok := listed["items"].([]envstore.Entry)
+	if !ok || len(items) != 1 || items[0].Key != "EMPTY_VALUE" || items[0].Configured {
+		t.Fatalf("Skill environment metadata = %#v", listed)
+	}
+	if _, err := runtime.RuntimeSkillManage(t.Context(), toolskill.PackageRequest{Action: "env_unset", Skill: "agentdock-user-guide", Key: "EMPTY_VALUE"}); err != nil {
+		t.Fatal(err)
+	}
 }

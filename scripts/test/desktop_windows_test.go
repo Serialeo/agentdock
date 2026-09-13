@@ -125,7 +125,7 @@ func TestWindowsControlPanelCanSwitchCorePrivilegeMode(t *testing.T) {
 	checks := map[string][]string{
 		filepath.Join("..", "..", "desktop", "windows", "control-panel", "MainWindow.xaml"): {
 			"ElevatedCoreCheckBox",
-			`Content="{local:Loc RunCoreElevated}"`,
+			"以管理员权限运行 AgentDock 核心",
 			"ElevatedCoreCheckBox_Click",
 		},
 		filepath.Join("..", "..", "desktop", "windows", "control-panel", "MainWindow.xaml.cs"): {
@@ -242,16 +242,16 @@ func TestDesktopTrayMenusUseNativeDismissalAndOmitCopyActions(t *testing.T) {
 	macApp := string(macData)
 
 	orderedItems := []string{
-		`AgentDock: {statusText}`,
-		`UiText.Get("OpenAgentDock")`,
-		`UiText.Get("StopAgentDock")`,
-		`UiText.Get("RestartAgentDock")`,
-		`UiText.Get("StartAgentDock")`,
-		`UiText.Get("CheckForUpdates")`,
-		`UiText.Get("OpenLogsFolder")`,
-		`UiText.Get("OpenConfigFolder")`,
-		`UiText.Get("OpenDocumentation")`,
-		`UiText.Get("ExitTray")`,
+		`AgentDock：{statusText}`,
+		`"打开 AgentDock"`,
+		`"停止 AgentDock"`,
+		`"重启 AgentDock"`,
+		`"启动 AgentDock"`,
+		`"检查更新…"`,
+		`"打开日志目录"`,
+		`"打开配置目录"`,
+		`"打开使用文档"`,
+		`"退出菜单栏"`,
 	}
 	lastIndex := -1
 	for _, item := range orderedItems {
@@ -282,19 +282,19 @@ func TestDesktopTrayMenusUseNativeDismissalAndOmitCopyActions(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		`L10n.text("Open AgentDock")`,
-		`L10n.text("Stop AgentDock")`,
-		`L10n.text("Restart AgentDock")`,
-		`L10n.text("Start AgentDock")`,
-		`L10n.text("Open background settings")`,
-		`L10n.text("Check for updates…")`,
-		`L10n.text("Open logs folder")`,
-		`L10n.text("Open configuration folder")`,
-		`L10n.text("Open documentation")`,
-		`L10n.text("Exit menu bar app")`,
+		`"打开 AgentDock"`,
+		`"停用 AgentDock"`,
+		`"重启 AgentDock"`,
+		`"启用 AgentDock"`,
+		`"打开后台设置"`,
+		`"检查更新…"`,
+		`"打开日志目录"`,
+		`"打开配置目录"`,
+		`"打开使用文档"`,
+		`"退出菜单栏"`,
 	} {
 		if !strings.Contains(macApp, want) {
-			t.Fatalf("macOS tray menu missing localized item %q", want)
+			t.Fatalf("macOS tray menu missing item %q", want)
 		}
 	}
 
@@ -356,18 +356,13 @@ func TestWindowsUpdateFeedbackUsesUTF8AndImmediateStatus(t *testing.T) {
 	script := string(scriptData)
 
 	for _, want := range []string{
-		`_updateInProgress ? UiText.Get("CheckingForUpdates") : UiText.Get("CheckForUpdates")`,
-		`ControlPanelWindow.SetUpdateState(true, UiText.Get("PleaseWaitCheckingUpdates"))`,
+		`_updateInProgress ? "正在检查更新…" : "检查更新…"`,
+		`ControlPanelWindow.SetUpdateState(true, "正在检查更新，请稍候…")`,
 		`var check = await Runtime.CheckForUpdatesAsync()`,
 		`if (!check.UpdateAvailable)`,
 		`MessageBoxButton.YesNo`,
 		`new UpdateProgressWindow(check.CurrentVersion, check.LatestVersion)`,
 		`var output = await Runtime.RunUpdateAsync(progress)`,
-		`ResumeUpdateProgressIfNeededAsync`,
-		`ReadUpdateUiHandoffTransactionAsync`,
-		`ReadUpdateTerminalResultAsync`,
-		`AcknowledgeUpdateUiHandoffAsync(transaction.TransactionId)`,
-		`UpdateStageRollingBack`,
 	} {
 		if !strings.Contains(app, want) {
 			t.Fatalf("Windows tray update flow missing %q", want)
@@ -390,14 +385,8 @@ func TestWindowsUpdateFeedbackUsesUTF8AndImmediateStatus(t *testing.T) {
 		`startInfo.ArgumentList.Add("--check")`,
 		`JsonSerializer.Deserialize<UpdateCheckResult>`,
 		`IProgress<UpdateProgress>? progress`,
-		`startInfo.ArgumentList.Add("--progress-json")`,
-		`startInfo.Environment[UpdateUiHandoffEnvironment] = "1"`,
-		`"staged" or "trial" or "rolling_back" or "committed" or "rolled_back" or "failed" => transaction`,
-		`Path.Combine(RuntimeRoot, "update", "ui-handoff-ack.json")`,
-		`File.Move(temporaryPath, acknowledgementPath, overwrite: true)`,
 		`ReadProcessLinesAsync`,
-		`ParseUpdateProgress`,
-		`JsonSerializer.Deserialize<UpdateProgressEvent>`,
+		`MapUpdateProgress`,
 		`StandardOutputEncoding = utf8`,
 		`StandardErrorEncoding = utf8`,
 	} {
@@ -411,8 +400,7 @@ func TestWindowsUpdateFeedbackUsesUTF8AndImmediateStatus(t *testing.T) {
 		`<ProgressBar x:Name="UpdateProgressBar"`,
 		`IsEnabled="False"`,
 		`if (!_canClose)`,
-		`UpdateProgressBar.IsIndeterminate = progress.IsIndeterminate`,
-		`UpdateProgressBar.Value = Math.Clamp(percentage, 0, 100)`,
+		`UpdateProgressBar.Value = Math.Max`,
 		`public void Complete(string message)`,
 		`public void Fail(string message)`,
 	} {

@@ -358,7 +358,7 @@ begin
     ExpandConstant('{app}\bin\agentdock-tray.exe'),
     '',
     ExpandConstant('{app}'),
-    ExpandConstant('{app}\installer\agentdock.ico'),
+    ExpandConstant('{app}\bin\agentdock-tray.exe'),
     0,
     SW_SHOWNORMAL
   );
@@ -438,7 +438,6 @@ begin
     InstallProgressPage.SetProgress(1, 4);
     ExtractTemporaryFile('install.ps1');
     ExtractTemporaryFile('launch-windows-process.ps1');
-    ExtractTemporaryFile('manage-windows.ps1');
     ExtractTemporaryFile('agentdock_windows_{#PayloadArchitecture}.zip');
     ExtractTemporaryFile('agentdock_windows_{#PayloadArchitecture}.zip.sha256');
     ExtractTemporaryFile('cloudflared.exe');
@@ -469,11 +468,6 @@ begin
       ' -InstallChannel setup' +
       ' -CorePrivilegeMode ' + PrivilegeMode +
       ' -ResultFile ' + QuoteArgument(ResultFilePath);
-
-    { PORT is intentionally a silent-setup override. The interactive installer keeps the product
-      default, while isolated E2E environments can avoid colliding with an already running AgentDock. }
-    if Trim(ExpandConstant('{param:PORT|}')) <> '' then
-      Parameters := Parameters + ' -Port ' + QuoteArgument(Trim(ExpandConstant('{param:PORT|}')));
 
     if StartupPage.Values[0] or (TunnelMode <> 'none') then
       Parameters := Parameters + ' -RegisterStartup';

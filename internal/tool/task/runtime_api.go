@@ -6,20 +6,13 @@ import (
 	"github.com/uvwt/agentdock/internal/taskstate"
 )
 
-func (s *Service) RuntimeTasks(status string, limit int) (Result, error) {
-	statusFilter := taskstate.Status(strings.ToLower(strings.TrimSpace(status)))
-	if statusFilter != "" && statusFilter != taskstate.StatusActive && statusFilter != taskstate.StatusBlocked && statusFilter != taskstate.StatusCompleted {
-		return nil, toolErrorDetails("INVALID_STATUS", "unsupported task status filter", "validation", map[string]any{"status": statusFilter, "allowed": []string{"active", "blocked", "completed"}})
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	tasks, err := s.tasks.List(statusFilter, limit)
+func (s *Service) RuntimeTasks(options taskstate.ListOptions) (Result, error) {
+	page, err := s.tasks.ListPage(options)
 	if err != nil {
 		return nil, taskToolError(err)
 	}
-	items := make([]map[string]any, 0, len(tasks))
-	for _, task := range tasks {
+	items := make([]map[string]any, 0, len(page.Tasks))
+	for _, task := range page.Tasks {
 		item := compactTaskListItem(task)
 		item["created_at"] = task.CreatedAt
 		item["event_count"] = len(task.Events)
@@ -34,7 +27,10 @@ func (s *Service) RuntimeTasks(status string, limit int) (Result, error) {
 		}
 		items = append(items, item)
 	}
-	return Result{"ok": true, "source": "agentdock-api", "action": "list", "tasks": items, "count": len(items)}, nil
+	return Result{
+		"ok": true, "source": "agentdock-api", "action": "list", "tasks": items, "count": len(items),
+		"total": page.Total, "offset": page.Offset, "limit": page.Limit, "has_more": page.HasMore, "counts": page.Counts,
+	}, nil
 }
 
 func (s *Service) RuntimeTask(id string) (Result, error) {

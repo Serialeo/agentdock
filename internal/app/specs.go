@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	mcpcontract "github.com/uvwt/agentdock-protocol/mcpcontract"
+	mcpcontract "github.com/Serialeo/agentdock-protocol/mcpcontract"
 	"github.com/uvwt/agentdock/internal/config"
 	toolcontract "github.com/uvwt/agentdock/internal/tool/contract"
 )

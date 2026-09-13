@@ -12,12 +12,10 @@
 
 <a href="https://trendshift.io/repositories/136526?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-136526" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/136526/daily?language=Go" alt="uvwt%2Fagentdock | Trendshift" width="250" height="55"/></a>
 
-[在线文档](https://uvwt.github.io/agentdock-docs/zh-CN/) · [下载安装](https://github.com/uvwt/agentdock/releases) · [QQ群](https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info)
+[在线文档](https://uvwt.github.io/agentdock-docs/zh-CN/) · [私有发行版](https://github.com/Serialeo/agentdock/releases) · [QQ群](https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info)
 
-[![CI](https://github.com/uvwt/agentdock/actions/workflows/ci.yml/badge.svg)](https://github.com/uvwt/agentdock/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/uvwt/agentdock?display_name=tag&logo=github)](https://github.com/uvwt/agentdock/releases)
-[![Docker Hub](https://img.shields.io/docker/pulls/agentdockio/agentdock?logo=docker&label=Docker%20Hub)](https://hub.docker.com/r/agentdockio/agentdock)
-[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fuvwt%2Fagentdock-2496ED?logo=docker&logoColor=white)](https://github.com/uvwt/agentdock/pkgs/container/agentdock)
+[![CI](https://github.com/Serialeo/agentdock/actions/workflows/ci.yml/badge.svg)](https://github.com/Serialeo/agentdock/actions/workflows/ci.yml)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fserialeo%2Fagentdock-2496ED?logo=docker&logoColor=white)](https://github.com/Serialeo/agentdock/pkgs/container/agentdock)
 [![License](https://img.shields.io/github/license/uvwt/agentdock)](./LICENSE)
 
 </div>
@@ -73,6 +71,8 @@ AgentDock 不提供聊天界面，也不负责模型推理。它专注于解决�
 
 普通用户直接使用正式安装包即可，不需要下载源码、安装 Go 或自己构建 AgentDock。
 
+这个二次开发版本有意只支持 **Linux amd64**、**macOS arm64（Apple Silicon）**、**Windows amd64/x86-64**；Release 资产、安装器、容器和内置自更新都遵循同一支持边界。
+
 完整步骤见 [安装 AgentDock](https://uvwt.github.io/agentdock-docs/zh-CN/docs/getting-started/install)。
 
 
@@ -83,6 +83,27 @@ AgentDock 不提供聊天界面，也不负责模型推理。它专注于解决�
 | Linux / VPS | [systemd 部署](https://uvwt.github.io/agentdock-docs/zh-CN/docs/getting-started/vps) |
 | macOS | [macOS 安装](https://uvwt.github.io/agentdock-docs/zh-CN/docs/getting-started/macos) |
 | Windows | [Windows 图形安装程序](https://uvwt.github.io/agentdock-docs/zh-CN/docs/getting-started/windows) |
+
+
+### 私有 GHCR Docker 发行版
+
+Serialeo 私有主线只向 GitHub Container Registry 发布容器：`ghcr.io/serialeo/agentdock`，不再把 Docker Hub 作为发布目标。
+
+拉取私有镜像前先登录 GHCR。按照 GitHub 当前规则，命令行拉取私有 package 可使用带 `read:packages` 的 personal access token (classic)，同时该 GitHub 账号本身需要拥有 package 的读取权限。Token 应保存在 Docker credential store、shell secret 或 CI secret 中，不要写进 `docker-compose.yml`，也不要提交到 Git。
+
+```bash
+export CR_PAT='<read:packages token>'
+echo "$CR_PAT" | docker login ghcr.io -u '<github-username>' --password-stdin
+
+# 优先使用 A/N 配套 release manifest 记录的固定版本。
+export AGENTDOCK_IMAGE='ghcr.io/serialeo/agentdock:<release-tag>'
+docker compose pull
+docker compose up -d
+```
+
+浏览器版使用 `ghcr.io/serialeo/agentdock:browser-<release-tag>`，开发版使用 `ghcr.io/serialeo/agentdock:dev-<release-tag>`。`latest`、`browser-latest`、`dev-latest` 只作为便利标签；生产环境优先固定已验证的 release tag 或 image digest。AgentDock 与 NexusDock 应使用同一 release manifest 中验证过的 Bridge generation 配对，不要只自动升级其中一边。
+
+从源码构建 Docker 镜像时，还需要读取私有 Go module `Serialeo/agentdock-protocol`。Dockerfile 只通过 BuildKit secret id `github_token` 使用该凭据；禁止用普通 `ARG` 传 token 或把凭据写入镜像层。
 
 
 ### 连接方式如何选择
@@ -121,7 +142,19 @@ AgentDock 通过 MCP Streamable HTTP 提供工具能力。下面是一个通用�
 - 标准输出、标准错误和退出码分离
 - 长时间命令会话、PTY、会话观察、输入和停止
 - 输出截断和敏感信息脱敏
-- macOS、Linux、Windows 与 WSL 支持
+- macOS、Linux 与 Windows 支持
+
+#### 显式透传宿主环境变量
+
+`exec_command` 默认只使用精简环境，不会完整继承 AgentDock 进程环境。宿主运行环境确实依赖额外变量时，可以配置“子进程变量名 -> AgentDock 宿主进程变量名”的显式映射：
+
+```bash
+export AGENTDOCK_COMMAND_ENV_FROM_ENV_JSON='{"NIX_LD":"NIX_LD","NIX_LD_LIBRARY_PATH":"NIX_LD_LIBRARY_PATH"}'
+```
+
+只有显式声明的变量会被复制；宿主变量不存在时会跳过。Skill 环境变量可以覆盖宿主映射值，单次 `exec_command.env` 又可以继续覆盖 Skill 环境。
+
+使用 systemd 或 OpenRC 部署时，映射来源是 **AgentDock 服务进程自身的环境**，不会读取某个用户的登录 Shell。以启用 `nix-ld` 的 NixOS 为例，需要同时通过服务配置向 AgentDock 注入当前的 `NIX_LD`、`NIX_LD_LIBRARY_PATH`，再配置上述映射。NixOS 建议通过声明式服务配置提供这些值，不要把某一代 `/nix/store` 的绝对路径长期快照到手写配置里。
 
 ### Skill 与动态 MCP
 
@@ -190,6 +223,13 @@ Docker、原生安装和本地开发的默认 MCP 地址：
 
 ## 开发与贡献
 
+源码构建依赖私有 `github.com/Serialeo/agentdock-protocol` module。先为 Git 配置一个只允许读取 `Serialeo/agentdock-protocol`、`Contents: Read` 的机器凭据，并设置：
+
+```bash
+export GOPRIVATE='github.com/Serialeo/*'
+export GONOSUMDB='github.com/Serialeo/*'
+```
+
 提交代码前运行完整检查：
 
 ```bash
@@ -198,15 +238,24 @@ make check
 
 项目使用 GitHub Actions 持续执行测试、静态检查、构建和发布验证。
 
+从源码构建 Docker 镜像时，通过 BuildKit secret 提供 protocol 只读凭据，不使用普通 build argument：
+
+```bash
+export PRIVATE_GO_READ_TOKEN='<Serialeo/agentdock-protocol Contents: Read token>'
+docker build --secret id=github_token,env=PRIVATE_GO_READ_TOKEN --target runtime -t agentdock:local .
+```
+
+不要把人类账号的长期 token 复制给 AgentDock 服务用户，也不要把凭据提交到仓库。
+
+私有发行主线不要把最终版本 tag 当作第一次容器测试。源码 CI 通过后，在精确 commit 上手动运行 **Publish candidate containers**；它只发布 `sha-abcdef0`、`dev-sha-abcdef0`、`browser-sha-abcdef0` 这类 commit 级候选标签，不更新 `latest`，也不创建 GitHub Release。随后构建配套的 NexusDock `sha-*` 候选镜像，并在 NexusDock 运行 **Verify paired private images**，对四个精确镜像完成 Bridge、配置和数据卷持久化验收。只有配对验收通过后才创建匹配的 A/N 最终版本 tag，再由正常 release workflow 发布最终标签和 `latest` 别名。
+
 用户文档独立维护在 [`uvwt/agentdock-docs`](https://github.com/uvwt/agentdock-docs)。修改用户可见行为、配置参数、安装方式或工具 Schema 时，应同步更新对应文档。
 
-涉及设备配对、跨节点工具路由、Recall 或 Workflow 等集成能力时，可能还需协同修改独立仓库 [`uvwt/nexusdock`](https://github.com/uvwt/nexusdock)。两者共享的协议维护在 [`uvwt/agentdock-protocol`](https://github.com/uvwt/agentdock-protocol)。变更共享接口或数据结构时，应先更新协议定义，再同步两端实现与协议依赖版本，核对兼容性并更新对应文档，在 PR 中关联跨仓库改动。
-
-提交问题或功能建议请使用 [GitHub Issues](https://github.com/uvwt/agentdock/issues)。
+私有主线的问题或功能建议请使用 [GitHub Issues](https://github.com/Serialeo/agentdock/issues)。
 
 ## 支持项目
 
-<p>如果 <b>AgentDock</b> 对您有帮助，请考虑为它点个 <b>Star</b> ⭐，感谢您的支持</p>
+<p>如果 <b>AgentDock</b> 对您有帮助，请考虑为它点个 <b>Star</b> ⭐，感谢您的支持！</p>
 <table>
 <thead>
 <tr>
@@ -229,9 +278,8 @@ make check
 
 - [Documentation](https://uvwt.github.io/agentdock-docs/zh-CN/)
 - [Documentation source](https://github.com/uvwt/agentdock-docs)
-- [GitHub Releases](https://github.com/uvwt/agentdock/releases)
-- [GitHub Container Registry](https://github.com/uvwt/agentdock/pkgs/container/agentdock)
-- [Docker Hub](https://hub.docker.com/r/agentdockio/agentdock)
+- [私有 GitHub Releases](https://github.com/Serialeo/agentdock/releases)
+- [私有 GitHub Container Registry](https://github.com/Serialeo/agentdock/pkgs/container/agentdock)
 - [Linux Do](https://linux.do/)
 
 ## License

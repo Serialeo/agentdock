@@ -161,6 +161,9 @@ func TestTaskManageSingleTemplateResolvesActiveVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := result["next_required_action"]; ok {
+		t.Fatalf("task create leaked next_required_action prose: %#v", result)
+	}
 	summary := result["task_summary"].(map[string]any)
 	if summary["step_count"] != 1 || summary["current_step"].(map[string]any)["id"] != "inspect" {
 		t.Fatalf("single template was not applied: %#v", summary)
@@ -189,8 +192,11 @@ func TestWorkflowTemplateGetManyRequiresModelComposition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["composition_required"] != true || result["next_required_action"] == "" {
-		t.Fatalf("get_many did not instruct model composition: %#v", result)
+	if result["composition_required"] != true {
+		t.Fatalf("get_many did not report composition requirement: %#v", result)
+	}
+	if _, ok := result["next_required_action"]; ok {
+		t.Fatalf("get_many leaked next_required_action prose: %#v", result)
 	}
 	templates := result["templates"].([]taskstate.Template)
 	if len(templates) != 2 || len(templates[0].Steps) == 0 || len(templates[1].CompletionConditions) == 0 {

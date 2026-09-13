@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	protocol "github.com/uvwt/agentdock-protocol"
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/publicartifacts"
 )
 

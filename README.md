@@ -12,12 +12,10 @@ Open ChatGPT in your browser and manage multiple computers and servers from one 
 
 <a href="https://trendshift.io/repositories/136526?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-136526" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/136526/daily?language=Go" alt="uvwt%2Fagentdock | Trendshift" width="250" height="55"/></a>
 
-[Documentation](https://uvwt.github.io/agentdock-docs/) · [Download](https://github.com/uvwt/agentdock/releases) · [Community](https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info)
+[Documentation](https://uvwt.github.io/agentdock-docs/) · [Private releases](https://github.com/Serialeo/agentdock/releases) · [Community](https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info)
 
-[![CI](https://github.com/uvwt/agentdock/actions/workflows/ci.yml/badge.svg)](https://github.com/uvwt/agentdock/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/uvwt/agentdock?display_name=tag&logo=github)](https://github.com/uvwt/agentdock/releases)
-[![Docker Hub](https://img.shields.io/docker/pulls/agentdockio/agentdock?logo=docker&label=Docker%20Hub)](https://hub.docker.com/r/agentdockio/agentdock)
-[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fuvwt%2Fagentdock-2496ED?logo=docker&logoColor=white)](https://github.com/uvwt/agentdock/pkgs/container/agentdock)
+[![CI](https://github.com/Serialeo/agentdock/actions/workflows/ci.yml/badge.svg)](https://github.com/Serialeo/agentdock/actions/workflows/ci.yml)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fserialeo%2Fagentdock-2496ED?logo=docker&logoColor=white)](https://github.com/Serialeo/agentdock/pkgs/container/agentdock)
 [![License](https://img.shields.io/github/license/uvwt/agentdock)](./LICENSE)
 
 </div>
@@ -72,6 +70,8 @@ AgentDock does not provide a chat interface or perform model inference. It focus
 
 Regular users can install AgentDock from the official package for their operating system. You do not need the source code or Go.
 
+This fork intentionally supports only **Linux amd64**, **macOS arm64 (Apple Silicon)**, and **Windows amd64/x86-64**. Release assets, installers, containers, and built-in self-update follow the same support boundary.
+
 See [Install AgentDock](https://uvwt.github.io/agentdock-docs/docs/getting-started/install) for the complete instructions.
 
 | Platform | Documentation |
@@ -81,6 +81,26 @@ See [Install AgentDock](https://uvwt.github.io/agentdock-docs/docs/getting-start
 | Linux / VPS | [Manual systemd deployment](https://uvwt.github.io/agentdock-docs/docs/getting-started/vps) |
 | macOS | [macOS installation](https://uvwt.github.io/agentdock-docs/docs/getting-started/macos) |
 | Windows | [Graphical Windows installer](https://uvwt.github.io/agentdock-docs/docs/getting-started/windows) |
+
+### Private GHCR Docker releases
+
+The Serialeo release line publishes containers only to the private GitHub Container Registry namespace `ghcr.io/serialeo/agentdock`. Docker Hub is not part of this release path.
+
+Authenticate before pulling a private image. GitHub currently requires a personal access token (classic) with `read:packages` for CLI pulls, and the GitHub account must have read access to the package. Keep the token in a credential store or shell secret; do not put it in `docker-compose.yml` or commit it to Git.
+
+```bash
+export CR_PAT='<read:packages token>'
+echo "$CR_PAT" | docker login ghcr.io -u '<github-username>' --password-stdin
+
+# Prefer the release tag recorded in the paired AgentDock/NexusDock release manifest.
+export AGENTDOCK_IMAGE='ghcr.io/serialeo/agentdock:<release-tag>'
+docker compose pull
+docker compose up -d
+```
+
+The browser variant uses `ghcr.io/serialeo/agentdock:browser-<release-tag>` and the development variant uses `ghcr.io/serialeo/agentdock:dev-<release-tag>`. `latest`, `browser-latest`, and `dev-latest` are convenience tags; production deployments should pin the tested release tag or image digest. Keep AgentDock and NexusDock on the release pair documented for the same Bridge generation instead of independently auto-upgrading only one side.
+
+Source Docker builds also need read access to the private `Serialeo/agentdock-protocol` Go module. The Dockerfile consumes that credential only through BuildKit secret id `github_token`; do not pass it with `ARG` or bake it into an image layer.
 
 ### Choose a connection option
 
@@ -117,7 +137,19 @@ AgentDock exposes tools over MCP Streamable HTTP. The exact client syntax varies
 - Separate stdout, stderr, and exit status
 - Long-running command sessions, PTY, observation, input, and termination
 - Output truncation and sensitive-value redaction
-- macOS, Linux, Windows, and WSL support
+- macOS, Linux, and Windows support
+
+#### Forward selected host environment variables
+
+`exec_command` intentionally starts from a small environment instead of inheriting the complete AgentDock process environment. When a host runtime needs additional variables, configure an explicit child-to-host mapping:
+
+```bash
+export AGENTDOCK_COMMAND_ENV_FROM_ENV_JSON='{"NIX_LD":"NIX_LD","NIX_LD_LIBRARY_PATH":"NIX_LD_LIBRARY_PATH"}'
+```
+
+Only mapped variables are copied. A missing host variable is skipped. Skill environment values override the mapped host value, and an explicit `exec_command.env` value overrides both.
+
+For a systemd or OpenRC deployment, the source variables must also exist in the AgentDock service process environment. The mapping does not read a user's login shell. For example, a NixOS service using `nix-ld` should provide the current `NIX_LD` and `NIX_LD_LIBRARY_PATH` values through the service configuration together with the mapping above. Prefer declarative NixOS service configuration over snapshotting generation-specific `/nix/store` paths into a long-lived file.
 
 ### Skills and dynamic MCP
 
@@ -187,6 +219,13 @@ For public deployments, enable Bearer Token or OAuth authentication and use HTTP
 
 ## Development and contribution
 
+Source builds depend on the private `github.com/Serialeo/agentdock-protocol` module. Configure Git with a machine credential restricted to `Serialeo/agentdock-protocol` and `Contents: Read`, then set:
+
+```bash
+export GOPRIVATE='github.com/Serialeo/*'
+export GONOSUMDB='github.com/Serialeo/*'
+```
+
 Run the full check before submitting code:
 
 ```bash
@@ -195,15 +234,24 @@ make check
 
 GitHub Actions continuously run tests, static checks, builds, and release validation.
 
+For a source Docker build, provide the protocol credential through BuildKit instead of a build argument:
+
+```bash
+export PRIVATE_GO_READ_TOKEN='<Serialeo/agentdock-protocol Contents: Read token>'
+docker build --secret id=github_token,env=PRIVATE_GO_READ_TOKEN --target runtime -t agentdock:local .
+```
+
+Do not copy a human account's long-lived token to the AgentDock service user and do not commit credentials to the repository.
+
+For the private release line, do not use the final version tag as the first container test. After source CI passes, manually run **Publish candidate containers** on the exact commit. It publishes only commit-scoped tags such as `sha-abcdef0`, `dev-sha-abcdef0`, and `browser-sha-abcdef0`; it does not update `latest` or create a GitHub Release. Build the matching NexusDock `sha-*` candidate and run NexusDock's **Verify paired private images** workflow against all four exact images. Only after that paired Bridge/persistence gate passes should the matching final A/N version tags be created; the normal release workflows then publish the final tags and `latest` aliases.
+
 User documentation is maintained separately in [`uvwt/agentdock-docs`](https://github.com/uvwt/agentdock-docs). Changes to user-visible behavior, configuration, installation, or tool schemas should update the matching documentation in the same change set.
 
-Changes involving device pairing, cross-node tool routing, Recall, or Workflow integrations may also require coordinated changes in [`uvwt/nexusdock`](https://github.com/uvwt/nexusdock). The shared protocol is maintained in [`uvwt/agentdock-protocol`](https://github.com/uvwt/agentdock-protocol). When changing shared interfaces or data structures, update the protocol definitions first, then align both implementations and their protocol dependency versions, check compatibility, update the corresponding documentation, and link related cross-repository changes in the PR.
-
-Submit bugs and feature requests through [GitHub Issues](https://github.com/uvwt/agentdock/issues).
+Submit private-line bugs and feature requests through [GitHub Issues](https://github.com/Serialeo/agentdock/issues).
 
 ## Support the project
 
-<p>If <b>AgentDock</b> helps you, please consider giving it a <b>Star</b> ⭐. Thank you for your support</p>
+<p>If <b>AgentDock</b> helps you, please consider giving it a <b>Star</b> ⭐. Thank you for your support!</p>
 <table>
 <thead>
 <tr>
@@ -226,9 +274,8 @@ Submit bugs and feature requests through [GitHub Issues](https://github.com/uvwt
 
 - [Documentation](https://uvwt.github.io/agentdock-docs/)
 - [Documentation source](https://github.com/uvwt/agentdock-docs)
-- [GitHub Releases](https://github.com/uvwt/agentdock/releases)
-- [GitHub Container Registry](https://github.com/uvwt/agentdock/pkgs/container/agentdock)
-- [Docker Hub](https://hub.docker.com/r/agentdockio/agentdock)
+- [Private GitHub Releases](https://github.com/Serialeo/agentdock/releases)
+- [Private GitHub Container Registry](https://github.com/Serialeo/agentdock/pkgs/container/agentdock)
 - [Linux Do](https://linux.do/)
 
 ## License

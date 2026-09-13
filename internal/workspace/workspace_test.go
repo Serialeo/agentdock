@@ -1,9 +1,11 @@
 package workspace
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -166,6 +168,100 @@ func TestSetDefaultCWDAndDisplay(t *testing.T) {
 	}
 	if _, err := ws.SetDefaultCWD("file.txt"); err == nil {
 		t.Fatal("SetDefaultCWD() accepted a regular file")
+	}
+}
+
+func TestContextScopedCWDKeepsConcurrentTargetsIsolated(t *testing.T) {
+	root := t.TempDir()
+	projectA := filepath.Join(root, "project-a")
+	projectB := filepath.Join(root, "project-b")
+	for path, content := range map[string]string{projectA: "a", projectB: "b"} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "value.txt"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ws, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultCWD := ws.DefaultCWD()
+
+	ctxA, err := WithCWD(context.Background(), projectA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctxB, err := WithCWD(context.Background(), projectB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		want string
+		got  string
+		err  error
+	}
+	results := make(chan result, 200)
+	var wg sync.WaitGroup
+	for _, target := range []struct {
+		ctx  context.Context
+		want string
+	}{{ctx: ctxA, want: projectA}, {ctx: ctxB, want: projectB}} {
+		target := target
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				resolved, resolveErr := ws.ResolveExistingContext(target.ctx, "value.txt")
+				results <- result{want: target.want, got: resolved.Abs, err: resolveErr}
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		want := filepath.Join(result.want, "value.txt")
+		if result.got != want {
+			t.Fatalf("scoped resolution = %q, want %q", result.got, want)
+		}
+	}
+	if ws.DefaultCWD() != defaultCWD {
+		t.Fatalf("context-scoped resolution mutated default cwd: got %q want %q", ws.DefaultCWD(), defaultCWD)
+	}
+}
+
+func TestContextScopedCWDValidationAndAbsolutePath(t *testing.T) {
+	ws, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WithCWD(nil, ws.Root()); err == nil {
+		t.Fatal("WithCWD accepted nil context")
+	}
+	if _, err := WithCWD(context.Background(), "relative"); err == nil {
+		t.Fatal("WithCWD accepted relative cwd")
+	}
+
+	outside := t.TempDir()
+	file := filepath.Join(outside, "outside.txt")
+	if err := os.WriteFile(file, []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := WithCWD(context.Background(), ws.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ws.ResolveExistingContext(ctx, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Abs != file {
+		t.Fatalf("absolute path changed under scoped cwd: got %q want %q", resolved.Abs, file)
 	}
 }
 

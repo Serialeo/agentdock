@@ -14,6 +14,9 @@ func (s *Service) Session(ctx context.Context, request SessionRequest) (Result, 
 	action := actionArg(request.Action)
 	switch action {
 	case "info":
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		info, err := s.manager.AgentInfo(ctx)
 		if err != nil {
 			return nil, acpToolError(err)
@@ -26,40 +29,90 @@ func (s *Service) Session(ctx context.Context, request SessionRequest) (Result, 
 			"interaction_policy": policies.Interactions, "steering_policy": policies.Steering,
 		}, nil
 	case "authenticate":
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		methodID := request.AuthMethodID
 		if err := s.manager.Authenticate(ctx, methodID); err != nil {
 			return nil, acpToolError(err)
 		}
 		return Result{"action": action, "auth_method_id": methodID, "authenticated": true}, nil
 	case "new":
-		result, err := s.manager.NewSession(ctx, request.CWD, request.AdditionalDirectories)
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
+		cwd, err := s.resolveACPDirectory(ctx, request.CWD)
+		if err != nil {
+			return nil, err
+		}
+		additional, err := s.resolveACPDirectories(ctx, request.AdditionalDirectories)
+		if err != nil {
+			return nil, err
+		}
+		result, err := s.manager.NewSession(s.withNewACPSessionOwnership(ctx), cwd, additional)
 		if err != nil {
 			return nil, acpToolError(err)
 		}
 		return sessionActionResult(action, result), nil
 	case "load":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		result, err := s.manager.LoadSession(ctx, request.SessionID)
 		if err != nil {
 			return nil, acpToolError(err)
 		}
 		return sessionActionResult(action, result), nil
 	case "resume":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		result, err := s.manager.ResumeSession(ctx, request.SessionID)
 		if err != nil {
 			return nil, acpToolError(err)
 		}
 		return sessionActionResult(action, result), nil
 	case "fork":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
+		cwd := request.CWD
+		if cwd != "" {
+			var err error
+			cwd, err = s.resolveACPDirectory(ctx, cwd)
+			if err != nil {
+				return nil, err
+			}
+		}
 		var additional []string
 		if request.AdditionalDirectories != nil {
-			additional = append([]string{}, request.AdditionalDirectories...)
+			var err error
+			additional, err = s.resolveACPDirectories(ctx, request.AdditionalDirectories)
+			if err != nil {
+				return nil, err
+			}
 		}
-		result, err := s.manager.ForkSession(ctx, request.SessionID, request.CWD, additional)
+		result, err := s.manager.ForkSession(s.withNewACPSessionOwnership(ctx), request.SessionID, cwd, additional)
 		if err != nil {
 			return nil, acpToolError(err)
 		}
 		return sessionActionResult(action, result), nil
 	case "set_mode":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		sessionID := request.SessionID
 		modeID := request.ModeID
 		if err := s.manager.SetSessionMode(ctx, sessionID, modeID); err != nil {
@@ -67,6 +120,12 @@ func (s *Service) Session(ctx context.Context, request SessionRequest) (Result, 
 		}
 		return Result{"action": action, "session_id": sessionID, "mode_id": modeID, "changed": true}, nil
 	case "set_config":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		sessionID := request.SessionID
 		configID := request.ConfigID
 		configOptions, err := s.manager.SetSessionConfigOption(ctx, sessionID, configID, request.ConfigValue)
@@ -79,11 +138,20 @@ func (s *Service) Session(ctx context.Context, request SessionRequest) (Result, 
 		if err != nil {
 			return nil, acpToolError(err)
 		}
+		if execution, scoped := acpProjectExecution(ctx); scoped {
+			filtered := sessions[:0]
+			for _, session := range sessions {
+				if sessionOwnedByACPExecution(execution, session) {
+					filtered = append(filtered, session)
+				}
+			}
+			sessions = filtered
+		}
 		return Result{"action": action, "sessions": sessions, "count": len(sessions)}, nil
 	case "inspect":
-		session, err := s.manager.InspectSession(request.SessionID)
+		session, err := s.requireACPSessionOwner(ctx, request.SessionID)
 		if err != nil {
-			return nil, acpToolError(err)
+			return nil, err
 		}
 		messages, err := s.manager.SessionMessages(session.ID)
 		if err != nil {
@@ -91,6 +159,9 @@ func (s *Service) Session(ctx context.Context, request SessionRequest) (Result, 
 		}
 		return Result{"action": action, "session": session, "messages": messages}, nil
 	case "close":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
 		session, err := s.manager.CloseSession(ctx, request.SessionID)
 		if err != nil {
 			return nil, acpToolError(err)
@@ -98,6 +169,9 @@ func (s *Service) Session(ctx context.Context, request SessionRequest) (Result, 
 		return Result{"action": action, "session": session}, nil
 	case "delete":
 		sessionID := request.SessionID
+		if _, err := s.requireACPSessionOwner(ctx, sessionID); err != nil {
+			return nil, err
+		}
 		if err := s.manager.DeleteSession(ctx, sessionID); err != nil {
 			return nil, acpToolError(err)
 		}
@@ -125,6 +199,12 @@ func (s *Service) Prompt(ctx context.Context, request PromptRequest) (Result, er
 	action := actionArg(request.Action)
 	switch action {
 	case "start":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		result, err := s.manager.StartPrompt(ctx, request.SessionID, request.Text)
 		if err != nil {
 			return nil, acpToolError(err)
@@ -134,6 +214,9 @@ func (s *Service) Prompt(ctx context.Context, request PromptRequest) (Result, er
 			"status": result.Status, "started_at": result.StartedAt,
 		}, nil
 	case "events":
+		if _, err := s.requireACPRunOwner(ctx, request.RunID); err != nil {
+			return nil, err
+		}
 		after := intValue(request.AfterSeq, 0)
 		if after < 0 {
 			return nil, validationError("ACP_AFTER_SEQ_INVALID", "after_seq must not be negative", map[string]any{"after_seq": after})
@@ -163,6 +246,12 @@ func (s *Service) Prompt(ctx context.Context, request PromptRequest) (Result, er
 		}
 		return response, nil
 	case "steer":
+		if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		result, err := s.manager.Steer(ctx, request.SessionID, request.Text)
 		if err != nil {
 			return nil, acpToolError(err)
@@ -174,6 +263,16 @@ func (s *Service) Prompt(ctx context.Context, request PromptRequest) (Result, er
 		if sessionID == "" && runID == "" {
 			return nil, validationError("ACP_CANCEL_TARGET_REQUIRED", "session_id or run_id is required for cancel", nil)
 		}
+		if sessionID != "" {
+			if _, err := s.requireACPSessionOwner(ctx, sessionID); err != nil {
+				return nil, err
+			}
+		}
+		if runID != "" {
+			if _, err := s.requireACPRunOwner(ctx, runID); err != nil {
+				return nil, err
+			}
+		}
 		if err := s.manager.CancelPrompt(ctx, sessionID, runID); err != nil {
 			return nil, acpToolError(err)
 		}
@@ -183,28 +282,52 @@ func (s *Service) Prompt(ctx context.Context, request PromptRequest) (Result, er
 	}
 }
 
-func (s *Service) Interaction(_ context.Context, request InteractionRequest) (Result, error) {
+func (s *Service) Interaction(ctx context.Context, request InteractionRequest) (Result, error) {
 	if s == nil || s.manager == nil {
 		return nil, validationError("ACP_NOT_CONFIGURED", "ACP runtime is not configured", nil)
 	}
 	action := actionArg(request.Action)
 	switch action {
 	case "list":
+		if request.SessionID != "" {
+			if _, err := s.requireACPSessionOwner(ctx, request.SessionID); err != nil {
+				return nil, err
+			}
+		}
 		interactions := s.manager.ListInteractions(request.SessionID, boolValue(request.PendingOnly, true))
+		if execution, scoped := acpProjectExecution(ctx); scoped && request.SessionID == "" {
+			filtered := interactions[:0]
+			for _, interaction := range interactions {
+				record, err := s.manager.InspectSession(interaction.SessionID)
+				if err == nil && sessionOwnedByACPExecution(execution, record) {
+					filtered = append(filtered, interaction)
+				}
+			}
+			interactions = filtered
+		}
 		return Result{"action": action, "interactions": interactions, "count": len(interactions)}, nil
 	case "inspect":
-		interaction, err := s.manager.InspectInteraction(request.InteractionID)
+		interaction, err := s.requireACPInteractionOwner(ctx, request.InteractionID)
 		if err != nil {
-			return nil, acpToolError(err)
+			return nil, err
 		}
 		return Result{"action": action, "interaction": interaction}, nil
 	case "respond":
+		if _, err := s.requireACPInteractionOwner(ctx, request.InteractionID); err != nil {
+			return nil, err
+		}
+		if _, err := s.requireCurrentACP(ctx); err != nil {
+			return nil, err
+		}
 		interaction, err := s.manager.RespondInteraction(request.InteractionID, request.OptionID, false)
 		if err != nil {
 			return nil, acpToolError(err)
 		}
 		return Result{"action": action, "interaction": interaction, "responded": true}, nil
 	case "cancel":
+		if _, err := s.requireACPInteractionOwner(ctx, request.InteractionID); err != nil {
+			return nil, err
+		}
 		interaction, err := s.manager.RespondInteraction(request.InteractionID, "", true)
 		if err != nil {
 			return nil, acpToolError(err)

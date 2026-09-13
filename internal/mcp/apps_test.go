@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	protocol "github.com/uvwt/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/config"
 )
@@ -112,8 +112,8 @@ func TestUIResourcesMatchServedResourceRegistry(t *testing.T) {
 	server := &Server{cfg: config.Config{NexusEndpoint: "https://nexus.example.test", ACPEnabled: true, MCPAppsEnabled: true}}
 	definitions := server.appResourceDefinitions()
 	resources := server.UIResources()
-	if len(definitions) != 8 || len(resources) != len(definitions) {
-		t.Fatalf("resource registry=%d bridge capabilities=%d, want 8", len(definitions), len(resources))
+	if len(definitions) != 7 || len(resources) != len(definitions) {
+		t.Fatalf("resource registry=%d bridge capabilities=%d, want 7", len(definitions), len(resources))
 	}
 	byURI := make(map[string]protocol.UIResourceCapability, len(resources))
 	for _, resource := range resources {
@@ -154,13 +154,13 @@ func TestMCPAppsCanBeDisabledWithoutRemovingTools(t *testing.T) {
 	if tools["agentdock_context"] == nil || tools["file_edit"] == nil || tools["task_manage"] == nil {
 		t.Fatalf("core tools disappeared when MCP Apps UI was disabled: %#v", tools)
 	}
-	for _, name := range []string{"agentdock_context", "file_edit", "task_manage", "mcp_tool_call", "file_publish"} {
+	for _, name := range []string{"agentdock_context", "file_edit", "task_manage", "mcp_tool_call"} {
 		if ui := tools[name].Meta["ui"]; ui != nil {
 			t.Fatalf("%s still exposes Apps UI metadata while disabled: %#v", name, ui)
 		}
 	}
-	if tools["file_publish"].Meta["file_arg_rewrite_paths"] == nil {
-		t.Fatalf("file_publish lost non-UI metadata while MCP Apps UI was disabled: %#v", tools["file_publish"].Meta)
+	if tools["file_publish"] != nil {
+		t.Fatalf("retired file_publish tool is still listed: %#v", tools["file_publish"])
 	}
 
 	resources := 0
@@ -202,8 +202,8 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	if len(tools) != 16 {
-		t.Fatalf("tools/list count = %d, want 16", len(tools))
+	if len(tools) != 15 {
+		t.Fatalf("tools/list count = %d, want 15", len(tools))
 	}
 	contextTool := tools["agentdock_context"]
 	if contextTool == nil {
@@ -242,7 +242,9 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 			t.Fatalf("%s should not bind an Apps UI: %#v", name, tool.Meta)
 		}
 	}
-	assertToolUIResource(t, tools["file_publish"], protocol.ArtifactUIResourceURI, "file_arg_rewrite_paths", "openai/fileParams")
+	if tools["file_publish"] != nil {
+		t.Fatalf("retired file_publish tool is still listed: %#v", tools["file_publish"])
+	}
 
 	resources := map[string]*mcpsdk.Resource{}
 	for resource, err := range harness.session.Resources(t.Context(), nil) {
@@ -251,15 +253,14 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		}
 		resources[resource.URI] = resource
 	}
-	if len(resources) != 5 {
-		t.Fatalf("resources/list count = %d, want 5", len(resources))
+	if len(resources) != 4 {
+		t.Fatalf("resources/list count = %d, want 4", len(resources))
 	}
 	for _, uri := range []string{
 		protocol.ContextUIResourceURI,
 		protocol.TaskProgressUIResourceURI,
 		protocol.FileChangeUIResourceURI,
 		protocol.DynamicMCPUIResourceURI,
-		protocol.ArtifactUIResourceURI,
 	} {
 		resource := resources[uri]
 		if resource == nil || resource.MIMEType != protocol.MCPAppMIMEType {
@@ -306,7 +307,7 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		t.Fatalf("agent context resource = %#v", contextRead.Contents)
 	}
 	contextHTML := contextRead.Contents[0].Text
-	for _, marker := range []string{`expectedView="agentdock_context"`, "renderAgentContext", "renderNodeAgentContext", "renderFleetAgentContext", "appendNodeAgentContext", "contextItems", "appendContextOverview", "appendContextSection", "contextPill", `contextItems(data.skills)`, `appendContextOverview(overview,skills.length,t("agentDockSkills"))`, `appendContextSection(groups,t("agentDockSkills"),skills,10)`, `contextPill(summary.skills.length,t("agentDockSkills"))`, `const commonSkillIndex=isObject(data.common_skills)?data.common_skills:{}`, `appendContextSection(groups,t("commonSkills"),commonSkills,10)`, `contextItems(data.dynamic_mcp)`, `Array.isArray(data.nodes)`, `const fleetOverview=el("div","context-overview fleet-overview")`, `appendContextOverview(fleetOverview,nodes.length,t("devices"))`, `appendContextOverview(fleetOverview,online,t("online"))`, `const tabs=el("div","context-node-tabs")`, `fragment.append(tabs,fleetOverview,content)`, `.fleet-overview{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:11px}`, `.context-node-tabs{display:flex;justify-content:safe center`, `.context-node-tab{flex:0 0 auto;border:1px solid var(--ad-border)`, `contextPill(workflowCount,t("workflow"))`, `contextPill(recallEnabled?t("on"):t("off"),t("recall"))`, `button.addEventListener("click",()=>selectNode(index))`, `appendNodeAgentContext(content,{`, `common_skills:node.context.common_skills`, `workflow_templates:shared.workflow_templates`, `const status=node.error?t("unavailable"):(node.online===true?t("online"):stateLabel("offline"))`, `.context-node-tab.active{border-color:var(--ad-text-primary);color:var(--ad-text-primary)}`, `.context-node-content{padding-top:11px}`, ".context-overview{display:grid;grid-template-columns:repeat(4", ".context-overview-card{min-width:0;padding:1px 12px;border-right:1px solid var(--ad-border)", ".context-overview-value{font-size:18px;font-weight:760;line-height:1;color:var(--ad-text-primary)", ".context-section+.context-section{border-top:1px solid var(--ad-border)", ".context-list{display:grid;grid-template-columns:repeat(2", ".context-item{min-width:0;padding:7px 0;border-bottom:1px solid var(--ad-border-soft)", ".context-section-title{font-size:11.5px;font-weight:750;letter-spacing:.01em;color:var(--ad-text-primary)", ".context-name{font-size:11.5px;font-weight:650;color:var(--ad-text-primary)", ".context-desc{margin-top:1px;min-width:0;color:var(--ad-text-muted)", ".compact-context"} {
+	for _, marker := range []string{`expectedView="agentdock_context"`, "renderAgentContext", "renderNodeAgentContext", "renderFleetAgentContext", "appendNodeAgentContext", "contextItems", "appendContextOverview", "appendContextSection", "contextPill", `contextItems(data.skills)`, `appendContextOverview(overview,skills.length,"AgentDock Skills")`, `appendContextSection(groups,"AgentDock Skills",skills,10)`, `contextPill(summary.skills.length,"AgentDock Skills")`, `const commonSkillIndex=isObject(data.common_skills)?data.common_skills:{}`, `appendContextSection(groups,"Common Skills",commonSkills,10)`, `contextItems(data.dynamic_mcp)`, `Array.isArray(data.nodes)`, `const fleetOverview=el("div","context-overview fleet-overview")`, `appendContextOverview(fleetOverview,nodes.length,"Devices")`, `appendContextOverview(fleetOverview,online,"Online")`, `const tabs=el("div","context-node-tabs")`, `fragment.append(tabs,fleetOverview,content)`, `.fleet-overview{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:11px}`, `.context-node-tabs{display:flex;justify-content:safe center`, `.context-node-tab{flex:0 0 auto;border:1px solid var(--ad-border)`, `contextPill(workflowCount,"Workflow")`, `contextPill(recallEnabled?"ON":"OFF","Recall")`, `button.addEventListener("click",()=>selectNode(index))`, `appendNodeAgentContext(content,{`, `common_skills:node.context.common_skills`, `workflow_templates:shared.workflow_templates`, `node.error?"不可用"`, `.context-node-tab.active{border-color:var(--ad-text-primary);color:var(--ad-text-primary)}`, `.context-node-content{padding-top:11px}`, ".context-overview{display:grid;grid-template-columns:repeat(4", ".context-overview-card{min-width:0;padding:1px 12px;border-right:1px solid var(--ad-border)", ".context-overview-value{font-size:18px;font-weight:760;line-height:1;color:var(--ad-text-primary)", ".context-section+.context-section{border-top:1px solid var(--ad-border)", ".context-list{display:grid;grid-template-columns:repeat(2", ".context-item{min-width:0;padding:7px 0;border-bottom:1px solid var(--ad-border-soft)", ".context-section-title{font-size:11.5px;font-weight:750;letter-spacing:.01em;color:var(--ad-text-primary)", ".context-name{font-size:11.5px;font-weight:650;color:var(--ad-text-primary)", ".context-desc{margin-top:1px;min-width:0;color:var(--ad-text-muted)", ".compact-context"} {
 		if !strings.Contains(contextHTML, marker) {
 			t.Fatalf("agent context resource missing structured summary marker %q", marker)
 		}
@@ -354,7 +355,7 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadResource(task progress) error = %v", err)
 	}
-	for _, marker := range []string{".compact-progress", ".compact-progress-row", ".compact-summary", ".progress-fill", ".progress-node.completed", ".progress-node.in-progress", ".progress-node.blocked", `node.title=(step.title||step.id||t("step"))+" · "+stateLabel(status)`, `fill.style.width="calc((100% - 14px) * "+ratio+")"`, "taskProgress(steps)", `compactRows.push(el("span","compact-summary",task.summary))`, `progressRow.append(progress)`, `compactRows.push(progressRow)`, ".steps::before", ".step-marker", `status==="completed"?"✓"`} {
+	for _, marker := range []string{".compact-progress", ".compact-progress-row", ".compact-summary", ".progress-fill", ".progress-node.completed", ".progress-node.in-progress", ".progress-node.blocked", `node.title=(step.title||step.id||"Step")+" · "+status`, `fill.style.width="calc((100% - 14px) * "+ratio+")"`, "taskProgress(steps)", `compactRows.push(el("span","compact-summary",task.summary))`, `progressRow.append(progress)`, `compactRows.push(progressRow)`, ".steps::before", ".step-marker", `status==="completed"?"✓"`} {
 		if len(taskRead.Contents) != 1 || !strings.Contains(taskRead.Contents[0].Text, marker) {
 			t.Fatalf("task resource missing compact or detailed progress marker %q", marker)
 		}
@@ -365,7 +366,6 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		renderer string
 	}{
 		{protocol.DynamicMCPUIResourceURI, "dynamic_mcp", "renderDynamicMCP"},
-		{protocol.ArtifactUIResourceURI, "artifact", "renderArtifact"},
 	} {
 		read, err := harness.session.ReadResource(t.Context(), &mcpsdk.ReadResourceParams{URI: tc.uri})
 		if err != nil || len(read.Contents) != 1 {
@@ -380,13 +380,6 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		for _, forbidden := range []string{"result-kicker", "result-heading", "result-head-meta", "resultHead("} {
 			if strings.Contains(html, forbidden) {
 				t.Fatalf("resource %s contains a separate gray domain header marker %q", tc.uri, forbidden)
-			}
-		}
-		if tc.uri == protocol.ArtifactUIResourceURI {
-			for _, marker := range []string{`.detail-link{color:var(--ad-link);text-decoration:none}`, `href:data.url`, `link.target="_blank"`, `link.rel="noopener noreferrer"`} {
-				if !strings.Contains(html, marker) {
-					t.Fatalf("artifact resource missing clickable signed URL marker %q", marker)
-				}
 			}
 		}
 	}
@@ -405,7 +398,7 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 	if !ok {
 		t.Fatalf("agentdock_context structuredContent = %#v", contextResult.StructuredContent)
 	}
-	for _, field := range []string{"skills", "dynamic_mcp", "workflow_templates", "rules"} {
+	for _, field := range []string{"skills", "common_skills", "dynamic_mcp", "workflow_templates"} {
 		if contextStructured[field] == nil {
 			t.Fatalf("agentdock_context structuredContent missing %s: %#v", field, contextStructured)
 		}
@@ -424,20 +417,16 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 			"action": "replace", "path": "note.txt", "old": "alpha", "new": "beta", "dry_run": true,
 		},
 	})
-	if err != nil || fileEditResult.IsError {
-		t.Fatalf("file_edit result=%#v err=%v", fileEditResult, err)
+	if err != nil || !fileEditResult.IsError {
+		t.Fatalf("direct file_edit without Project Target result=%#v err=%v", fileEditResult, err)
 	}
 	fileEditStructured, ok := fileEditResult.StructuredContent.(map[string]any)
-	if !ok || fileEditStructured["action"] != "replace" || fileEditStructured["dry_run"] != true || fileEditStructured["view"] != nil {
-		t.Fatalf("file_edit structuredContent = %#v", fileEditResult.StructuredContent)
-	}
-	diffPreview, _ := fileEditStructured["diff_preview"].(string)
-	if !strings.Contains(diffPreview, "beta") {
-		t.Fatalf("file_edit diff_preview = %q", diffPreview)
+	if !ok || fileEditStructured["code"] != protocol.ErrorExecutionContextRequired {
+		t.Fatalf("direct file_edit authorization result = %#v", fileEditResult.StructuredContent)
 	}
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil || string(fileBytes) != "alpha\n" {
-		t.Fatalf("dry-run changed file: content=%q err=%v", fileBytes, err)
+		t.Fatalf("rejected direct file_edit changed file: content=%q err=%v", fileBytes, err)
 	}
 	errorResult, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{
 		Name: "file_edit",
@@ -449,8 +438,8 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		t.Fatalf("file_edit validation error result=%#v err=%v", errorResult, err)
 	}
 	errorStructured, ok := errorResult.StructuredContent.(map[string]any)
-	if !ok || errorStructured["code"] != "MATCH_COUNT_MISMATCH" {
-		t.Fatalf("file_edit validation structuredContent = %#v", errorResult.StructuredContent)
+	if !ok || errorStructured["code"] != protocol.ErrorExecutionContextRequired {
+		t.Fatalf("direct file_edit must reject before host mutation: %#v", errorResult.StructuredContent)
 	}
 
 	createdTask, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{
@@ -534,8 +523,8 @@ func TestMCPAppsExposeNexusViewsWhenNexusEnabled(t *testing.T) {
 		}
 		resources[resource.URI] = resource
 	}
-	if len(resources) != 7 {
-		t.Fatalf("resources/list count = %d, want 7", len(resources))
+	if len(resources) != 6 {
+		t.Fatalf("resources/list count = %d, want 6", len(resources))
 	}
 	for _, tc := range []struct {
 		uri      string
@@ -623,8 +612,8 @@ func TestMCPAppsExposeACPViewOnlyWhenACPEnabled(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	if len(tools) != 19 {
-		t.Fatalf("tools/list count = %d, want 19", len(tools))
+	if len(tools) != 18 {
+		t.Fatalf("tools/list count = %d, want 18", len(tools))
 	}
 	assertToolUIResource(t, tools["acp_session"], protocol.ACPStatusUIResourceURI)
 	for _, name := range []string{"acp_prompt", "acp_interaction"} {
@@ -650,12 +639,12 @@ func TestMCPAppsExposeACPViewOnlyWhenACPEnabled(t *testing.T) {
 	assertResourceUIMeta(t, read.Contents[0].Meta, "")
 
 	sessionList, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "acp_session", Arguments: map[string]any{"action": "list"}})
-	if err != nil || sessionList.IsError {
-		t.Fatalf("acp_session list result=%#v err=%v", sessionList, err)
+	if err != nil || !sessionList.IsError {
+		t.Fatalf("direct acp_session without Project Target result=%#v err=%v", sessionList, err)
 	}
 	sessionStructured, ok := sessionList.StructuredContent.(map[string]any)
-	if !ok || sessionStructured["action"] != "list" || sessionStructured["sessions"] == nil || sessionStructured["view"] != nil {
-		t.Fatalf("acp_session list structuredContent = %#v", sessionList.StructuredContent)
+	if !ok || sessionStructured["code"] != protocol.ErrorExecutionContextRequired {
+		t.Fatalf("direct acp_session authorization result = %#v", sessionList.StructuredContent)
 	}
 
 }

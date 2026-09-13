@@ -30,7 +30,6 @@
 | `AGENTDOCK_OAUTH_ACCESS_TOKEN_TTL` | OAuth Access Token 有效期 | Desktop/高级启动配置 |
 | `AGENTDOCK_STDIO` | 是否启用 stdio 运行模式 | 直接启动/集成场景 |
 | `AGENTDOCK_TRUSTED_PROXY_CIDRS` | 受信任反向代理网段 | 服务器/反代场景 |
-| `AGENTDOCK_INSTRUCTIONS_FILE` | 额外 Instructions 文件 | 高级启动配置 |
 
 Coding Agent 的发现、Codex / Claude Adapter 安装、Grok stdio 模式、平台配置和验证流程见 `acp.md`。
 

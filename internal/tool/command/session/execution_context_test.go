@@ -12,19 +12,15 @@ func TestExecutionContextIsIncludedInSnapshotAndSummary(t *testing.T) {
 		Done:      make(chan struct{}),
 		Terminal:  "conpty",
 	}
-	s.SetExecutionContext(ExecutionContext{
-		Runtime:      "wsl",
-		Distribution: "Ubuntu",
-		Workdir:      "/mnt/d/Project/synapse",
-	})
+	s.SetExecutionContext(ExecutionContext{Workdir: "/srv/project"})
 
 	snapshot := s.Snapshot("running", 1024)
-	if snapshot.Runtime != "wsl" || snapshot.WSLDistribution != "Ubuntu" || snapshot.Workdir != "/mnt/d/Project/synapse" {
+	if snapshot.Workdir != "/srv/project" {
 		t.Fatalf("snapshot execution metadata = %#v", snapshot)
 	}
 
 	summary := s.Summary()
-	if summary.Runtime != "wsl" || summary.Distribution != "Ubuntu" || summary.Workdir != "/mnt/d/Project/synapse" {
+	if summary.Workdir != "/srv/project" {
 		t.Fatalf("summary execution metadata = %#v", summary)
 	}
 }

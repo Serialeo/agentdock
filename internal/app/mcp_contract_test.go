@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/uvwt/agentdock-protocol/mcpcontract"
+	"github.com/Serialeo/agentdock-protocol/mcpcontract"
 )
 
 func TestCanonicalToolDefinitionsMatchSharedContract(t *testing.T) {

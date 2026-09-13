@@ -364,15 +364,14 @@ func (app *trayApp) removeIcon() {
 
 func (app *trayApp) refreshTooltip() {
 	state := app.readState()
-	labels := currentTrayText()
-	text := labels.TooltipStopped
+	text := "AgentDock: 未运行"
 	if state.Healthy {
-		text = labels.TooltipRunning
+		text = "AgentDock: 运行中"
 		if state.Version != "" {
 			text += " v" + strings.TrimPrefix(state.Version, "v")
 		}
 	} else if state.Err != nil {
-		text = labels.TooltipUnavailable
+		text = "AgentDock: 状态不可用"
 	}
 	data := notifyIconData{
 		Size:   uint32(unsafe.Sizeof(notifyIconData{})),
@@ -386,43 +385,42 @@ func (app *trayApp) refreshTooltip() {
 
 func (app *trayApp) showMenu() {
 	state := app.readState()
-	labels := currentTrayText()
 	menu, _, _ := procCreatePopupMenu.Call()
 	if menu == 0 {
 		return
 	}
 	defer procDestroyMenu.Call(menu)
 
-	status := labels.StatusStopped
+	status := "状态：未运行"
 	if state.Healthy {
-		status = labels.StatusRunning
+		status = "状态：运行中"
 		if state.Version != "" {
 			status += " v" + strings.TrimPrefix(state.Version, "v")
 		}
 	} else if state.Err != nil {
-		status = labels.StatusUnavailable
+		status = "状态：不可用"
 	}
 	appendMenu(menu, mfString|mfDisabled|mfGrayed, menuStatus, status)
 	appendMenu(menu, mfSeparator, 0, "")
-	appendMenu(menu, menuFlags(state.Manifest.LocalMCPURL != ""), menuCopyLocal, labels.CopyLocalMCP)
-	appendMenu(menu, menuFlags(state.Manifest.PublicURL != ""), menuCopyPublic, labels.CopyPublicMCP)
+	appendMenu(menu, menuFlags(state.Manifest.LocalMCPURL != ""), menuCopyLocal, "复制本地 MCP 地址")
+	appendMenu(menu, menuFlags(state.Manifest.PublicURL != ""), menuCopyPublic, "复制公网 MCP 地址")
 	if state.Manifest.TunnelMode == "quick" {
 		appendMenu(
 			menu,
 			menuFlags(state.Manifest.AgentDockBinary != ""),
 			menuRefreshQuickURL,
-			labels.RefreshQuickURL,
+			"重新生成临时公网地址",
 		)
 	}
 	appendMenu(menu, mfSeparator, 0, "")
-	appendMenu(menu, menuFlags(!state.Healthy && state.Manifest.AgentDockBinary != ""), menuStart, labels.StartAgentDock)
-	appendMenu(menu, menuFlags(state.Manifest.AgentDockBinary != ""), menuRestart, labels.RestartAgentDock)
-	appendMenu(menu, menuFlags(state.Manifest.AgentDockBinary != ""), menuUpdate, labels.InstallUpdate)
+	appendMenu(menu, menuFlags(!state.Healthy && state.Manifest.AgentDockBinary != ""), menuStart, "启动 AgentDock")
+	appendMenu(menu, menuFlags(state.Manifest.AgentDockBinary != ""), menuRestart, "重启 AgentDock")
+	appendMenu(menu, menuFlags(state.Manifest.AgentDockBinary != ""), menuUpdate, "检查并安装更新")
 	appendMenu(menu, mfSeparator, 0, "")
-	appendMenu(menu, mfString, menuOpenFolder, labels.OpenRuntimeFolder)
-	appendMenu(menu, mfString, menuOpenDocs, labels.OpenDocumentation)
+	appendMenu(menu, mfString, menuOpenFolder, "打开运行目录")
+	appendMenu(menu, mfString, menuOpenDocs, "打开使用文档")
 	appendMenu(menu, mfSeparator, 0, "")
-	appendMenu(menu, mfString, menuExit, labels.ExitTray)
+	appendMenu(menu, mfString, menuExit, "退出托盘")
 
 	var cursor point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
@@ -444,44 +442,43 @@ func (app *trayApp) showMenu() {
 
 func (app *trayApp) handleMenu(command uint16) {
 	state := app.readState()
-	labels := currentTrayText()
 	switch command {
 	case menuCopyLocal:
 		if err := setClipboardText(state.Manifest.LocalMCPURL); err != nil {
-			app.notify("AgentDock", fmt.Sprintf(labels.CopyLocalFailed, err), true)
+			app.notify("AgentDock", "复制本地 MCP 地址失败："+err.Error(), true)
 			return
 		}
-		app.notify("AgentDock", labels.CopyLocalSucceeded, false)
+		app.notify("AgentDock", "本地 MCP 地址已复制。", false)
 	case menuCopyPublic:
 		if state.Manifest.PublicURL == "" {
 			return
 		}
 		if err := setClipboardText(strings.TrimRight(state.Manifest.PublicURL, "/") + "/mcp"); err != nil {
-			app.notify("AgentDock", fmt.Sprintf(labels.CopyPublicFailed, err), true)
+			app.notify("AgentDock", "复制公网 MCP 地址失败："+err.Error(), true)
 			return
 		}
-		app.notify("AgentDock", labels.CopyPublicSucceeded, false)
+		app.notify("AgentDock", "公网 MCP 地址已复制。", false)
 	case menuRefreshQuickURL:
 		if err := regenerateQuickTunnel(state.Manifest); err != nil {
-			app.notify("AgentDock", fmt.Sprintf(labels.RefreshQuickFailed, err), true)
+			app.notify("AgentDock", "重新生成临时地址失败："+err.Error(), true)
 			return
 		}
-		app.notify("AgentDock", labels.RefreshQuickStarted, false)
+		app.notify("AgentDock", "正在生成新的临时公网地址，完成后托盘会自动更新。", false)
 	case menuStart:
 		if err := startAgentDock(state.Manifest); err != nil {
-			app.notify("AgentDock", fmt.Sprintf(labels.StartFailed, err), true)
+			app.notify("AgentDock", "启动失败："+err.Error(), true)
 			return
 		}
-		app.notify("AgentDock", labels.StartStarted, false)
+		app.notify("AgentDock", "正在启动 AgentDock。", false)
 	case menuRestart:
 		if err := restartAgentDock(state.Manifest); err != nil {
-			app.notify("AgentDock", fmt.Sprintf(labels.RestartFailed, err), true)
+			app.notify("AgentDock", "重启失败："+err.Error(), true)
 			return
 		}
-		app.notify("AgentDock", labels.RestartStarted, false)
+		app.notify("AgentDock", "正在重启 AgentDock。", false)
 	case menuUpdate:
 		if err := launchUpdate(state.Manifest); err != nil {
-			app.notify("AgentDock", fmt.Sprintf(labels.UpdateFailed, err), true)
+			app.notify("AgentDock", "启动更新失败："+err.Error(), true)
 		}
 	case menuOpenFolder:
 		_ = exec.Command("explorer.exe", filepath.Dir(app.manifestPath)).Start()
@@ -561,15 +558,14 @@ func copyUTF16(destination []uint16, value string) {
 }
 
 func setClipboardText(value string) error {
-	labels := currentTrayText()
 	if strings.TrimSpace(value) == "" {
-		return errors.New(labels.ClipboardNoAddress)
+		return errors.New("没有可复制的地址")
 	}
 	encoded := windows.StringToUTF16(value)
 	size := uintptr(len(encoded) * 2)
 	memory, _, allocErr := procGlobalAlloc.Call(gmemMoveable, size)
 	if memory == 0 {
-		return fmt.Errorf(labels.ClipboardAllocFailed, allocErr)
+		return fmt.Errorf("分配剪贴板内存失败: %w", allocErr)
 	}
 	transferred := false
 	defer func() {
@@ -580,7 +576,7 @@ func setClipboardText(value string) error {
 
 	pointer, _, lockErr := procGlobalLock.Call(memory)
 	if pointer == 0 {
-		return fmt.Errorf(labels.ClipboardLockFailed, lockErr)
+		return fmt.Errorf("锁定剪贴板内存失败: %w", lockErr)
 	}
 	// 目标地址属于 Windows 全局内存，不把它包装成 Go 切片，避免 uintptr
 	// 跨越调用边界后重新转换为 unsafe.Pointer 的生命周期风险。
@@ -597,14 +593,14 @@ func setClipboardText(value string) error {
 		time.Sleep(20 * time.Millisecond)
 	}
 	if !opened {
-		return errors.New(labels.ClipboardBusy)
+		return errors.New("剪贴板正被其他程序占用")
 	}
 	defer procCloseClipboard.Call()
 	if result, _, emptyErr := procEmptyClipboard.Call(); result == 0 {
-		return fmt.Errorf(labels.ClipboardClearFailed, emptyErr)
+		return fmt.Errorf("清空剪贴板失败: %w", emptyErr)
 	}
 	if result, _, setErr := procSetClipboardData.Call(cfUnicodeText, memory); result == 0 {
-		return fmt.Errorf(labels.ClipboardWriteFailed, setErr)
+		return fmt.Errorf("写入剪贴板失败: %w", setErr)
 	}
 	transferred = true
 	return nil
@@ -613,7 +609,7 @@ func setClipboardText(value string) error {
 func runtimeRootForManifest(manifest desktopruntime.Manifest) (string, error) {
 	binary := strings.TrimSpace(manifest.AgentDockBinary)
 	if binary == "" {
-		return "", errors.New(currentTrayText().RuntimeIncomplete)
+		return "", errors.New("AgentDock 运行信息不完整")
 	}
 	return filepath.Dir(desktopruntime.PathForBinary(binary)), nil
 }
@@ -625,20 +621,20 @@ func runNativeAgentDock(manifest desktopruntime.Manifest, arguments ...string) e
 	}
 	binary := strings.TrimSpace(manifest.AgentDockBinary)
 	if _, err := os.Stat(binary); err != nil {
-		return fmt.Errorf(currentTrayText().CoreUnavailable, err)
+		return fmt.Errorf("AgentDock 核心不可用: %w", err)
 	}
 	arguments = append(arguments, "--runtime-root", runtimeRoot)
 	command := exec.Command(binary, arguments...)
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf(currentTrayText().NativeCommandFailed, err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("原生控制命令失败: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
 
 func regenerateQuickTunnel(manifest desktopruntime.Manifest) error {
 	if manifest.TunnelMode != "quick" {
-		return errors.New(currentTrayText().QuickTunnelNotActive)
+		return errors.New("当前未使用临时公网地址")
 	}
 	return runNativeAgentDock(manifest, "tunnel", "regenerate")
 }
@@ -654,7 +650,7 @@ func restartAgentDock(manifest desktopruntime.Manifest) error {
 func launchUpdate(manifest desktopruntime.Manifest) error {
 	binary := strings.TrimSpace(manifest.AgentDockBinary)
 	if binary == "" {
-		return errors.New(currentTrayText().CoreUnavailablePlain)
+		return errors.New("AgentDock 核心不可用")
 	}
 	if _, err := os.Stat(binary); err != nil {
 		return err
@@ -675,7 +671,7 @@ func launchUpdate(manifest desktopruntime.Manifest) error {
 		swShow,
 	)
 	if result <= 32 {
-		return fmt.Errorf(currentTrayText().UpdateProgramFailed, result)
+		return fmt.Errorf("启动更新程序失败，ShellExecute 错误码 %d", result)
 	}
 	return nil
 }

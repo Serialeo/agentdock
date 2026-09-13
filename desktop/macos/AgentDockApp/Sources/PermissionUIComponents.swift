@@ -4,12 +4,8 @@ final class TopAlignedStackView: NSStackView {
     override var isFlipped: Bool { true }
 }
 
-final class TopAlignedDocumentView: NSView {
-    override var isFlipped: Bool { true }
-}
-
 enum PermissionUI {
-    static func statusLabel(_ text: String = L10n.text("Not checked")) -> NSTextField {
+    static func statusLabel(_ text: String = "未检查") -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.alignment = .right

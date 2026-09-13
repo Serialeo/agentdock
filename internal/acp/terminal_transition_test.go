@@ -131,7 +131,7 @@ func TestManagerCloseSealsLateSessionWrites(t *testing.T) {
 	if _, err := manager.beginSessionOperation(created.Session.ID); err == nil {
 		t.Fatal("session operation entered after manager close")
 	}
-	if _, err := manager.persistNewSession(sessionLifecycleResponse{SessionID: "remote-after-close"}, workspace, nil); err == nil {
+	if _, err := manager.persistNewSession(sessionLifecycleResponse{SessionID: "remote-after-close"}, workspace, nil, SessionOwnership{}); err == nil {
 		t.Fatal("new session metadata was persisted after manager close")
 	}
 	if _, err := manager.markSessionReady(created.Session, sessionLifecycleResponse{}); err == nil {

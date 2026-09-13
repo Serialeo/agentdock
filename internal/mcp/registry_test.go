@@ -112,7 +112,7 @@ func TestAgentDockContextSchemaIsStructuredEntrypoint(t *testing.T) {
 	if !ok {
 		t.Fatal("agentdock_context output schema properties missing")
 	}
-	for _, name := range []string{"runtime", "skills", "dynamic_mcp", "acp", "workflow_templates", "recall", "rules", "warnings"} {
+	for _, name := range []string{"runtime", "skills", "common_skills", "dynamic_mcp", "acp", "workflow_templates", "recall", "warnings"} {
 		if _, ok := outputProps[name]; !ok {
 			t.Fatalf("agentdock_context output schema missing %q: %#v", name, outputProps)
 		}
@@ -120,8 +120,11 @@ func TestAgentDockContextSchemaIsStructuredEntrypoint(t *testing.T) {
 	if _, legacy := outputProps["context"]; legacy {
 		t.Fatalf("agentdock_context output schema still exposes legacy Markdown context: %#v", outputProps)
 	}
+	if _, legacy := outputProps["rules"]; legacy {
+		t.Fatalf("Bridge v4 context still exposes removed rules compatibility field: %#v", outputProps)
+	}
 	required, ok := output["required"].([]string)
-	if !ok || !reflect.DeepEqual(required, []string{"runtime", "skills", "dynamic_mcp", "workflow_templates", "rules"}) {
+	if !ok || !reflect.DeepEqual(required, []string{"runtime", "skills", "common_skills", "dynamic_mcp", "workflow_templates"}) {
 		t.Fatalf("agentdock_context output schema required = %#v", output["required"])
 	}
 }
@@ -250,17 +253,20 @@ func TestTaskManageSchemaExposesLifecycleActions(t *testing.T) {
 	if !ok {
 		t.Fatal("task_manage output schema properties missing")
 	}
-	for _, name := range []string{"task_id", "task", "task_summary", "next_required_action", "tasks", "count", "state_dir"} {
+	for _, name := range []string{"task_id", "task", "task_summary", "tasks", "count", "state_dir"} {
 		if _, ok := outputProps[name]; !ok {
 			t.Fatalf("task_manage output schema missing %q", name)
 		}
+	}
+	if _, ok := outputProps["next_required_action"]; ok {
+		t.Fatal("task_manage output schema still exposes next_required_action")
 	}
 
 	workflowOutputProps, ok := outputSchema("workflow_template_manage")["properties"].(map[string]any)
 	if !ok {
 		t.Fatal("workflow_template_manage output schema properties missing")
 	}
-	for _, name := range []string{"candidates", "recommended", "best_candidate_score", "score_thresholds", "composition_required", "next_required_action"} {
+	for _, name := range []string{"candidates", "recommended", "best_candidate_score", "score_thresholds", "composition_required"} {
 		if _, ok := workflowOutputProps[name]; !ok {
 			t.Fatalf("workflow_template_manage output schema missing %q", name)
 		}
@@ -350,9 +356,14 @@ func TestPrivateNoteManageModelEntrypoint(t *testing.T) {
 	if !ok {
 		t.Fatal("private_note_manage definition missing")
 	}
-	for _, text := range []string{"Do not use by default", "NexusDock private note vault", "Search is metadata-only", "Actions: search, read, write, delete, status, or maintain"} {
+	for _, text := range []string{"NexusDock private note vault", "Search is metadata-only", "Actions: search, read, write, delete, status, or maintain"} {
 		if !strings.Contains(def.Description, text) {
 			t.Fatalf("private_note_manage description missing %q: %q", text, def.Description)
+		}
+	}
+	for _, hiddenRouting := range []string{"Do not use by default", "use only when", "user explicitly requests"} {
+		if strings.Contains(def.Description, hiddenRouting) {
+			t.Fatalf("private_note_manage description still contains behavioral routing %q: %q", hiddenRouting, def.Description)
 		}
 	}
 
