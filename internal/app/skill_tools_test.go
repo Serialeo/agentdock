@@ -19,6 +19,11 @@ func TestRemovedSkillRuntimeToolsAreUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	for _, name := range []string{"skill_read", "skill_run", "skill_env_manage"} {
 		_, err := rt.Call(context.Background(), name, map[string]any{})
 		var toolErr *ToolError

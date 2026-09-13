@@ -31,6 +31,11 @@ func TestAgentDockContextToolReturnsStructuredRuntimeIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	installDocumentSkillForTest(t, rt, "demo-skill", "1.0.0", "Use this Skill for context index tests.")
 
 	result, err := rt.Call(context.Background(), "agentdock_context", map[string]any{})
@@ -149,6 +154,11 @@ func TestNexusUnavailableHidesWorkflowTemplateCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 
 	toolNames := strings.Join(rt.ToolNames(), "\n")
 	for _, hiddenTool := range []string{"workflow_template_manage", "evolve", "recall_bootstrap", "recall_search", "recall_read", "recall_write", "recall_maintain"} {
@@ -299,6 +309,11 @@ func TestSkillCapabilityIndexOmitsLegacyExecutableSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	installDocumentSkillForTest(t, rt, "document-skill", "1.0.0", "A document-only Skill.")
 
 	stateDir, err := config.SkillStateDir(rt.cfg)

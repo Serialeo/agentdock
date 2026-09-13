@@ -20,6 +20,11 @@ func TestRuntimeAPISkillFilesStayInsideActivePackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 
 	sourceDir := filepath.Join(cfg.AgentDockDefaultDir, "demo-skill")
 	if err := os.MkdirAll(filepath.Join(sourceDir, "references"), 0o755); err != nil {

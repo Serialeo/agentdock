@@ -190,6 +190,11 @@ func newMemoryTestRuntime(t *testing.T, store map[string]string) (*Runtime, func
 		server.Close()
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	return runtime, server.Close
 }
 

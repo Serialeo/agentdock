@@ -56,6 +56,11 @@ func TestMCPEndpointNotificationReturnsAcceptedWithEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := mcpEndpointHandler(mcp.NewServer(runtime, cfg), cfg, auth.NewOAuthStore())
 
 	req := newMCPRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`))
@@ -76,6 +81,11 @@ func TestMCPEndpointRejectsTrailingJSONValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := mcpEndpointHandler(mcp.NewServer(runtime, cfg), cfg, auth.NewOAuthStore())
 	body := `{"jsonrpc":"2.0","id":1,"method":"ping"} {"jsonrpc":"2.0","id":2,"method":"ping"}`
 	recorder := httptest.NewRecorder()
@@ -94,6 +104,11 @@ func TestMCPEndpointRejectsOversizedBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := mcpEndpointHandler(mcp.NewServer(runtime, cfg), cfg, auth.NewOAuthStore())
 	body := `{"jsonrpc":"2.0","id":1,"method":"ping"}` + strings.Repeat(" ", (1<<20)+1)
 	recorder := httptest.NewRecorder()
@@ -113,6 +128,11 @@ func TestRuntimeAPIRequiresBearerWhenConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/runtime/status", nil)
@@ -130,6 +150,11 @@ func TestRuntimeAPIStatusWithBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/runtime/status", nil)
@@ -154,6 +179,11 @@ func TestRuntimeAPISkillsNoAuthWhenUnconfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/internal/runtime/skills", nil)
@@ -205,6 +235,11 @@ func TestRuntimeAPIRejectsInvalidTaskQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
 	tests := []struct {
 		name string
@@ -243,6 +278,11 @@ func TestRuntimeAPIDeletesOnlySelectedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	createTask := func(title string) string {
 		t.Helper()
 		created, err := runtime.Call(context.Background(), "task_manage", map[string]any{
@@ -302,6 +342,11 @@ func TestRuntimeAPIUnknownRouteReturnsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/internal/runtime/unknown", nil))
@@ -319,6 +364,11 @@ func TestRuntimeAPIMethodContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := runtimeAPIHandler(runtime, cfg, auth.NewOAuthStore())
 	tests := []struct {
 		method string
@@ -355,6 +405,11 @@ func TestAgentDockContextRequiresBearerEvenOnLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := agentDockContextHandler(mcp.NewServer(runtime, cfg), cfg, auth.NewOAuthStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/capabilities/context", nil)
@@ -372,6 +427,11 @@ func TestAgentDockContextAcceptsBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := agentDockContextHandler(mcp.NewServer(runtime, cfg), cfg, auth.NewOAuthStore())
 
 	req := httptest.NewRequest(http.MethodGet, "/capabilities/context", nil)
@@ -390,6 +450,11 @@ func TestServerURLAloneDoesNotRequireAuthOrDeclareOAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	handler := mcpEndpointHandler(mcp.NewServer(runtime, cfg), cfg, auth.NewOAuthStore())
 
 	req := newMCPRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`))

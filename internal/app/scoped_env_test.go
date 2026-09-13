@@ -157,6 +157,11 @@ func newScopedEnvTestRuntime(t *testing.T) *Runtime {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	return runtime
 }
 

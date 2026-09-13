@@ -29,6 +29,11 @@ func newCodeToolsRuntime(t *testing.T) (*Runtime, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	return rt, root
 }
 

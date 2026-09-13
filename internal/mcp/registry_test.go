@@ -36,6 +36,11 @@ func TestRuntimeToolsHaveRegistryDefinitionsAndSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	for _, name := range rt.ToolNames() {
 		def, ok := toolDefinition(name)
 		if !ok {
@@ -78,6 +83,11 @@ func TestRuntimeExposesSingleToolSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	seen := map[string]bool{}
 	for _, name := range rt.ToolNames() {
 		seen[name] = true
@@ -141,6 +151,11 @@ func TestNexusDockRecallToolNamesHideLegacyMemoryTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	seen := map[string]bool{}
 	for _, name := range rt.ToolNames() {
 		seen[name] = true
@@ -171,6 +186,11 @@ func TestPrivateNoteManageIsHiddenWithoutNexus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Errorf("close runtime: %v", err)
+		}
+	})
 	for _, name := range rt.ToolNames() {
 		if name == "private_note_manage" {
 			t.Fatal("private_note_manage must be hidden when AgentDock is not paired with NexusDock")
