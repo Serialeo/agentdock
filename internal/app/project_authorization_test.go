@@ -38,10 +38,21 @@ func requireAppToolErrorCode(t *testing.T, err error, code string) {
 
 func TestProjectCapabilityMatrixUsesTrustedExecutionContext(t *testing.T) {
 	runtime := &Runtime{}
-	if err := runtime.authorizeProjectTool(context.Background(), "read_file", map[string]any{"path": "README.md"}); err == nil {
-		t.Fatal("read_file without Project execution context unexpectedly succeeded")
-	} else {
-		requireAppToolErrorCode(t, err, protocol.ErrorExecutionContextRequired)
+	for _, call := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "read_file", args: map[string]any{"path": "README.md"}},
+		{name: "file_edit", args: map[string]any{"action": "add", "path": "standalone.txt"}},
+		{name: "exec_command", args: map[string]any{"cmd": "true"}},
+		{name: "browser_session", args: map[string]any{"action": "start"}},
+		{name: "browser_snapshot", args: map[string]any{"session_id": "standalone"}},
+		{name: "mcp_tool_call", args: map[string]any{"name": "demo:tool"}},
+		{name: "acp_session", args: map[string]any{"action": "list"}},
+	} {
+		if err := runtime.authorizeProjectTool(context.Background(), call.name, call.args); err != nil {
+			t.Fatalf("standalone %s unexpectedly required Project execution context: %v", call.name, err)
+		}
 	}
 
 	readOnly := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly}
@@ -144,6 +155,9 @@ func TestBrowserSessionOwnerIsTargetScoped(t *testing.T) {
 		browserOwners: map[string]browserSessionOwner{
 			"browser-1": browserOwnerFromExecution(executionA),
 		},
+	}
+	if err := runtime.requireBrowserSessionOwner(context.Background(), "standalone-browser"); err != nil {
+		t.Fatalf("standalone browser session unexpectedly required Project ownership: %v", err)
 	}
 	if err := runtime.requireBrowserSessionOwner(ctxA, "browser-1"); err != nil {
 		t.Fatalf("owner Target rejected: %v", err)

@@ -13,30 +13,33 @@ import (
 	projectstate "github.com/uvwt/agentdock/internal/project"
 )
 
-func TestProjectExecutionRejectsMissingContextAtRuntimeBoundary(t *testing.T) {
+func TestStandaloneExecutionDoesNotRequireProjectContext(t *testing.T) {
 	runtime, root := newCodeToolsRuntime(t)
 	defer runtime.Close()
 	if err := os.WriteFile(filepath.Join(root, "project.txt"), []byte("project\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, test := range []struct {
-		name string
-		args map[string]any
-	}{
-		{name: "read_file", args: map[string]any{"path": "project.txt"}},
-		{name: "file_edit", args: map[string]any{"action": "replace", "path": "project.txt", "old": "project", "new": "changed", "dry_run": true}},
-		{name: "exec_command", args: map[string]any{"cmd": commandNoopForTest()}},
-		{name: "session_observe", args: map[string]any{"action": "list"}},
-		{name: "session_act", args: map[string]any{"action": "kill_all"}},
-		{name: "mcp_manage", args: map[string]any{"action": "list"}},
-		{name: "mcp_tool_search", args: map[string]any{"query": "*"}},
-		{name: "view_image", args: map[string]any{"path": "project.txt"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := runtime.Call(context.Background(), test.name, test.args)
-			assertProjectErrorCode(t, err, protocol.ErrorExecutionContextRequired)
-		})
+	if _, err := runtime.Call(context.Background(), "read_file", map[string]any{"path": "project.txt"}); err != nil {
+		t.Fatalf("standalone read_file: %v", err)
+	}
+	if _, err := runtime.Call(context.Background(), "file_edit", map[string]any{
+		"action": "replace", "path": "project.txt", "old": "project", "new": "changed", "dry_run": true,
+	}); err != nil {
+		t.Fatalf("standalone file_edit: %v", err)
+	}
+	if _, err := runtime.Call(context.Background(), "exec_command", map[string]any{"cmd": commandNoopForTest(), "execution_mode": "sync"}); err != nil {
+		t.Fatalf("standalone exec_command: %v", err)
+	}
+	if _, err := runtime.Call(context.Background(), "mcp_manage", map[string]any{"action": "list"}); err != nil {
+		t.Fatalf("standalone mcp_manage: %v", err)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "project.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "project\n" {
+		t.Fatalf("standalone dry-run file_edit changed file: %q", contents)
 	}
 }
 

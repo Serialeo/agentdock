@@ -53,12 +53,9 @@ func (r *Runtime) forgetBrowserSession(sessionID string) {
 func (r *Runtime) requireBrowserSessionOwner(ctx context.Context, sessionID string) error {
 	execution, ok := projectstate.ExecutionFromContext(ctx)
 	if !ok {
-		return toolErrorDetails(
-			protocol.ErrorExecutionContextRequired,
-			"Project execution context is required for browser session access",
-			"authorization",
-			map[string]any{"session_id": sessionID},
-		)
+		// Standalone AgentDock browser sessions are intentionally unowned by a
+		// Project Target. Ownership isolation applies only to Project-scoped calls.
+		return nil
 	}
 	r.browserOwnerMu.RLock()
 	owner, exists := r.browserOwners[strings.TrimSpace(sessionID)]

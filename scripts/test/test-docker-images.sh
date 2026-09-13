@@ -204,6 +204,17 @@ docker run --rm "$browser_image" sh -c '
   test -x "$AGENTDOCK_BROWSER_EXECUTABLE_PATH"
   test -f /etc/chromium.d/agentdock
   grep -q -- "--no-sandbox" /etc/chromium.d/agentdock
+  tmp="$(mktemp -d)"
+  trap '\''rm -rf "$tmp"'\'' EXIT
+  "$AGENTDOCK_BROWSER_EXECUTABLE_PATH" \
+    --headless \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --user-data-dir="$tmp/profile" \
+    --dump-dom \
+    "data:text/html,<title>AgentDock Browser Image Smoke</title><main>browser-image-ok</main>" \
+    >"$tmp/browser.html" 2>"$tmp/browser.stderr"
+  grep -q "browser-image-ok" "$tmp/browser.html"
 '
 
 browser_token="browser-smoke-${RANDOM}-${RANDOM}"

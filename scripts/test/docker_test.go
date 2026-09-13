@@ -36,6 +36,24 @@ func TestDockerSmokeUsesStreamableHTTPAcceptHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestDockerBrowserImageSmokeLaunchesChromiumDirectly(t *testing.T) {
+	data, err := os.ReadFile("test-docker-images.sh")
+	if err != nil {
+		t.Fatalf("read test-docker-images.sh: %v", err)
+	}
+	script := strings.ReplaceAll(string(data), "\r\n", "\n")
+	for _, marker := range []string{
+		`--headless`,
+		`--dump-dom`,
+		`browser-image-ok`,
+		`grep -q "browser-image-ok" "$tmp/browser.html"`,
+	} {
+		if !strings.Contains(script, marker) {
+			t.Fatalf("test-docker-images.sh missing browser runtime smoke marker %q", marker)
+		}
+	}
+}
 func TestCloudflareComposeKeepsTunnelTokenOutOfAgentDock(t *testing.T) {
 	data, err := os.ReadFile("../../docker-compose.yml")
 	if err != nil {

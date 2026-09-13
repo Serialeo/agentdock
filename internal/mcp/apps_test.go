@@ -417,16 +417,16 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 			"action": "replace", "path": "note.txt", "old": "alpha", "new": "beta", "dry_run": true,
 		},
 	})
-	if err != nil || !fileEditResult.IsError {
-		t.Fatalf("direct file_edit without Project Target result=%#v err=%v", fileEditResult, err)
+	if err != nil || fileEditResult.IsError {
+		t.Fatalf("standalone direct file_edit result=%#v err=%v", fileEditResult, err)
 	}
 	fileEditStructured, ok := fileEditResult.StructuredContent.(map[string]any)
-	if !ok || fileEditStructured["code"] != protocol.ErrorExecutionContextRequired {
-		t.Fatalf("direct file_edit authorization result = %#v", fileEditResult.StructuredContent)
+	if !ok || fileEditStructured["changed"] != true || fileEditStructured["dry_run"] != true {
+		t.Fatalf("standalone direct file_edit result = %#v", fileEditResult.StructuredContent)
 	}
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil || string(fileBytes) != "alpha\n" {
-		t.Fatalf("rejected direct file_edit changed file: content=%q err=%v", fileBytes, err)
+		t.Fatalf("standalone dry-run file_edit changed file: content=%q err=%v", fileBytes, err)
 	}
 	errorResult, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{
 		Name: "file_edit",
@@ -438,8 +438,8 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		t.Fatalf("file_edit validation error result=%#v err=%v", errorResult, err)
 	}
 	errorStructured, ok := errorResult.StructuredContent.(map[string]any)
-	if !ok || errorStructured["code"] != protocol.ErrorExecutionContextRequired {
-		t.Fatalf("direct file_edit must reject before host mutation: %#v", errorResult.StructuredContent)
+	if !ok || errorStructured["code"] != "MATCH_COUNT_MISMATCH" {
+		t.Fatalf("standalone direct file_edit validation result = %#v", errorResult.StructuredContent)
 	}
 
 	createdTask, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{
@@ -639,12 +639,12 @@ func TestMCPAppsExposeACPViewOnlyWhenACPEnabled(t *testing.T) {
 	assertResourceUIMeta(t, read.Contents[0].Meta, "")
 
 	sessionList, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "acp_session", Arguments: map[string]any{"action": "list"}})
-	if err != nil || !sessionList.IsError {
-		t.Fatalf("direct acp_session without Project Target result=%#v err=%v", sessionList, err)
+	if err != nil || sessionList.IsError {
+		t.Fatalf("standalone direct acp_session result=%#v err=%v", sessionList, err)
 	}
 	sessionStructured, ok := sessionList.StructuredContent.(map[string]any)
-	if !ok || sessionStructured["code"] != protocol.ErrorExecutionContextRequired {
-		t.Fatalf("direct acp_session authorization result = %#v", sessionList.StructuredContent)
+	if !ok || sessionStructured["action"] != "list" || sessionStructured["count"] != float64(0) {
+		t.Fatalf("standalone direct acp_session result = %#v", sessionList.StructuredContent)
 	}
 
 }

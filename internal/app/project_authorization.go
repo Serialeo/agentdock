@@ -64,12 +64,11 @@ func (r *Runtime) authorizeProjectTool(ctx context.Context, name string, args ma
 	}
 	execution, ok := projectstate.ExecutionFromContext(ctx)
 	if !ok {
-		return toolErrorDetails(
-			protocol.ErrorExecutionContextRequired,
-			"Project execution context is required for this tool",
-			"authorization",
-			map[string]any{"tool": name},
-		)
+		// Standalone AgentDock MCP/direct runtime calls are not Project-scoped.
+		// Project authorization applies only after a trusted Project Target has
+		// been bound into the context. Nexus Bridge v4 enforces the presence and
+		// validity of ExecutionContext before dispatching Project-routed tool calls.
+		return nil
 	}
 	permissions := execution.Permissions
 	if permissions.FullAccess {
