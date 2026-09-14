@@ -151,6 +151,10 @@ func (r *Runtime) ApplyProjectDeployment(deployment protocol.Deployment) (protoc
 	if r == nil || r.projects == nil {
 		return protocol.Deployment{}, errors.New("Project execution state is not initialized")
 	}
+	// P1 understands policy but does not yet advertise a production native backend.
+	if deployment.Permissions.Computer != protocol.ComputerPermissionNone {
+		return protocol.Deployment{}, toolErrorDetails(protocol.ErrorComputerUnsupported, "native computer backend is not integrated in this Node build", "capability", map[string]any{"required_capability": protocol.ComputerCapability})
+	}
 	return r.projects.ApplyDeployment(deployment)
 }
 
@@ -333,7 +337,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 		return nil, err
 	}
 	var err error
-	ctx, err = r.refreshPreparedProjectExecution(ctx, name)
+	ctx, err = r.refreshPreparedProjectExecution(ctx, name, args)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +354,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 	return spec.Handler(ctx, r, args)
 }
 
-func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string) (context.Context, error) {
+func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string, arguments ...map[string]any) (context.Context, error) {
 	execution, ok := projectstate.ExecutionFromContext(ctx)
 	if !ok || r == nil || r.projects == nil || r.ws == nil {
 		return ctx, nil
@@ -358,8 +362,14 @@ func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName 
 	executionContext := execution.Context
 	var refreshed projectstate.Execution
 	var err error
-	switch toolName {
-	case "session_observe", "session_act", "acp_session", "acp_prompt", "acp_interaction":
+	var args map[string]any
+	if len(arguments) > 0 {
+		args = arguments[0]
+	}
+	switch {
+	case protocol.AllowsHistoricalComputerControl(toolName, args):
+		refreshed, err = r.projects.ResolveSessionControlExecution(&executionContext)
+	case toolName == "session_observe" || toolName == "session_act" || toolName == "acp_session" || toolName == "acp_prompt" || toolName == "acp_interaction":
 		refreshed, err = r.projects.ResolveSessionControlExecution(&executionContext)
 	default:
 		refreshed, err = r.projects.ResolveExecution(&executionContext)

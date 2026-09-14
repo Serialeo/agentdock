@@ -55,7 +55,7 @@ func TestProjectCapabilityMatrixUsesTrustedExecutionContext(t *testing.T) {
 		}
 	}
 
-	readOnly := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly}
+	readOnly := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly}
 	readOnlyCtx := projectAuthorizationContextForTest("target-read-only", readOnly)
 	if err := runtime.authorizeProjectTool(readOnlyCtx, "read_file", map[string]any{"path": "README.md"}); err != nil {
 		t.Fatalf("read_file denied for read_only: %v", err)
@@ -82,7 +82,7 @@ func TestProjectCapabilityMatrixUsesTrustedExecutionContext(t *testing.T) {
 		}
 	}
 
-	nodeFullAccess := protocol.DeploymentPermissions{FullAccess: true, Files: protocol.FileCapabilityNone}
+	nodeFullAccess := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, FullAccess: true, Files: protocol.FileCapabilityNone}
 	nodeFullAccessCtx := projectAuthorizationContextForTest("target-node-full-access", nodeFullAccess)
 	for _, call := range []struct {
 		name string
@@ -102,7 +102,7 @@ func TestProjectCapabilityMatrixUsesTrustedExecutionContext(t *testing.T) {
 		t.Fatal("retired Project action unexpectedly restored by Node Full Access")
 	}
 
-	denied := protocol.DeploymentPermissions{Files: protocol.FileCapabilityNone}
+	denied := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityNone}
 	deniedCtx := projectAuthorizationContextForTest("target-denied", denied)
 	for _, call := range []struct {
 		name string
@@ -123,7 +123,7 @@ func TestProjectCapabilityMatrixUsesTrustedExecutionContext(t *testing.T) {
 
 func TestProjectSpecialSessionControlsDoNotRestoreGeneralExecution(t *testing.T) {
 	runtime := &Runtime{}
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityNone}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityNone}
 	ctx := projectAuthorizationContextForTest("target-1", permissions)
 
 	for _, call := range []struct {

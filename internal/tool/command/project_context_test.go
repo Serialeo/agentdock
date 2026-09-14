@@ -11,7 +11,7 @@ import (
 )
 
 func commandProjectExecutionForTest(targetID string, shell bool) projectstate.Execution {
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly, Shell: shell}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly, Shell: shell}
 	return projectstate.Execution{
 		Deployment: protocol.Deployment{
 			ID: "deployment-1", ProjectID: "project-1", NodeID: "node-1",

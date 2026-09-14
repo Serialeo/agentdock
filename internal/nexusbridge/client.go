@@ -252,6 +252,9 @@ func (c *Client) invoke(parent context.Context, socket *websocket.Conn, incoming
 					prepare = c.node.PrepareProjectSessionControlExecution
 				}
 			}
+			if protocol.AllowsHistoricalComputerControl(request.Tool, request.Arguments) {
+				prepare = c.node.PrepareProjectSessionControlExecution
+			}
 			preparedCtx, prepareErr := prepare(ctx, incoming.ExecutionContext)
 			if prepareErr != nil {
 				err = prepareErr

@@ -301,7 +301,7 @@ func TestBridgeV4ProjectPromptLoadReturnsCompleteApplicableAgentsChain(t *testin
 	deployment := protocol.Deployment{
 		ID: "deployment-prompt", ProjectID: "project-prompt", NodeID: "node-test", WorkingFolder: work,
 		Role: "test", Purpose: "Bridge Project Prompt test",
-		Permissions:     protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly},
+		Permissions:     protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly},
 		DesiredRevision: "rev-1", AppliedRevision: "rev-1", Enabled: true, ApplyStatus: protocol.DeploymentApplyApplied,
 	}
 

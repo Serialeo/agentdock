@@ -1,6 +1,6 @@
 # 原生 Computer Use 设计草案
 
-状态：设计草案 v0.1，可据此拆分实现；本文中的新类型、工具和路径均为拟新增内容。
+状态：设计 v0.2。P1 共享契约与权限已实现；原生执行与 IPC 尚未接入。当前边界见 [MCP 接入进度](native-computer-use-integration.md)。
 日期：2026-09-13（America/Los_Angeles）。
 基线：AgentDock `0e51c4b690e7`、NexusDock `c2bb473e9804`、agentdock-protocol `3e926f7aa779`。
 
@@ -68,7 +68,7 @@ IPC 使用拒绝远程客户端的 named pipe，DACL 限定实际用户 SID；�
 
 ## 4. 权限、协商与撤销
 
-共享 `DeploymentPermissions` 新增 `computer` 枚举：`none | observe | control`。它类似现有 files 的分级，避免把读取桌面与输入合成一个 bool。缺失字段在数据迁移/归一化时取 none；持久化新快照写出明确值。更新 `Validate()` 时必须同时检查 files 与 computer，不能保留现有 files 分支的提前 return。
+共享 `DeploymentPermissions` 新增 `computer` 枚举：`none | observe | control`。它类似现有 files 的分级，避免把读取桌面与输入合成一个 bool。按用户要求统一重新部署客户端、服务端与新数据库；所有快照显式写出 computer，新建配置默认 none，不保留缺失字段兼容。更新 `Validate()` 时必须同时检查 files 与 computer，不能保留现有 files 分支的提前 return。
 
 | 能力 | none | observe | control |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ Node FullAccess 继续覆盖 Deployment 细粒度 computer 权限，但不能覆
 
 能力 token 拟定为 `bridge.computer.v1`：只有具有完整会话、观察、输入、停止与结果查询契约的新版 Node 才发布该 token，后端尚未启动/无权限则在 status 报具体状态。工具本身仍经 Node Hello 的 ToolDescriptor 发现，不加入 Nexus 自有 canonical tool 列表。
 
-Bridge 传输版本保持 v4，但权限 schema 与工具 schema 必须同步发布。给不支持新权限 schema 的旧 Node 应用新 Deployment 快照时明确返回 upgrade_required；不得静默丢掉 computer 字段，不增加 shell fallback。未升级节点已有功能无需因新增工具而被冒充支持。capability 校验覆盖 FullAccess 情况。
+Bridge 传输版本保持 v4，权限 schema 与工具 schema 同步部署，不提供旧版本字段裁剪或降级。capability 表示实际后端能力，不是工具链年份白名单；缺少原生后端时返回 unsupported。FullAccess 也不能绕过实际能力检查。
 
 撤销路径：
 
@@ -160,7 +160,7 @@ macOS CGEventPost 是无返回值的投递函数，因此该路径只能给 `inp
 
 每个 observation 保存：不可复用 ID、owner、desktop_id、desktop_epoch、geometry_revision、input_sequence、captured_at、expires_at、display/window identity、编码尺寸、原始捕获尺寸、crop、方向、原生坐标空间、image_to_native 变换和图像 SHA-256。
 
-模型坐标统一是“本次返回图像左上角为原点的像素坐标”。首版每次返回一个 display tile；多显示器通过多次 observe 选择 display_id，不把混合 DPI 显示器拼成一张没有可靠全局缩放关系的图。
+模型坐标统一是“本次返回图像左上角为原点的像素坐标”。ID 作为不透明引用，不限制平台字符格式；坐标上限由实际 observation 尺寸决定。首版每次返回一个 display tile；多显示器通过多次 observe 选择 display_id，不把混合 DPI 显示器拼成一张没有可靠全局缩放关系的图。
 
 映射由后端保存并在 act 时读取；不接收模型回传的变换矩阵作为可信输入：
 
@@ -171,7 +171,7 @@ native_y = b*x + d*y + ty
 
 矩阵包含截图裁剪、输出缩放和显示旋转。macOS 记录捕获像素到 CGEvent 坐标的转换；Windows helper 声明 Per-Monitor V2 DPI awareness，以物理虚拟桌面坐标计算，再转换为 SendInput absolute + virtual-desktop 范围。原点可为负数，不直接把主显示器的 scale 应用到其他显示器。[Apple 坐标与缩放说明](https://developer.apple.com/videos/play/wwdc2022/10155/)、[Windows MOUSEINPUT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)、[Windows DPI](https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows)
 
-出队时检查 observation owner、TTL、desktop epoch、geometry revision 和 input sequence；窗口定向输入另复验窗口进程/创建代次/边界。窗口移动、显示器热插拔、旋转、DPI/分辨率变化使旧几何观察失效。每次本系统输入都推进 sequence；用户接管或焦点变化触发失效。TTL 不是“屏幕一定未变化”的证明，后台动画/页面刷新仍可能发生，操作后的真实观察不可省略。
+出队时检查 observation owner、TTL、desktop epoch、geometry revision 和 input sequence；窗口定向输入另复验窗口进程/创建代次/边界。窗口移动、显示器热插拔、旋转、DPI/分辨率变化使旧几何观察失效。每次本系统输入都推进 sequence；目标窗口的用户接管或焦点变化触发重新观察。正式执行不要求 AgentDock 面板拥有焦点，也不以无关窗口标题差异拒绝动作。TTL 不是“屏幕一定未变化”的证明，后台动画/页面刷新仍可能发生，操作后的真实观察不可省略。
 
 动作后捕获要求捕获时间晚于最后一次输入完成的单调时钟时间。ScreenCaptureKit 不能返回动作前缓冲帧；DXGI 无新帧时可在确认捕获仍活跃且没有 dirty/move 更新后返回已确认未变化的当前画面，必须显式标注 `unchanged` 和 `verified_current_at`，不能给旧帧伪造新 captured_at。无法确认时返回 observation_unavailable，保留已发送输入结果。
 
@@ -219,7 +219,7 @@ unknown 后客户端可重新观察再决定下一步，但旧操作本身不能
 
 ## 9. 私有图像与 checkpoint 证据
 
-首版 computer_observe 和 act 后观察直接返回标准 MCP image + 结构化 metadata，复用图片编码与 envelope 尺寸限制。默认最大边 1600px、原始编码不超过 2 MiB，总 Bridge JSON 控制在 4 MiB 内；超限时明确调整输出尺寸并同步矩阵，不能只裁断字节。现有 Bridge 总帧上限是 8 MiB，base64 开销必须计入。
+首版 computer_observe 和 act 后观察直接返回标准 MCP image + 结构化 metadata，复用图片编码与 envelope 尺寸限制。默认期望最大边 1600px、原始编码不超过 2 MiB，总 Bridge JSON 控制在 4 MiB 内；超限时明确调整输出尺寸并同步矩阵，不能只裁断字节。现有 Bridge 总帧上限是 8 MiB，base64 开销必须计入。
 
 现有 publicartifacts.Metadata 不携带 WorkSession/Target owner，发布会形成签名 URL。桌面截图默认不能走此公开发布路径。新增私有 observation store，用 owner、当前读取权限、TTL 和 hash 验证读取；图像不进入日志、node heartbeat 或普通运行状态。现有私有 artifact.read 也不能直接按 observation_id 读取而跳过 owner 校验。
 
@@ -248,7 +248,7 @@ SendInput 必须比较请求数与返回数；零或部分插入返回 input_rej
 | 阶段 | 交付 | 主要文件/范围 | 验收退出条件 |
 | --- | --- | --- | --- |
 | P0 平台 spike | 两平台最小捕获+一次输入+新观察；macOS 身份/签名与 Windows 用户 session 验证 | 新 `desktop/macos/AgentDockComputer/`、`desktop/windows/computer-helper/` 实验入口及平台测试 App | 真机验证权限拒绝/授予、缩放坐标和停止；产出实际支持矩阵，不公开空能力 |
-| P1 共享契约与权限 | Go 类型、schema、权限枚举、capability、默认拒绝与混合版本行为 | protocol 新 `computer.go`；`project.go`、`mcpcontract/output.go`；Nexus `scripts/generate-contracts.py`、Projects 三个前端组件 | schema 编译、默认 deny、FullAccess 与本地停用、旧节点明确 upgrade_required |
+| P1 共享契约与权限 | Go 类型、schema、权限枚举、capability、默认关闭与同步部署行为 | protocol 新 `computer.go`；`project.go`、`mcpcontract/output.go`；Nexus `scripts/generate-contracts.py`、Projects 三个前端组件 | schema 编译、显式 none、FullAccess 与实际能力分离、无旧协议降级 |
 | P2 核心服务与模拟后端 | 会话互斥、owner、grant、日志、去重、取消、结果重读、私有 observation store | 新 `internal/tool/computer/`、`internal/computeripc/`、`internal/computerstate/`；`internal/app/specs_computer.go`、runtime/authorization | 确定性故障注入：不重复输入、无跨服务阻塞、跨 owner 不能读写、撤销清理 |
 | P3 macOS 完整后端 | Swift 组件、SCK/CGEvent、权限 UI、签名/安装/升级 | `DesktopPermissionChecker.swift`、`ServiceController.swift`、`packaging/macos/build-app.sh`、安装与发布脚本 | 通过 macOS 真机矩阵，升级后 actual helper 权限状态可信 |
 | P4 Windows 完整后端 | DXGI/SendInput、用户会话、DPI、pipe 身份与停止 | Windows helper、`service_startup_windows.go`、manifest、control-panel/tray、Windows 打包 | 通过混合 DPI/多屏/锁屏/UIPI/用户切换矩阵；无 Session 0 输入 |
@@ -256,7 +256,7 @@ SendInput 必须比较请求数与返回数；零或部分插入返回 input_rej
 
 P0 与 P1 可并行；公开工具的 release 必须整合 P2、对应平台后端和 P5 的权限/撤销/图像路由部分。可以先发布 macOS，再发布 Windows，但不同平台保持相同 required fields/action enum，差异通过 capabilities 表达。AX/UIA 控件模式和机器 predicate 不阻塞坐标输入首版，也不能提前宣称已实现。
 
-Nexus 具体同步点：`ProjectsPage.tsx` 的权限类型、`ProjectDetailPage.tsx` 的 draft/回填/序列化/开关、`ProjectSessionsPanel.tsx` 的展示，以及生成的 `internal/httpx/web_dist`。权限存于现有 permissions_json，无须为单个能力增加 SQLite 列；修订、Target 撤销及迁移测试必须同步。
+Nexus 具体同步点：`ProjectsPage.tsx` 的权限类型、`ProjectDetailPage.tsx` 的 draft/回填/序列化/开关、`ProjectSessionsPanel.tsx` 的展示，以及生成的 `internal/httpx/web_dist`。Deployment 权限实际分列保存，因此新库增加 computer_permission 列；Target 快照继续使用 permissions_json。修订及 Target 撤销同步，按用户要求不增加旧 computer 数据迁移。
 
 ## 12. 回归矩阵和性能观测
 
@@ -275,4 +275,4 @@ Nexus 具体同步点：`ProjectsPage.tsx` 的权限类型、`ProjectDetailPage.
 
 分段指标：queue_wait、grant_validate、native_connect、capture_wait、encode、input_submit、post_observe、journal_fsync、bridge_bytes、outcome_unknown_count。初始建议本地 stop 控制请求 P95 <100ms、普通暖截图 P95 <500ms；这些是待 P0 校准的工程目标，不是已有性能数据。磁盘/队列/图像上限是资源边界，不增加“必须写若干条说明”之类执行策略门槛。
 
-下一步优先实施 P0：确认 actual helper 的权限身份和显示坐标；并把 P1 的类型/schema/权限测试落实为独立变更，再推进完整运行时。
+P0 基本真机反馈已记录，P1 类型/schema/权限及边界测试已落实。下一步接入原生 helper IPC 与完整运行时。正式客户端携带预编译 helper，终端用户无需安装 Visual Studio、CMake 或 Xcode。

@@ -34,7 +34,7 @@ func TestBridgeCommandOutcomesSurviveLostAckAndRuntimeRestart(t *testing.T) {
 	t.Cleanup(func() { _ = runtime.Close() })
 	deployment := protocol.Deployment{
 		ID: "outcome-deployment", ProjectID: "outcome-project", NodeID: "outcome-node", WorkingFolder: cfg.AgentDockDefaultDir,
-		Role: "test", Purpose: "durable outcome test", Permissions: protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadWrite, Shell: true},
+		Role: "test", Purpose: "durable outcome test", Permissions: protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadWrite, Shell: true},
 		DesiredRevision: "rev-1", AppliedRevision: "rev-1", Enabled: true, ApplyStatus: protocol.DeploymentApplyApplied,
 	}
 	if _, err := runtime.ApplyProjectDeployment(deployment); err != nil {

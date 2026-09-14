@@ -238,7 +238,7 @@ func canonicalTestPath(t *testing.T, path string) string {
 func testDeployment(working, revision string, files protocol.FileCapability) protocol.Deployment {
 	return protocol.Deployment{
 		ID: "deployment-1", ProjectID: "project-1", NodeID: "node-1", WorkingFolder: working,
-		Role: "linux", Purpose: "tests", Permissions: protocol.DeploymentPermissions{Files: files},
+		Role: "linux", Purpose: "tests", Permissions: protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: files},
 		DesiredRevision: revision, AppliedRevision: revision, Enabled: true, ApplyStatus: protocol.DeploymentApplyApplied,
 	}
 }

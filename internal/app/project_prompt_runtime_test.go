@@ -18,7 +18,7 @@ func TestProjectSourceProvenanceRequiresRefreshWhenGitStateChanges(t *testing.T)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git unavailable: %v", err)
 	}
-	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly})
+	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly})
 	root := deployment.WorkingFolder
 	mustWriteProjectFile(t, filepath.Join(root, "AGENTS.md"), "root\n")
 	runProjectPromptGit(t, root, "init")
@@ -51,7 +51,7 @@ func TestProjectSourceProvenanceRequiresRefreshWhenGitStateChanges(t *testing.T)
 }
 
 func TestProjectTargetBindRejectsStalePromptAndExecutionDetectsRuleChange(t *testing.T) {
-	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly})
+	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly})
 	mustWriteProjectFile(t, filepath.Join(deployment.WorkingFolder, "AGENTS.md"), "root-v1\n")
 	prompt := loadProjectPromptForTest(t, runtime, deployment, ".")
 
@@ -76,7 +76,7 @@ func TestProjectTargetBindRejectsStalePromptAndExecutionDetectsRuleChange(t *tes
 }
 
 func TestProjectTargetRebindRequiresNewContextRevisionWhenPromptContextChanges(t *testing.T) {
-	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly})
+	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly})
 	mustMkdirProject(t, filepath.Join(deployment.WorkingFolder, "backend"))
 	mustWriteProjectFile(t, filepath.Join(deployment.WorkingFolder, "AGENTS.md"), "root\n")
 	mustWriteProjectFile(t, filepath.Join(deployment.WorkingFolder, "backend", "AGENTS.md"), "backend\n")
@@ -98,7 +98,7 @@ func TestProjectTargetRebindRequiresNewContextRevisionWhenPromptContextChanges(t
 }
 
 func TestNestedProjectPromptScopeBlocksFileAccessBeforeRefreshThenAllowsAfterRebind(t *testing.T) {
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadWrite}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadWrite}
 	runtime, deployment := newProjectPromptRuntime(t, permissions)
 	root := deployment.WorkingFolder
 	mustMkdirProject(t, filepath.Join(root, "backend"))
@@ -151,7 +151,7 @@ func TestNestedProjectPromptScopeBlocksFileAccessBeforeRefreshThenAllowsAfterReb
 }
 
 func TestMultiScopePatchPreflightsEveryFileBeforeAnyMutation(t *testing.T) {
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadWrite}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadWrite}
 	runtime, deployment := newProjectPromptRuntime(t, permissions)
 	root := deployment.WorkingFolder
 	for _, dir := range []string{"backend", "frontend"} {
@@ -182,7 +182,7 @@ func TestMultiScopePatchPreflightsEveryFileBeforeAnyMutation(t *testing.T) {
 }
 
 func TestRecursiveStructuredFileToolsPreflightNestedPromptScopes(t *testing.T) {
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadWrite}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadWrite}
 	runtime, deployment := newProjectPromptRuntime(t, permissions)
 	root := deployment.WorkingFolder
 	mustMkdirProject(t, filepath.Join(root, "backend"))
@@ -218,7 +218,7 @@ func TestRecursiveStructuredFileToolsPreflightNestedPromptScopes(t *testing.T) {
 }
 
 func TestRawDiffPatchPreflightsEveryNestedPromptBeforeGitApply(t *testing.T) {
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadWrite}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadWrite}
 	runtime, deployment := newProjectPromptRuntime(t, permissions)
 	root := deployment.WorkingFolder
 	for _, dir := range []string{"backend", "frontend"} {
@@ -262,7 +262,7 @@ func TestProjectPromptLoadingIsIsolatedPerDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly}
 	deployments := []protocol.Deployment{
 		{ID: "deployment-a", ProjectID: "project-shared", NodeID: "node-a", WorkingFolder: rootA, Permissions: permissions, DesiredRevision: "rev-a", AppliedRevision: "rev-a", Enabled: true, ApplyStatus: protocol.DeploymentApplyApplied},
 		{ID: "deployment-b", ProjectID: "project-shared", NodeID: "node-b", WorkingFolder: rootB, Permissions: permissions, DesiredRevision: "rev-b", AppliedRevision: "rev-b", Enabled: true, ApplyStatus: protocol.DeploymentApplyApplied},
@@ -286,7 +286,7 @@ func TestProjectPromptLoadingIsIsolatedPerDeployment(t *testing.T) {
 }
 
 func TestProjectPromptDoesNotAutoLoadRulesForExternalHostPath(t *testing.T) {
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly}
 	runtime, deployment := newProjectPromptRuntime(t, permissions)
 	mustWriteProjectFile(t, filepath.Join(deployment.WorkingFolder, "AGENTS.md"), "project rules\n")
 	external := t.TempDir()
@@ -309,7 +309,7 @@ func TestProjectPromptDoesNotAutoLoadRulesForExternalHostPath(t *testing.T) {
 }
 
 func TestProjectPromptInternalLoadDoesNotBypassFilesNone(t *testing.T) {
-	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Files: protocol.FileCapabilityNone})
+	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityNone})
 	mustWriteProjectFile(t, filepath.Join(deployment.WorkingFolder, "AGENTS.md"), "internal prompt\n")
 	prompt := loadProjectPromptForTest(t, runtime, deployment, ".")
 	if len(prompt.Prompt.Sources) != 1 || prompt.Prompt.Sources[0].Content != "internal prompt\n" {
@@ -325,7 +325,7 @@ func TestProjectPromptInternalLoadDoesNotBypassFilesNone(t *testing.T) {
 }
 
 func TestDeliveredPromptScopeUnionEnforcesContextBudget(t *testing.T) {
-	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly})
+	runtime, deployment := newProjectPromptRuntime(t, protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly})
 	root := deployment.WorkingFolder
 	prompts := make([]protocol.ProjectPromptLoadResult, 0, 5)
 	for branch := 0; branch < 5; branch++ {
@@ -353,7 +353,7 @@ func TestExplicitCommandWorkdirRequiresNestedPromptBeforeExecution(t *testing.T)
 	if goruntime.GOOS == "windows" {
 		t.Skip("marker command in this test uses POSIX shell syntax")
 	}
-	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly, Shell: true}
+	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly, Shell: true}
 	runtime, deployment := newProjectPromptRuntime(t, permissions)
 	root := deployment.WorkingFolder
 	mustMkdirProject(t, filepath.Join(root, "backend"))
