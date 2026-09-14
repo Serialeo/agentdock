@@ -70,7 +70,7 @@ Alpine/极简系统如果没有 curl/bash：
 环境变量可覆盖默认值：
   AGENTDOCK_INSTALL_MODE、AGENTDOCK_RELEASE_VERSION、AGENTDOCK_NONINTERACTIVE
   AGENTDOCK_REPO_URL、AGENTDOCK_BRANCH、AGENTDOCK_SOURCE_DIR、AGENTDOCK_DATA_DIR、AGENTDOCK_ENV_FILE
-  AGENTDOCK_SERVICE_NAME、AGENTDOCK_SERVICE_USER、AGENTDOCK_HOST、AGENTDOCK_PORT
+  AGENTDOCK_SERVICE_NAME、AGENTDOCK_SERVICE_USER、AGENTDOCK_HOST、AGENTDOCK_PORT、AGENTDOCK_CLI_LINK
   AGENTDOCK_AUTH_TOKEN、AGENTDOCK_GO_VERSION、AGENTDOCK_SERVER_URL
   AGENTDOCK_OAUTH_PASSWORD、AGENTDOCK_OAUTH_TOKEN_SECRET
   AGENTDOCK_TUNNEL_MODE、AGENTDOCK_CLOUDFLARE_TUNNEL_TOKEN
@@ -79,6 +79,7 @@ Alpine/极简系统如果没有 curl/bash：
 默认以安装用户运行（sudo 安装时使用 SUDO_USER），不创建系统用户。
 AGENTDOCK_SERVICE_USER 可指定其他已存在的用户。
 默认在运行用户主目录创建 .agentdock 和 AgentDock；AGENTDOCK_DATA_DIR 可覆盖数据根目录。
+默认创建 /usr/local/bin/agentdock 命令链接；AGENTDOCK_CLI_LINK 可覆盖链接路径。
 
 参数：
   -h, --help    显示帮助，不执行部署
@@ -437,6 +438,23 @@ service_user_home() {
   fi
   validate_abs_path '运行用户主目录' "$home_dir"
   printf '%s' "$home_dir"
+}
+
+install_cli_link() {
+  local binary="$1"
+  local link_path="${AGENTDOCK_CLI_LINK:-/usr/local/bin/agentdock}"
+  validate_abs_path '命令链接' "$link_path"
+  [[ "$binary" != "$link_path" ]] || return 0
+  if [[ -L "$link_path" ]] && [[ "$(readlink "$link_path")" == "$binary" ]]; then
+    return 0
+  fi
+  if [[ -e "$link_path" || -L "$link_path" ]]; then
+    warn "命令链接位置已被占用，保留原文件：${link_path}；请使用 $binary"
+    return 0
+  fi
+  run_root mkdir -p -m 0755 "$(dirname "$link_path")"
+  run_root ln -s "$binary" "$link_path"
+  log "已创建命令链接：$link_path -> $binary"
 }
 
 prepare_data_directories() {
@@ -1491,6 +1509,7 @@ SUMMARY
   # 服务用户必须能够穿过安装目录并执行二进制；mkdir 会受调用者 umask 影响，
   # 因此不能依赖目录碰巧是 0755。
   run_root chmod 0755 "$source_dir" "$source_dir/bin" "$source_dir/bin/agentdock"
+  install_cli_link "$source_dir/bin/agentdock"
 
   prepare_data_directories "$data_dir" "$service_user" "$service_group"
   write_env_file "$env_file" "$host" "$port" "$token" "$log_level" \

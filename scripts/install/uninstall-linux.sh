@@ -375,6 +375,10 @@ if is_true "$PURGE_CONFIG"; then
   remove_managed_config "$env_file" "$config_dir"
 fi
 if is_true "$PURGE_DATA"; then
+  cli_link="${AGENTDOCK_CLI_LINK:-/usr/local/bin/agentdock}"
+  if [ -L "$cli_link" ] && [ "$(readlink "$cli_link")" = "$source_dir/bin/agentdock" ]; then
+    run_root rm "$cli_link"
+  fi
   run_root rm -rf "$source_dir"
   remove_managed_data "$data_dir"
 fi

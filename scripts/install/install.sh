@@ -301,16 +301,19 @@ restore_public_config() {
 
   if [ "$ENV_BACKUP_EXISTS" = true ]; then
     run_root cp -p "$ENV_BACKUP" "$env_file"
-  else
-    run_root rm -f "$env_file"
   fi
   if [ "$TUNNEL_ENV_BACKUP_EXISTS" = true ]; then
     run_root cp -p "$TUNNEL_ENV_BACKUP" "$tunnel_env_file"
-  else
+  elif [ "$ENV_BACKUP_EXISTS" = true ]; then
     run_root rm -f "$tunnel_env_file"
   fi
   ENV_BACKUP_ACTIVE=false
-  log "安装未完成，已恢复原公网配置（模式：${PREVIOUS_TUNNEL_MODE}）。"
+  if [ "$ENV_BACKUP_EXISTS" = true ]; then
+    log "安装未完成，已恢复原公网配置（模式：${PREVIOUS_TUNNEL_MODE}）。"
+  else
+    # 首次安装可能已经创建并启动服务；不能删掉它们仍需读取的配置。
+    log "安装未完成，已保留生成的配置以便修复：$env_file"
+  fi
 }
 
 commit_public_config() {

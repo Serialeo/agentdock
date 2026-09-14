@@ -153,6 +153,37 @@ cp "$ROOT_DIR/scripts/install/uninstall-linux.sh" "$RELEASE_DIR/uninstall-linux.
 chmod +x "$RELEASE_DIR/uninstall-linux.sh"
 checksum_asset uninstall-linux.sh
 
+# Linux 命令链接可直接执行、可重复安装，且不覆盖已有文件或其他链接。
+AGENTDOCK_NONINTERACTIVE=true bash -s -- "$ROOT_DIR" "$TMP_ROOT/cli-link" <<'BASH'
+set -Eeuo pipefail
+source "$1/scripts/install/install-linux-platform.sh"
+cli_root="$2"
+run_root() { "$@"; }
+mkdir -p "$cli_root/source/bin"
+binary="$cli_root/source/bin/agentdock"
+printf '#!/bin/sh\nprintf "cli-ok\\n"\n' >"$binary"
+chmod 0755 "$binary"
+export AGENTDOCK_CLI_LINK="$cli_root/path/agentdock"
+install_cli_link "$binary"
+install_cli_link "$binary"
+[[ "$(readlink "$AGENTDOCK_CLI_LINK")" == "$binary" ]]
+[[ "$(PATH="$cli_root/path:$PATH" agentdock)" == cli-ok ]]
+for kind in file directory dangling-link; do
+  export AGENTDOCK_CLI_LINK="$cli_root/$kind"
+  case "$kind" in
+    file) printf 'keep\n' >"$AGENTDOCK_CLI_LINK" ;;
+    directory) mkdir "$AGENTDOCK_CLI_LINK" ;;
+    dangling-link) ln -s "$cli_root/unrelated" "$AGENTDOCK_CLI_LINK" ;;
+  esac
+  install_cli_link "$binary"
+  case "$kind" in
+    file) [[ "$(cat "$AGENTDOCK_CLI_LINK")" == keep ]] ;;
+    directory) [[ -d "$AGENTDOCK_CLI_LINK" && ! -e "$AGENTDOCK_CLI_LINK/agentdock" ]] ;;
+    dangling-link) [[ "$(readlink "$AGENTDOCK_CLI_LINK")" == "$cli_root/unrelated" ]] ;;
+  esac
+done
+BASH
+
 # CI、容器和管道执行时 /dev/tty 可能存在但无法打开，必须自动回退到标准流。
 if command -v setsid >/dev/null 2>&1; then
   NO_TTY_ROOT="$TMP_ROOT/no-tty"
@@ -356,6 +387,42 @@ grep -Fq '已恢复原公网配置' "$ROLLBACK_ROOT/stderr.log"
 grep -Fq 'restart agentdock' "$ROLLBACK_ROOT/systemctl.log"
 grep -Fq 'enable --now agentdock-cloudflared' "$ROLLBACK_ROOT/systemctl.log"
 
+# 首次安装后续失败时，保留已经生成的配置，避免残留服务缺少 EnvironmentFile。
+for failure in generic rate-limit; do
+  FRESH_ROOT="$TMP_ROOT/fresh-failure-$failure"
+  mkdir -p "$FRESH_ROOT/systemd"
+  fail_generic=false
+  fail_rate_limit=false
+  if [ "$failure" = generic ]; then
+    fail_generic=true
+  else
+    fail_rate_limit=true
+  fi
+  if printf '2\n' | PATH="$FAKE_BIN:$PATH" \
+    TEST_UNAME=Linux \
+    TEST_WRITE_ENV=true \
+    TEST_FAIL_GENERIC="$fail_generic" \
+    TEST_FAIL_RATE_LIMIT="$fail_rate_limit" \
+    TEST_SYSTEMCTL_LOG="$FRESH_ROOT/systemctl.log" \
+    AGENTDOCK_NO_SUDO=true \
+    AGENTDOCK_SERVICE_MANAGER=systemd \
+    AGENTDOCK_ENV_FILE="$FRESH_ROOT/config/agentdock.env" \
+    AGENTDOCK_SYSTEMD_DIR="$FRESH_ROOT/systemd" \
+    AGENTDOCK_INSTALLER_BASE_URL="file://$RELEASE_DIR" \
+    sh "$ENTRY" >"$FRESH_ROOT/stdout.log" 2>"$FRESH_ROOT/stderr.log"; then
+    printf 'failed fresh installation unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  assert_line 'AGENTDOCK_AUTH_TOKEN=test-bearer-token' "$FRESH_ROOT/config/agentdock.env"
+  assert_line 'AGENTDOCK_TUNNEL_MODE=quick' "$FRESH_ROOT/config/cloudflared.env"
+  grep -Fq '已保留生成的配置' "$FRESH_ROOT/stderr.log"
+  if [ "$failure" = generic ]; then
+    grep -Fq 'restart agentdock' "$FRESH_ROOT/systemctl.log"
+  else
+    grep -Fq 'disable --now agentdock-cloudflared' "$FRESH_ROOT/systemctl.log"
+  fi
+done
+
 NONE_SYSTEMD="$UPDATE_ROOT/systemd-none"
 mkdir -p "$NONE_SYSTEMD/agentdock-cloudflared.service.d"
 printf 'stale\n' >"$NONE_SYSTEMD/agentdock-cloudflared.service.d/retry-limit.conf"
@@ -509,11 +576,13 @@ PURGE_ROOT="$TMP_ROOT/purge with spaces"
 mkdir -p "$PURGE_ROOT/config" "$PURGE_ROOT/source/bin" "$PURGE_ROOT/data/.agentdock" "$PURGE_ROOT/systemd" "$PURGE_ROOT/openrc"
 printf 'AGENTDOCK_HOST=127.0.0.1\n' >"$PURGE_ROOT/config/agentdock.env"
 printf 'binary\n' >"$PURGE_ROOT/source/bin/agentdock"
+ln -s "$PURGE_ROOT/source/bin/agentdock" "$PURGE_ROOT/agentdock"
 PATH="$FAKE_BIN:$PATH" \
   TEST_UNAME=Linux \
   AGENTDOCK_NO_SUDO=true \
   AGENTDOCK_ENV_FILE="$PURGE_ROOT/config/agentdock.env" \
   AGENTDOCK_SOURCE_DIR="$PURGE_ROOT/source" \
+  AGENTDOCK_CLI_LINK="$PURGE_ROOT/agentdock" \
   AGENTDOCK_DATA_DIR="$PURGE_ROOT/data" \
   AGENTDOCK_SYSTEMD_DIR="$PURGE_ROOT/systemd" \
   AGENTDOCK_OPENRC_DIR="$PURGE_ROOT/openrc" \
@@ -521,6 +590,7 @@ PATH="$FAKE_BIN:$PATH" \
   sh "$ENTRY" --uninstall --purge-data
 [ ! -d "$PURGE_ROOT/config" ]
 [ ! -d "$PURGE_ROOT/source" ]
+[ ! -L "$PURGE_ROOT/agentdock" ]
 [ -d "$PURGE_ROOT/data" ]
 [ ! -e "$PURGE_ROOT/data/.agentdock" ]
 [ ! -e "$PURGE_ROOT/data/AgentDock" ]
@@ -532,17 +602,20 @@ mkdir -p "$SHARED_ROOT/config" "$SHARED_ROOT/source/bin" "$SHARED_ROOT/data/.age
 printf 'AGENTDOCK_HOST=127.0.0.1\n' >"$SHARED_ROOT/config/agentdock.env"
 printf 'binary\n' >"$SHARED_ROOT/source/bin/agentdock"
 printf 'keep\n' >"$SHARED_ROOT/data/custom.keep"
+ln -s "$SHARED_ROOT/unrelated" "$SHARED_ROOT/agentdock"
 PATH="$FAKE_BIN:$PATH" \
   TEST_UNAME=Linux \
   AGENTDOCK_NO_SUDO=true \
   AGENTDOCK_ENV_FILE="$SHARED_ROOT/config/agentdock.env" \
   AGENTDOCK_SOURCE_DIR="$SHARED_ROOT/source" \
+  AGENTDOCK_CLI_LINK="$SHARED_ROOT/agentdock" \
   AGENTDOCK_DATA_DIR="$SHARED_ROOT/data" \
   AGENTDOCK_SYSTEMD_DIR="$SHARED_ROOT/systemd" \
   AGENTDOCK_OPENRC_DIR="$SHARED_ROOT/openrc" \
   AGENTDOCK_INSTALLER_BASE_URL="file://$RELEASE_DIR" \
   sh "$ENTRY" --uninstall --purge-data
 [ ! -d "$SHARED_ROOT/source" ]
+[ "$(readlink "$SHARED_ROOT/agentdock")" = "$SHARED_ROOT/unrelated" ]
 [ -f "$SHARED_ROOT/data/custom.keep" ]
 [ ! -e "$SHARED_ROOT/data/.agentdock" ]
 [ ! -e "$SHARED_ROOT/data/AgentDock" ]
