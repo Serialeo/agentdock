@@ -4,7 +4,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 output="${1:-$root/dist/AgentDockComputer.app}"
 mkdir -p "$output/Contents/MacOS"
 cd "$root"
-CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$output/Contents/MacOS/agentdock-computer" ./cmd/agentdock-computer
+CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags agentdock_computer_native -trimpath -o "$output/Contents/MacOS/agentdock-computer" ./cmd/agentdock-computer
 cat > "$output/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

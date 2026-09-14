@@ -169,8 +169,15 @@ docker run --rm -v "$test_volume:/home/agentdock/.agentdock" "$runtime_image" sh
 docker volume rm -f "$test_volume" >/dev/null
 test_volume=""
 
-runtime_container="$(docker run -d --rm -e AGENTDOCK_AUTH_TOKEN=runtime-health-value "$runtime_image")"
+runtime_container="$(docker run -d --rm -p 127.0.0.1::8765 \
+  -e AGENTDOCK_AUTH_TOKEN=runtime-health-value \
+  -e AGENTDOCK_ACP_ENABLED=true -e AGENTDOCK_ACP_ARGS_JSON=invalid-json \
+  -e AGENTDOCK_COMPUTER_HELPER_PATH=/missing/helper "$runtime_image")"
 wait_for_healthy "$runtime_container" runtime
+runtime_port="$(docker port "$runtime_container" 8765/tcp | awk -F: 'NR == 1 {print $NF}')"
+AGENTDOCK_SMOKE_URL="http://127.0.0.1:$runtime_port" \
+AGENTDOCK_AUTH_TOKEN=runtime-health-value \
+  ./packaging/docker/smoke-docker.sh
 docker exec "$runtime_container" sh -c 'curl -fsS http://127.0.0.1:8765/healthz >/dev/null'
 docker exec "$runtime_container" sh -c '
   test -f "$HOME/.agentdock/skill-store/bundled-skills.json"

@@ -61,6 +61,10 @@ jobs:
         if: runner.os == 'Linux'
         run: go test -race ./...
 
+      - name: Docker capability boundary
+        if: runner.os == 'Linux'
+        run: go test -race -tags agentdock_docker ./internal/config ./internal/app -run '^TestDocker'
+
       - name: Vet
         run: go vet ./...
 

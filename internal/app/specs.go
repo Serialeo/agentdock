@@ -151,7 +151,7 @@ func compileAvailableToolContracts(cfg config.Config) ([]string, map[string]*too
 
 func requiresNexus(cfg config.Config) bool   { return cfg.NexusEndpoint != "" }
 func requiresBrowser(cfg config.Config) bool { return cfg.BrowserEnabled }
-func requiresACP(cfg config.Config) bool     { return cfg.ACPEnabled }
+func requiresACP(cfg config.Config) bool     { return !config.ContainerBuild && cfg.ACPEnabled }
 
 func readOnlyToolAnnotations(openWorld bool) *ToolAnnotations {
 	return &ToolAnnotations{ReadOnlyHint: true, DestructiveHint: boolPointer(false), OpenWorldHint: boolPointer(openWorld)}

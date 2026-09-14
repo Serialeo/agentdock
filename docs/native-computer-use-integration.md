@@ -1,12 +1,16 @@
 # 原生 Computer Use：MCP 接入进度
 
-当前交付：截图、鼠标移动、多击、拖拽、滚动、快捷键和 Unicode 文本输入的 MCP 接入。五个 computer 工具只在本机预编译 helper 握手成功后发布，同时宣告 `bridge.computer.v1`。Linux 和没有 helper 的安装保持普通工具可用；不会假装具备原生桌面能力。
+当前发行状态：computer use 尚未完成，所有平台固定关闭五个 computer MCP 工具及 helper 自动启动，不宣告 `bridge.computer.v1`；环境变量和残留 helper 不能开启。Windows ZIP / Setup、macOS App / DMG 均不再构建或携带 computer helper。NexusDock 同步停止 computer 工具发布、转发和权限启用，并隐藏 GUI 中的 computer 权限入口。
+
+以下记录保留在源码中的实验实现，供后续完善，不表示当前发行包支持。原生后端仅在开发构建显式传入 `-tags agentdock_computer_native` 时编译；该标签不会开启当前 Core 的 MCP。已编写截图、鼠标移动、多击、拖拽、滚动、快捷键和 Unicode 文本输入的 MCP 接入。
 
 ## 部署约定
 
-客户端、服务端和数据库按已确认方案统一重建部署；没有旧 computer 协议翻译、缺省权限兼容或数据库迁移分支。本次开发没有清空数据库、推送代码或部署服务。
+客户端、服务端和数据库按已确认方案统一重建部署；没有旧 computer 协议翻译、缺省权限兼容或数据库迁移分支。代码提交、推送供用户 review；数据库重建与 0.9.2 发布由用户另行执行。
 
 用户安装的是预编译程序。Windows helper 使用 Go 调用系统 API，无需 Visual Studio、CMake；macOS helper 在构建机链接系统框架，终端用户无需 Xcode。已通过真机测试的 P0 校准程序保持原样。
+
+官方 AgentDock Docker 镜像的 Core 以 `agentdock_docker` 构建，额外禁用 ACP，不启动后端或暴露相关工具；环境变量不能开启。桌面 ACP 保留。NexusDock 容器继续转发其他已授权的远端节点工具。沿用已有 Deployment 权限，不新增操作审批系统。
 
 ## 执行链
 
@@ -35,27 +39,27 @@ helper 通过继承的匿名 stdin/stdout 管道通信，不监听 TCP、Unix so
 - Windows helper 在当前交互用户的标准权限 Core 下运行；本轮不支持从 elevated Core 跨权限启动桌面 helper。锁屏、断开会话和安全桌面不执行输入。
 - 本地 enable / stop / disable 为命令入口，尚未加入桌面面板开关。操作日志保留以便去重；当前不自动清理，图像元数据在 30 秒后回收。
 
-## 本地启用与诊断
+## 实验 helper 的本地诊断（当前发行包不提供）
 
-Windows：helper 与 `agentdock.exe` 放在同一目录，正式 Windows release zip / Setup 已增加这个文件。使用普通 PowerShell：
+以下命令仅用于单独构建的实验 helper；即使执行 enable，当前 Core 也不会加载它或公开 computer MCP。Windows 开发目录中使用普通 PowerShell：
 
 ```powershell
 .\agentdock-computer.exe enable
 .\agentdock-computer.exe diagnose
 ```
 
-`diagnose` 自动查询交互桌面、截图并打印结果，将图片存入该用户私有目录的 `diagnostic.png`，不点击鼠标。运行中的 Core 下一次维护周期即可识别 enable。若安装 helper 前 Core 已启动，需要重启 Core 以发现新工具。
+`diagnose` 自动查询交互桌面、截图并打印结果，将图片存入该用户私有目录的 `diagnostic.png`，不点击鼠标。当前 Core 不加载实验 helper；重启也不会开启 computer 工具。
 
-macOS：正式包位于 `/Applications/AgentDock.app/Contents/Helpers/AgentDockComputer.app`。本地命令：
+macOS：单独构建实验 App 后，在其所在目录使用：
 
 ```bash
-helper=/Applications/AgentDock.app/Contents/Helpers/AgentDockComputer.app/Contents/MacOS/agentdock-computer
+helper=./AgentDockComputer.app/Contents/MacOS/agentdock-computer
 "$helper" enable
 "$helper" permissions
 "$helper" diagnose
 ```
 
-系统权限授予 **AgentDock Computer**；P0 校准程序的权限身份不同。permissions 是用户主动调用，MCP status 不触发系统授权弹窗。macOS helper 由发布构建机生成并随客户端提供，安装和使用不需要原生编译。
+系统权限授予 **AgentDock Computer**；P0 校准程序的权限身份不同。permissions 是用户主动调用，MCP status 不触发系统授权弹窗。实验 helper 的构建脚本保留，但不再由发布构建调用。
 
 任一平台使用 `agentdock-computer stop` 锁存本地停止，`enable` 才能解除。MCP 的 session acquire/renew 不能解除本地停止。`disable` 同时停止并关闭本地授权。
 
@@ -80,6 +84,6 @@ MCP 顺序：status 获取 desktop/display → session acquire → observe → a
 
 Linux 自动化已覆盖动作轨迹、坐标变换、快捷键顺序与部分提交后的释放、Unicode 分批、取消拖拽后释放、真实子进程取消与 EOF 后清理；另覆盖引擎及管道的重复操作、崩溃后结果恢复、所有权隔离、撤权、过期、边界坐标、停止后不恢复、后图失败及原生拒绝原因保留；所有成功结果实际经过共享 output schema 校验。MCP 测试确认图片转为标准 content:image，structuredContent 不携带 base64、路径或公共 URL。
 
-Windows helper 已在 Linux 交叉编译通过。macOS C/Objective-C 尚未在 macOS SDK 环境编译验证；新增动作也尚未通过两平台产品 helper 真机测试。原生构建与完整安装包验证由发布流程完成，P0 校准测试和模拟测试不能代替这些结果。
+Windows helper 已在 Linux 交叉编译通过。macOS C/Objective-C 尚未在 macOS SDK 环境编译验证；新增动作也尚未通过两平台产品 helper 真机测试。因此本轮关闭发行支持；P0 校准测试和模拟测试不能代替这些结果。
 
-使用 `MCP/go.work` 关联本地 protocol。独立发布前仍需发布更新后的 protocol 模块并同步依赖版本；本轮没有推送或发布模块。
+使用 `MCP/go.work` 关联本地 protocol；独立构建的依赖固定到已推送的 protocol 提交。

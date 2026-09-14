@@ -1,4 +1,4 @@
-//go:build !darwin || !cgo
+//go:build !agentdock_computer_native || !darwin || !cgo
 
 package computer
 

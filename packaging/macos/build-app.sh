@@ -198,7 +198,6 @@ else
   lipo -create "${helper_cloudflared_binaries[@]}" -output "$HELPERS_DIR/cloudflared"
 fi
 chmod 0755 "$HELPERS_DIR/agentdock" "$HELPERS_DIR/cloudflared"
-bash "$ROOT_DIR/packaging/macos/build-computer-helper.sh" "$HELPERS_DIR/AgentDockComputer.app"
 find "$CORE_SKILL_BUNDLE" -type d -exec chmod 0755 {} +
 find "$CORE_SKILL_BUNDLE" -type f -exec chmod 0644 {} +
 [[ -f "$CORE_SKILL_BUNDLE/manifest.json" && ! -L "$CORE_SKILL_BUNDLE/manifest.json" ]] || \

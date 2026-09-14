@@ -43,7 +43,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
     $entryNames = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-    foreach ($requiredEntry in @('agentdock.exe', 'agentdock-computer.exe', 'agentdock-tray.exe', 'agentdock.ico', 'manage-windows.ps1', 'share/agentdock/core-skills/manifest.json')) {
+    foreach ($requiredEntry in @('agentdock.exe', 'agentdock-tray.exe', 'agentdock.ico', 'manage-windows.ps1', 'share/agentdock/core-skills/manifest.json')) {
         if ($entryNames -notcontains $requiredEntry) {
             throw "AgentDock archive does not contain required entry: $requiredEntry"
         }

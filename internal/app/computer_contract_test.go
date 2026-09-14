@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/Serialeo/agentdock-protocol/mcpcontract"
@@ -11,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestComputerContractsCompileAndRequireAvailableBackend(t *testing.T) {
+func TestComputerContractsCompileButRemainDisabled(t *testing.T) {
 	for _, name := range mcpcontract.ComputerToolNames() {
 		input, ok := mcpcontract.ComputerInputSchema(name)
 		if !ok {
@@ -28,12 +29,35 @@ func TestComputerContractsCompileAndRequireAvailableBackend(t *testing.T) {
 			t.Fatalf("%s output: %v", name, err)
 		}
 		spec, exists := toolSpecByName(name)
-		if !exists || spec.available(config.Config{}) || !spec.available(config.Config{ComputerAvailable: true}) {
-			t.Fatalf("computer registration is not gated by helper availability: %s", name)
+		if !exists || spec.available(config.Config{}) || spec.available(config.Config{ComputerAvailable: true}) {
+			t.Fatalf("unfinished computer tool is not disabled: %s", name)
 		}
 		if mcpcontract.IsCanonicalTool(name) {
 			t.Fatalf("Node-owned tool made canonical: %s", name)
 		}
+	}
+}
+
+func TestComputerReleaseDoesNotStartOrExposeBackend(t *testing.T) {
+	// A stale helper path or programmatic availability flag cannot enable the MCP.
+	cfg := config.Config{
+		AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(),
+		ComputerAvailable: true, ComputerHelperPath: "unfinished-helper",
+	}
+	r, err := NewRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	if r.computer != nil || r.Config().ComputerAvailable || r.Config().ComputerHelperPath != "" {
+		t.Fatal("release enabled a computer backend")
+	}
+	for _, name := range mcpcontract.ComputerToolNames() {
+		if _, ok := r.ToolDefinition(name); ok {
+			t.Fatalf("release exposed %s", name)
+		}
+		_, err := r.Call(context.Background(), name, nil)
+		requireAppToolErrorCode(t, err, "UNKNOWN_TOOL")
 	}
 }
 func TestComputerActContractRejectsUnsafeShapes(t *testing.T) {

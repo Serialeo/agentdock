@@ -11,7 +11,8 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 
-RUN CGO_ENABLED=0 go build -trimpath \
+# 官方容器仅提供服务端工具，不启用 ACP 或原生桌面 computer use。
+RUN CGO_ENABLED=0 go build -tags agentdock_docker -trimpath \
       -ldflags="-s -w -X github.com/uvwt/agentdock/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/uvwt/agentdock/internal/buildinfo.BuildDate=${BUILD_DATE}" \
       -o /out/agentdock ./cmd/agentdock
 

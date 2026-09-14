@@ -112,6 +112,8 @@ try:
     tool_names = {tool.get("name") for tool in tools if isinstance(tool, dict)}
     require("agentdock_context" in tool_names, f"agentdock_context not exposed; tools={sorted(tool_names)}")
     require("server_info" not in tool_names, f"server_info should not be exposed; tools={sorted(tool_names)}")
+    desktop_tools = sorted(name for name in tool_names if name.startswith(("acp_", "computer_")))
+    require(not desktop_tools, f"Docker must not expose ACP or native computer use: {desktop_tools}")
     print(f"tools/list ok ({len(tool_names)} tools)")
 
     print("==> MCP tools/call agentdock_context")

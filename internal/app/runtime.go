@@ -65,6 +65,7 @@ type Runtime struct {
 }
 
 func NewRuntime(cfg config.Config) (*Runtime, error) {
+	cfg.ApplyBuildCapabilities()
 	cfg.ComputerAvailable = false
 	toolNames, toolValidators, err := compileAvailableToolContracts(cfg)
 	if err != nil {
@@ -144,7 +145,7 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 		}
 		runtime.acp = toolacp.New(manager, ws)
 	}
-	if computer.Supported() {
+	if config.ComputerUseEnabled && !config.ContainerBuild && computer.Supported() {
 		path := cfg.ComputerHelperPath
 		if path == "" {
 			path = computer.BundledHelper()

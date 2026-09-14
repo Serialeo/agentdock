@@ -1,4 +1,5 @@
-//go:build darwin && cgo
+//go:build darwin && cgo && agentdock_computer_native
+
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>

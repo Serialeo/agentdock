@@ -20,6 +20,8 @@ const (
 	ServerName      = "agentdock"
 	PathModel       = "host"
 	RecallTimeoutMS = 30000
+	// Computer use is unfinished and disabled in all current distributions.
+	ComputerUseEnabled = false
 
 	defaultOAuthAccessTokenTTLSeconds = int64(time.Hour / time.Second)
 	maxOAuthAccessTokenTTLSeconds     = int64(999999 * 24 * 60 * 60)
@@ -90,9 +92,12 @@ func FromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	acpEnabled, err := getenvBool("AGENTDOCK_ACP_ENABLED", false)
-	if err != nil {
-		return Config{}, err
+	acpEnabled := false
+	if !ContainerBuild {
+		acpEnabled, err = getenvBool("AGENTDOCK_ACP_ENABLED", false)
+		if err != nil {
+			return Config{}, err
+		}
 	}
 	var acpArgs []string
 	var acpEnvFromEnv map[string]string
@@ -120,7 +125,7 @@ func FromEnv() (Config, error) {
 			return Config{}, err
 		}
 	}
-	return Config{
+	cfg := Config{
 		AgentDockHome:                strings.TrimSpace(os.Getenv("AGENTDOCK_HOME")),
 		AgentDockDefaultDir:          strings.TrimSpace(os.Getenv("AGENTDOCK_DEFAULT_DIR")),
 		CommandEnvFromEnv:            commandEnvFromEnv,
@@ -147,10 +152,24 @@ func FromEnv() (Config, error) {
 		ACPInteractionMS:             acpInteractionMS,
 		Stdio:                        stdio,
 		TrustedProxyCIDRs:            splitCommaSeparated(os.Getenv("AGENTDOCK_TRUSTED_PROXY_CIDRS")),
-	}, nil
+	}
+	cfg.ApplyBuildCapabilities()
+	return cfg, nil
+}
+
+// ApplyBuildCapabilities also applies when callers construct a Runtime directly.
+func (c *Config) ApplyBuildCapabilities() {
+	if ContainerBuild {
+		c.ACPEnabled = false
+	}
+	if !ComputerUseEnabled || ContainerBuild {
+		c.ComputerAvailable = false
+		c.ComputerHelperPath = ""
+	}
 }
 
 func (c *Config) Normalize() error {
+	c.ApplyBuildCapabilities()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve user home for AgentDock directories: %w", err)

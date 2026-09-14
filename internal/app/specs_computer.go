@@ -31,7 +31,9 @@ func computerToolSpecs() []ToolSpec {
 			annotations = readOnlyToolAnnotations(true)
 		}
 		specs = append(specs, ToolSpec{Name: name, Title: name, Description: descriptions[name], Annotations: annotations,
-			Availability: func(cfg config.Config) bool { return cfg.ComputerAvailable },
+			Availability: func(cfg config.Config) bool {
+				return config.ComputerUseEnabled && !config.ContainerBuild && cfg.ComputerAvailable
+			},
 			Contract: func(name string, cfg config.Config) (ToolContract, bool) {
 				return staticToolContract(name, mcpcontract.ComputerInputSchema, mcpcontract.ComputerOutputSchema)
 			},

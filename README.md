@@ -161,12 +161,14 @@ Official and community Skill sources live in [uvwt/agentdock-skills](https://git
 
 ### Native ACP
 
-AgentDock can optionally act as a native ACP client and host a local coding-agent adapter.
+Host installations of AgentDock can optionally act as a native ACP client and host a local coding-agent adapter. Official Docker images do not provide ACP or native computer use; Docker browser images continue to support CDP browser tools.
+
+Native computer use is unfinished and disabled in all current distributions. Computer MCP tools are not published or started, and desktop packages do not include the computer helper.
 
 - Desktop control panels provide presets for Codex, Claude, and Grok; host configuration controls whether ACP is enabled and which adapter is selected.
 - Use `acp_session` to create and manage sessions, `acp_prompt` to run and observe prompts, and `acp_interaction` to answer agent permission requests.
 - Optional ACP operations are available only when the connected adapter advertises the corresponding capability.
-- ACP working directories follow the host process or container security boundary rather than an AgentDock filesystem allowlist.
+- ACP working directories follow the host process permissions rather than an AgentDock filesystem allowlist.
 
 ### Browser and desktop automation
 

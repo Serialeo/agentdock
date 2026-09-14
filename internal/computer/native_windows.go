@@ -1,3 +1,5 @@
+//go:build windows && agentdock_computer_native
+
 package computer
 
 import (
