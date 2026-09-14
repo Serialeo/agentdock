@@ -70,6 +70,10 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		_, enabledErr := os.Stat(filepath.Join(home, "ENABLED"))
+		_, stopErr := os.Stat(filepath.Join(home, "STOP"))
+		status.LocalControlEnabled = enabledErr == nil
+		status.StopLatched = stopErr == nil
 		if err = json.NewEncoder(os.Stdout).Encode(status); err != nil {
 			return err
 		}
