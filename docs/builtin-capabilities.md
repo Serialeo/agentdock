@@ -56,7 +56,7 @@ agentdock builtins set --runtime-root "$HOME/.agentdock-stdio/runtime/stdio" --i
 
 ## 统一升级步骤（破坏性升级）
 
-本次交付以三个仓库的 `feat/builtin-capabilities` 配套版本统一重部署，不迁移旧开关，不支持新旧节点混合运行。两个消费者统一引用共享协议 `v0.9.2-0.20260914075145-b0beb69cdadb`；这不是 `0.9.2` 正式发布。最低支持边界是本分支配套实现，不能只用连接协议版本号判断热更新支持。
+本次交付以 AgentDock、NexusDock 和共享协议的 `v0.9.2` 配套版本统一重部署，不迁移旧开关，不支持新旧节点混合运行。两个消费者统一引用共享协议 `v0.9.2`。热更新管理的最低支持版本为配套的 `v0.9.2`，不能只用连接协议版本号判断支持情况。
 
 1. 停止旧 AgentDock 与 Nexus，备份需要保留的节点 home、身份及用户数据。数据库的清理或重建由部署人员按统一部署方案执行。
 2. 清理启动脚本、服务定义中的 `--browser-enabled`、`config update --acp-enabled` 以及环境文件中的 `AGENTDOCK_BROWSER_ENABLED`、`AGENTDOCK_ACP_ENABLED`。后端地址、命令、参数仍保留。旧 CLI 参数不再被接受，旧环境开关不再起作用。

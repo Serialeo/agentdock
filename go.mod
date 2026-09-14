@@ -3,7 +3,7 @@ module github.com/uvwt/agentdock
 go 1.26.5
 
 require (
-	github.com/Serialeo/agentdock-protocol v0.9.2-0.20260914075145-b0beb69cdadb
+	github.com/Serialeo/agentdock-protocol v0.9.2
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
