@@ -27,7 +27,7 @@ private enum BrowserConnectionMode: CaseIterable {
 }
 
 @MainActor
-final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDelegate {
+final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     private let service: ServiceController
     private let configurationController: ServiceConfigurationController
     private let menuLoginAgent: MenuLoginAgentController
@@ -40,7 +40,9 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private let mcpAppsEnabled = NSButton(checkboxWithTitle: "启用 MCP Apps UI", target: nil, action: nil)
     private let builtinStatus = NSTextField(wrappingLabelWithString: "本机内置能力：读取中…")
     private let builtinRefresh = NSButton(title: "刷新内置能力状态", target: nil, action: nil)
-    private var builtinBusy = false
+    private let requests = RuntimeUIRequests()
+    private var builtinSnapshot: [BuiltinCapability]?
+    private var settingsTicket: Int?
     private let browserEnabled = NSButton(checkboxWithTitle: "启用浏览器 CDP 控制", target: nil, action: nil)
     private let browserConnectionMode = NSPopUpButton(frame: .zero, pullsDown: false)
     private let browserCDPURL = NSTextField(string: "")
@@ -70,7 +72,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private var initialACPAgent = ACPAgentPreset.codex
     private var initialACPCommand = ""
     private var initialACPArgsJSON = "[]"
-    private var isBusy = false
+    private var isBusy: Bool { requests.changing }
     private var browserCDPRow: NSView?
     private var acpCommandRow: NSView?
     private var acpArgsRow: NSView?
@@ -94,6 +96,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
+        window.delegate = self
         configureUI()
     }
 
@@ -102,6 +105,8 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     }
 
     func present(status: ServiceStatus) {
+        requests.setVisible(true)
+        if isBusy { showWindow(nil); return }
         guard let configuration = status.configuration else { return }
         currentConfiguration = configuration
         initialServiceAutostart = status.autostartEnabled
@@ -394,40 +399,61 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     @objc private func acpToggled() { toggleBuiltin("acp", enabled: acpEnabled.state == .on) }
     @objc private func builtinRefreshPressed() { Task { await refreshBuiltins() } }
 
+    func windowWillClose(_ notification: Notification) {
+        requests.setVisible(false)
+        builtinSnapshot = nil
+    }
+
     private func renderBuiltins(_ states: [BuiltinCapability]) {
         for state in states {
             let control = state.id == "browser" ? browserEnabled : state.id == "acp" ? acpEnabled : nil
             control?.state = state.enabled ? .on : .off
-            control?.isEnabled = state.provided && !state.transitioning && !isBusy
+            control?.isEnabled = requests.visible && state.provided && !state.transitioning && !isBusy
         }
-        builtinStatus.stringValue = states.map { "\($0.id)：\($0.available ? "可用" : $0.reason)" }.joined(separator: "\n")
+        builtinStatus.stringValue = states.map { "\($0.id)：\($0.available ? "可用 " : "")\($0.reason)" }.joined(separator: "\n")
             + "\n开关立即生效并保存在本机；关闭清理当前会话，开启不恢复旧任务。"
     }
 
     private func refreshBuiltins() async {
-        guard !builtinBusy else { return }
-        do { renderBuiltins(try await service.builtins()) }
-        catch {
+        guard let ticket = requests.beginRead() else { return }
+        defer { requests.endRead(ticket) }
+        do {
+            let states = try await service.builtins()
+            guard requests.isCurrent(ticket) else { return }
+            builtinSnapshot = states; renderBuiltins(states)
+        } catch {
+            guard requests.isCurrent(ticket) else { return }
+            builtinSnapshot = nil
             browserEnabled.isEnabled = false; acpEnabled.isEnabled = false
             builtinStatus.stringValue = "无法读取本机能力：\(error.localizedDescription)。请启动后台服务后刷新。"
         }
     }
 
     private func toggleBuiltin(_ id: String, enabled: Bool) {
-        guard !builtinBusy else { return }
-        builtinBusy = true
-        browserEnabled.isEnabled = false; acpEnabled.isEnabled = false
+        guard let ticket = requests.beginChange() else {
+            if let states = builtinSnapshot { renderBuiltins(states) }
+            return
+        }
+        updateBusyControls()
         builtinStatus.stringValue = "正在切换内置能力…"
         Task {
-            do { renderBuiltins(try await service.builtins(id: id, enabled: enabled)) }
-            catch { showStatus("\(error.localizedDescription)。请刷新核对实际状态。", isError: true) }
-            builtinBusy = false
+            do {
+                let states = try await service.builtins(id: id, enabled: enabled)
+                if requests.isCurrent(ticket) { builtinSnapshot = states }
+            } catch {
+                if requests.isCurrent(ticket) {
+                    builtinSnapshot = nil
+                    showStatus("\(error.localizedDescription)。请刷新核对实际状态。", isError: true)
+                }
+            }
+            requests.endChange(ticket)
+            updateBusyControls()
             await refreshBuiltins()
         }
     }
 
     @objc private func applyPressed() {
-        guard let configuration = currentConfiguration else { return }
+        guard !isBusy, let configuration = currentConfiguration else { return }
         let selectedAgent = selectedACPAgent()
         let sameAgent = selectedAgent == configuration.acpAgent
         let customCommand = acpCommand.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -460,8 +486,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         showStatus("正在保存配置并验证 AgentDock…", isError: false)
         Task {
             do {
-                let validatedSettings = try settings.validated()
-                try await configurationController.apply(validatedSettings)
+                let validatedSettings = try await configurationController.apply(settings)
                 let serviceAutostartValue = serviceAutostart.state == .on
                 if serviceAutostartValue != initialServiceAutostart {
                     try await service.setAutostart(enabled: serviceAutostartValue)
@@ -511,6 +536,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     @objc private func cancelPressed() { close() }
 
     @objc private func pairNexusPressed() {
+        guard !isBusy else { return }
         let endpoint = nexusEndpoint.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let pairingCode = nexusPairingCode.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !endpoint.isEmpty, !pairingCode.isEmpty else {
@@ -570,21 +596,18 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             configuredCommand: configuredCommand,
             configuredArguments: configuredArguments
         )
-        let enabled = true
-        acpAgent.isEnabled = enabled && !isBusy
-        acpCommand.isEnabled = enabled && isCustom && !isBusy
-        acpArgsJSON.isEnabled = enabled && isCustom && !isBusy
+        acpAgent.isEnabled = !isBusy
+        acpCommand.isEnabled = isCustom && !isBusy
+        acpArgsJSON.isEnabled = isCustom && !isBusy
         if isCustom, (try? ACPDesktopConfiguration.decodeArguments(acpArgsJSON.stringValue)) == nil {
             acpStatus.stringValue = "Args JSON 必须是 JSON 字符串数组。"
-            acpStatus.textColor = enabled ? .systemRed : .secondaryLabelColor
+            acpStatus.textColor = .systemRed
         } else if resolution.available {
-            acpStatus.stringValue = enabled
-                ? resolution.message
-                : (isCustom ? "已配置 \(preset.title) · 启用后生效" : "已检测到 \(preset.title) · 启用后生效")
+            acpStatus.stringValue = resolution.message
             acpStatus.textColor = .secondaryLabelColor
         } else {
             acpStatus.stringValue = resolution.message
-            acpStatus.textColor = enabled ? .systemRed : .secondaryLabelColor
+            acpStatus.textColor = .systemRed
         }
     }
 
@@ -661,7 +684,16 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     }
 
     private func setBusy(_ busy: Bool) {
-        isBusy = busy
+        if busy { settingsTicket = requests.beginChange() }
+        else if let ticket = settingsTicket { requests.endChange(ticket); settingsTicket = nil }
+        updateBusyControls()
+        if !busy { Task { await refreshBuiltins() } }
+    }
+
+    private func updateBusyControls() {
+        let busy = isBusy
+        browserEnabled.isEnabled = false; acpEnabled.isEnabled = false
+        if !busy, let states = builtinSnapshot { renderBuiltins(states) }
         for control in [serviceAutostart, menuAutostart, portField, logLevel, mcpAppsEnabled, browserConnectionMode, browserCDPURL, acpAgent, acpCommand, acpArgsJSON, nexusEndpoint, nexusPairingCode, nexusPairButton] {
             control.isEnabled = !busy
         }

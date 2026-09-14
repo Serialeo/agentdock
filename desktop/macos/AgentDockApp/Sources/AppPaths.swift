@@ -42,7 +42,6 @@ struct ServiceConfiguration: Equatable {
         "AGENTDOCK_ACP_AGENT",
         "AGENTDOCK_ACP_COMMAND",
         "AGENTDOCK_ACP_ARGS_JSON",
-        "AGENTDOCK_ACP_ENV_FROM_ENV_JSON",
     ]
     // 旧 Nexus 凭据不再参与运行；保存设置时一并从环境文件清除，避免废弃密钥继续落盘。
     static let removableLegacyKeys: Set<String> = [

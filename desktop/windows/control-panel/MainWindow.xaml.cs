@@ -15,7 +15,8 @@ namespace AgentDock.ControlPanel;
 
 public partial class MainWindow : Window
 {
-    private bool _builtinBusy;
+    private readonly RuntimeUiRequests _requests = new();
+    private JsonElement? _builtinSnapshot;
 
     private const string BrowserConnectionManaged = "managed";
     private const string BrowserConnectionReuse = "reuse";
@@ -39,11 +40,15 @@ public partial class MainWindow : Window
         _runtime = runtime;
         InitializeComponent();
         Closing += MainWindow_Closing;
+        IsVisibleChanged += async (_, _) => {
+            _requests.SetVisible(IsVisible);
+            if (IsVisible) await RefreshAsync();
+        };
     }
 
     public async Task RefreshAsync()
     {
-        if (!await _refreshGate.WaitAsync(0))
+        if (_requests.Changing || !await _refreshGate.WaitAsync(0))
         {
             return;
         }
@@ -51,11 +56,14 @@ public partial class MainWindow : Window
         try
         {
             FooterStatusText.Text = "正在刷新…";
+            var revision = _requests.Revision;
             var snapshot = await _runtime.GetSnapshotAsync(includeNexusConnection: true);
+            if (!_requests.IsCurrent(revision)) return;
             _snapshot = snapshot;
             _bearerToken = _runtime.ReadBearerToken();
             _oauthPassword = _runtime.ReadOAuthPassword();
             ApplySnapshot(snapshot);
+            await RefreshBuiltinsAsync();
             FooterStatusText.Text = $"上次刷新：{snapshot.CheckedAt:HH:mm:ss}";
             await AutoTestPublicAsync(snapshot);
         }
@@ -141,7 +149,6 @@ public partial class MainWindow : Window
             UpdateTunnelModeUi();
             RefreshBrowserConnectionUi();
             RefreshAcpUi();
-            await RefreshBuiltinsAsync();
         }
         finally
         {
@@ -173,21 +180,23 @@ public partial class MainWindow : Window
 
     private async Task<bool> ExecuteActionAsync(string pendingText, Func<Task> action, TextBlock? statusTarget = null)
     {
+        var ticket = _requests.BeginChange();
+        if (ticket == null) return false;
+        DisableBuiltinControls();
         statusTarget ??= FooterStatusText;
         statusTarget.Text = pendingText;
-        try
-        {
-            await action();
-            statusTarget.Text = "操作完成";
-            await RefreshAsync();
-            return true;
+        var succeeded = false;
+        try { await action(); succeeded = true; }
+        catch (Exception ex) {
+            if (_requests.IsCurrent(ticket.Value)) {
+                statusTarget.Text = ex.Message;
+                MessageBox.Show(this, ex.Message, "AgentDock", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
-        catch (Exception ex)
-        {
-            statusTarget.Text = ex.Message;
-            MessageBox.Show(this, ex.Message, "AgentDock", MessageBoxButton.OK, MessageBoxImage.Error);
-            return false;
-        }
+        finally { _requests.EndChange(ticket.Value); }
+        _builtinSnapshot = null;
+        await RefreshAsync();
+        return succeeded;
     }
 
     private Task RunCoreActionAsync(string action, string pendingText) =>
@@ -408,14 +417,24 @@ public partial class MainWindow : Window
             : new SolidColorBrush(Color.FromRgb(102, 112, 133));
     }
 
+    private void DisableBuiltinControls() => BrowserEnabledCheckBox.IsEnabled = AcpEnabledCheckBox.IsEnabled = false;
+
     private async Task RefreshBuiltinsAsync()
     {
-        if (_builtinBusy) return;
-        try { RenderBuiltins(await _runtime.BuiltinsAsync()); }
-        catch (Exception error) {
-            BrowserEnabledCheckBox.IsEnabled = AcpEnabledCheckBox.IsEnabled = false;
-            BuiltinStatusText.Text = $"无法读取本机能力：{error.Message}。请启动后台服务后刷新。";
+        var ticket = _requests.BeginRead();
+        if (ticket == null) return;
+        try {
+            var snapshot = await _runtime.BuiltinsAsync();
+            if (_requests.IsCurrent(ticket.Value)) { _builtinSnapshot = snapshot; RenderBuiltins(snapshot); }
         }
+        catch (Exception error) {
+            if (_requests.IsCurrent(ticket.Value)) {
+                _builtinSnapshot = null;
+                DisableBuiltinControls();
+                BuiltinStatusText.Text = $"无法读取本机能力：{error.Message}。请启动后台服务后刷新。";
+            }
+        }
+        finally { _requests.EndRead(ticket.Value); }
     }
 
     private void RenderBuiltins(JsonElement snapshot)
@@ -426,9 +445,10 @@ public partial class MainWindow : Window
             CheckBox? control = id == "browser" ? BrowserEnabledCheckBox : id == "acp" ? AcpEnabledCheckBox : null;
             if (control != null) {
                 control.IsChecked = state.GetProperty("enabled").GetBoolean();
-                control.IsEnabled = state.GetProperty("provided").GetBoolean() && !state.GetProperty("transitioning").GetBoolean();
+                control.IsEnabled = !_requests.Changing && _requests.Visible && state.GetProperty("provided").GetBoolean() && !state.GetProperty("transitioning").GetBoolean();
             }
-            lines.Add($"{id}: {(state.GetProperty("available").GetBoolean() ? "可用" : state.GetProperty("reason").GetString())}");
+            var reason = state.GetProperty("reason").GetString();
+            lines.Add($"{id}: {(state.GetProperty("available").GetBoolean() ? "可用 " : "")}{reason}");
         }
         BuiltinStatusText.Text = string.Join(Environment.NewLine, lines);
     }
@@ -437,13 +457,25 @@ public partial class MainWindow : Window
 
     private async void BuiltinToggle_Click(object sender, RoutedEventArgs e)
     {
-        if (_builtinBusy || sender is not CheckBox control || control.Tag is not string id) return;
-        _builtinBusy = true;
-        BrowserEnabledCheckBox.IsEnabled = AcpEnabledCheckBox.IsEnabled = false;
+        if (sender is not CheckBox control || control.Tag is not string id) return;
+        var enabled = control.IsChecked == true;
+        var ticket = _requests.BeginChange();
+        if (ticket == null) { if (_builtinSnapshot is JsonElement previous) RenderBuiltins(previous); return; }
+        DisableBuiltinControls();
         BuiltinStatusText.Text = "正在切换内置能力…";
-        try { RenderBuiltins(await _runtime.BuiltinsAsync(id, control.IsChecked == true)); }
-        catch (Exception error) { BuiltinStatusText.Text = $"{error.Message}。请刷新核对实际状态。"; }
-        finally { _builtinBusy = false; await RefreshBuiltinsAsync(); }
+        try {
+            var snapshot = await _runtime.BuiltinsAsync(id, enabled);
+            if (_requests.IsCurrent(ticket.Value)) _builtinSnapshot = snapshot;
+        }
+        catch (Exception error) {
+            if (_requests.IsCurrent(ticket.Value)) {
+                _builtinSnapshot = null;
+                BuiltinStatusText.Text = $"{error.Message}。请刷新核对实际状态。";
+            }
+        }
+        finally { _requests.EndChange(ticket.Value); }
+        if (_requests.IsCurrent(ticket.Value) && _builtinSnapshot is JsonElement current) RenderBuiltins(current);
+        await RefreshBuiltinsAsync();
     }
 
     private async void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -454,7 +486,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        var acpEnabled = AcpEnabledCheckBox.IsChecked == true;
         var acpAgent = SelectedAcpAgent();
         var isCustomAcp = acpAgent == "custom";
         var sameAcpAgent = string.Equals(_snapshot?.Settings.AcpAgent, acpAgent, StringComparison.OrdinalIgnoreCase);
@@ -475,15 +506,6 @@ public partial class MainWindow : Window
         {
             configuredAcpArguments = sameAcpAgent ? _snapshot?.Settings.AcpArgs : null;
         }
-        if (acpEnabled && !_runtime.ResolveAcpAdapter(acpAgent, configuredAcpCommand, configuredAcpArguments).Available)
-        {
-            var message = isCustomAcp
-                ? "自定义 ACP Adapter 当前不可用，请检查 Command 与 Args JSON。"
-                : $"{AgentDisplayName(acpAgent)} 当前不可用，请先安装对应命令。";
-            MessageBox.Show(this, message, "AgentDock", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
         var browserConnectionMode = SelectedBrowserConnectionMode();
         var browserCdpUrl = BrowserCdpUrlTextBox.Text.Trim();
         if (browserConnectionMode == BrowserConnectionSpecified && string.IsNullOrWhiteSpace(browserCdpUrl))

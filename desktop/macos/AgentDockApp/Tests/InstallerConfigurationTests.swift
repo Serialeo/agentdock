@@ -3,6 +3,24 @@ import Foundation
 @main
 struct InstallerConfigurationTests {
     static func main() async throws {
+        let requests = RuntimeUIRequests()
+        let oldRead = requests.beginRead()!
+        precondition(requests.beginRead() == nil)
+        let write = requests.beginChange()!
+        precondition(!requests.isCurrent(oldRead))
+        requests.endRead(oldRead)
+        precondition(requests.changing && requests.beginRead() == nil && requests.beginChange() == nil)
+        requests.setVisible(false); requests.setVisible(true)
+        precondition(!requests.isCurrent(write) && requests.changing)
+        requests.endChange(write)
+        let recovered = requests.beginRead()!
+        precondition(requests.isCurrent(recovered))
+        requests.endRead(recovered)
+        let restart = requests.beginChange()!
+        precondition(requests.beginChange() == nil)
+        requests.endChange(restart)
+        precondition(requests.beginRead() != nil)
+
         let local = InstallRequest(mode: .local, serverURL: "", tunnelToken: "")
         let localURL = try local.validatedServerURL()
         let localToken = try local.validatedTunnelToken()
@@ -27,6 +45,7 @@ struct InstallerConfigurationTests {
         let reusedToken = try reuseNamed.validatedTunnelToken()
         precondition(reusedToken == nil)
 
+        precondition(!ServiceConfiguration.editableKeys.contains("AGENTDOCK_ACP_ENV_FROM_ENV_JSON"))
         let environmentText = """
         # preserved comment
         AGENTDOCK_PORT=8765

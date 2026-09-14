@@ -25,16 +25,13 @@ struct EditableServiceSettings {
             ? acpCommand.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
         var arguments = acpAgent == .custom ? acpArgs : []
-        do {
-            let resolution = acpAgent.resolveAdapter(
+        let resolution = acpAgent.resolveAdapter(
                 configuredCommand: acpCommand,
                 configuredArguments: acpArgs
             )
-            if resolution.available {
-                command = resolution.command
-                arguments = resolution.arguments
-            }
-
+        if resolution.available {
+            command = resolution.command
+            arguments = resolution.arguments
         }
 
         return EditableServiceSettings(
@@ -75,12 +72,12 @@ final class ServiceConfigurationController {
         self.service = service
     }
 
-    func apply(_ requested: EditableServiceSettings) async throws {
+    func apply(_ requested: EditableServiceSettings) async throws -> EditableServiceSettings {
         let settings = try requested.validated()
         let environmentURL = service.paths.environment
         let originalData = try readPrivateRegularFile(environmentURL)
         let environment = try ManagedEnvironment.load(from: environmentURL)
-        var replacements = [
+        let replacements = [
             "AGENTDOCK_PORT": String(settings.port),
             "AGENTDOCK_LOG_LEVEL": settings.logLevel,
             "AGENTDOCK_MCP_APPS_ENABLED": settings.mcpAppsEnabled ? "true" : "false",
@@ -90,17 +87,13 @@ final class ServiceConfigurationController {
             "AGENTDOCK_ACP_COMMAND": settings.acpCommand,
             "AGENTDOCK_ACP_ARGS_JSON": try ACPDesktopConfiguration.encodeArguments(settings.acpArgs),
         ]
-        do {
-            // 桌面预设依赖各 Agent 自己的登录状态，不继承上一个 Agent 的密钥映射。
-            replacements["AGENTDOCK_ACP_ENV_FROM_ENV_JSON"] = "{}"
-        }
         let updatedData = try environment.dataByUpdating(replacements, removing: ServiceConfiguration.removableLegacyKeys)
         let wasLoaded = service.isLoaded()
 
         try await service.runInBackground {
             try self.writePrivateAtomically(updatedData, to: environmentURL)
         }
-        guard wasLoaded else { return }
+        guard wasLoaded else { return settings }
 
         do {
             try await service.restart()
@@ -116,6 +109,7 @@ final class ServiceConfigurationController {
             }
             throw ValidationError("新配置启动失败，已恢复旧配置：\(originalError.localizedDescription)")
         }
+        return settings
     }
 
     private func readPrivateRegularFile(_ url: URL) throws -> Data {

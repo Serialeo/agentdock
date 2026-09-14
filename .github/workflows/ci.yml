@@ -8,7 +8,7 @@ on:
         required: false
         type: string
   push:
-    branches: [main]
+    branches: [main, feat/builtin-capabilities]
   pull_request:
     branches: [main]
 
@@ -78,6 +78,24 @@ jobs:
       - name: Test macOS scripts
         if: runner.os == 'macOS'
         run: make test-scripts-macos
+
+      - name: Setup .NET for Windows control panel
+        if: runner.os == 'Windows'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Windows control panel
+        if: runner.os == 'Windows'
+        run: dotnet build desktop/windows/control-panel/AgentDock.ControlPanel.csproj -c Release -p:RuntimeIdentifier=win-x64
+
+      - name: Test Windows runtime UI request ordering
+        if: runner.os == 'Windows'
+        run: dotnet run --project desktop/windows/control-panel-tests/ControlPanel.Tests.csproj
+
+      - name: Compile macOS native control panel
+        if: runner.os == 'macOS'
+        run: xcrun swiftc -swift-version 5 desktop/macos/AgentDockApp/Sources/*.swift -o /tmp/AgentDock-app-check
 
       - name: Check Windows PowerShell installer
         if: runner.os == 'Windows'
