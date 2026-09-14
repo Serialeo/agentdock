@@ -322,6 +322,7 @@ jobs:
           $runtimeIdentifier = 'win-x64'
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           go build -trimpath -ldflags $ldflags -o dist/agentdock.exe ./cmd/agentdock
+          go build -trimpath -ldflags $ldflags -o dist/agentdock-computer.exe ./cmd/agentdock-computer
           dotnet publish .\desktop\windows\control-panel\AgentDock.ControlPanel.csproj `
             -c Release `
             -r $runtimeIdentifier `
@@ -346,6 +347,7 @@ jobs:
         run: |
           .\packaging\windows\sign-windows.ps1 -Path @(
             '.\dist\agentdock.exe',
+            '.\dist\agentdock-computer.exe',
             '.\dist\agentdock-tray.exe'
           )
 
@@ -359,7 +361,7 @@ jobs:
           python .\packaging\build-core-skill-bundle.py --output dist\share\agentdock\core-skills
           Copy-Item .\packaging\windows\assets\agentdock.ico dist\agentdock.ico -Force
           Copy-Item .\scripts\install\manage-windows.ps1 dist\manage-windows.ps1 -Force
-          Compress-Archive -Path dist\agentdock.exe, dist\agentdock-tray.exe, dist\agentdock.ico, dist\manage-windows.ps1, dist\share -DestinationPath $asset -Force
+          Compress-Archive -Path dist\agentdock.exe, dist\agentdock-computer.exe, dist\agentdock-tray.exe, dist\agentdock.ico, dist\manage-windows.ps1, dist\share -DestinationPath $asset -Force
           $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$asset.sha256", "$hash  $asset`n", [Text.UTF8Encoding]::new($false))
 

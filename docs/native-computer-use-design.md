@@ -1,5 +1,7 @@
 # 原生 Computer Use 设计草案
 
+> P2 当前实现和验证范围以 [接入进度](native-computer-use-integration.md) 为准。原设计中的 named pipe / Unix socket 改为父子匿名管道；本轮先交付截图与单击，其余动作和本地面板入口仍待实现。
+
 状态：设计 v0.2。P1 共享契约与权限已实现；原生执行与 IPC 尚未接入。当前边界见 [MCP 接入进度](native-computer-use-integration.md)。
 日期：2026-09-13（America/Los_Angeles）。
 基线：AgentDock `0e51c4b690e7`、NexusDock `c2bb473e9804`、agentdock-protocol `3e926f7aa779`。

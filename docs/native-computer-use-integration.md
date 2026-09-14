@@ -1,33 +1,67 @@
 # 原生 Computer Use：MCP 接入进度
 
-当前交付：P1 共享契约、权限和路由边界。原生 IPC、执行服务及打包仍属于下一阶段，当前不会在 MCP 中发布五个 computer 工具或宣告 `bridge.computer.v1`。
+当前交付：P2 截图与单次点击闭环。五个 computer 工具只在本机预编译 helper 握手成功后发布，同时宣告 `bridge.computer.v1`。Linux 和没有 helper 的安装保持普通工具可用；不会假装具备原生桌面能力。
 
 ## 部署约定
 
-按用户确认，客户端、服务端和数据库统一重新部署。本轮没有旧 Node 字段裁剪、缺失权限字段归一化、旧 computer 数据迁移或混合版本降级。每个 Deployment 明确携带 `computer: none | observe | control`，新建项目界面默认 `none`。本次开发没有清空正在使用的数据库。
+客户端、服务端和数据库按已确认方案统一重建部署；没有旧 computer 协议翻译、缺省权限兼容或数据库迁移分支。本次开发没有清空数据库、推送代码或部署服务。
 
-正式用户安装的是包含预编译原生 helper 的客户端，运行 computer use 不需要 Visual Studio、CMake、Xcode 或 Swift 编译器。这些仅是构建机依赖；P0 源码测试包与正式安装包是不同交付物。本轮保留已真机测试的两个 P0 App 及其构建脚本。
+用户安装的是预编译程序。Windows helper 使用 Go 调用系统 API，无需 Visual Studio、CMake；macOS helper 在构建机链接系统框架，终端用户无需 Xcode。已通过真机测试的 P0 校准程序保持原样。
 
-## 已落地
+## 执行链
 
-- protocol 提供五个 Node 工具的输入／输出 schema、动作与观察类型、权限枚举和错误码；不加入 Nexus 自有 canonical 工具列表。
-- Nexus 新库的 Deployment 使用 `computer_permission` 列；Target 快照带显式 computer 字段。界面、HTTP 契约、保存／回填／展示同步。
-- Nexus 在转发桌面工具前检查实际 computer 能力及 Deployment 权限。Full Access 可以覆盖项目权限，不能把不存在的后端变成可用。
-- AgentDock 增加相同权限分类。历史 Target 仅允许本人 stop 和带 operation_id 的已存结果查询；实时观察与新动作不享受历史豁免。Bridge、Runtime 与 Nexus 使用同一分类函数。
-- 当前 Node 尚无正式原生执行服务，申请观察或控制会明确返回后端不支持。普通 none 配置直接使用当前完整快照，不裁剪字段适配旧节点。
+`Nexus Target 授权 → Runtime 再校验 → 私有父子管道 → 独立 helper → OS API → 持久化结果 → 标准 MCP image`
 
-## 校验取舍
+helper 通过继承的匿名 stdin/stdout 管道通信，不监听 TCP、Unix socket 或 named pipe，不在磁盘存 IPC 口令。只有 Core 提供可信 owner，模型参数不能覆盖 WorkSession、Target、Deployment 或 revision。
 
-移除了 ID 的字符格式和任意长度上限、坐标的固定数值上限、按键名称格式和五键限制、文本固定长度上限，以及将截图尺寸或等待时间偏好直接判为非法的固定上限。三击选择也在动作契约中允许。
+同一 OS 用户的 helper 使用固定 OS 用户目录和排他文件锁，避免两个 Core 并行占用桌面。macOS 目录从 passwd 用户记录取得，Windows 从 Known Folder API 取得，不受 `AGENTDOCK_HOME`、`HOME` 或 `AppData` 环境变量切换影响。
 
-必须保留：权限与 owner、停止和撤销、动作的必需字段、非有限或负坐标、实际观察图像范围、同 operation_id 去重、有限输入片段及传输字节预算。实际图像范围由执行服务根据 observation 检查；不能用某个固定屏幕分辨率代替。截图尺寸和等待时间由后端按能力处理并报告实际值，不能静默裁断图片或重发输入。
+会话租约为 15 秒；需显式 renew。观察有效期 30 秒，保存原始截图到原生坐标的变换及目标窗口/几何信息。截图大小是偏好，服务调整至传输预算并返回实际尺寸。MCP 图像在本次授权响应内传输，动作日志仅保存元数据和输入结果，不发布公共 Artifact URL。
 
-正式执行时校验目标应用窗口，不要求 AgentDock 面板在前台。目标失焦或几何变化应重新观察；内容标题、工具链年份、无关元数据格式不作为拒绝执行的理由。
+点击前持久化 executing 状态，OS 返回后先保存输入结果，再抓取后图。相同 owner 和 operation_id 重读已存结果；参数不同时返回冲突。后图失败不重试点击。重启遇到 executing 记录返回 outcome_unknown，不能据此假定没有输入。
 
-## 验证与下一步
+停止、租约到期、本地禁用、Target/WorkSession 撤销及 Deployment 变更会取消当前执行。停止处理与捕获任务分开；管道取消或关闭会终止 helper，重新连接不会重发任何调用。后续显式 status 可重读日志。
 
-本轮使用 `MCP/go.work` 关联三个本地仓库进行构建；独立发布前还需发布 protocol 模块并同步依赖版本。
+## 当前能力与边界
 
-已通过 protocol 全包测试、AgentDock 受影响包及 race 测试、Nexus 项目／数据库／HTTP／节点包测试、HTTP 契约检查和前端构建。针对性测试覆盖三档权限、Full Access、当前 wire 字段保存、历史 Target 与跨 owner 拒绝、宽松 ID／按键／尺寸参数，以及非法动作拒绝。
+- 已实现 status、session acquire/renew/release、observe、单次 click、stop 和 operation_id 查询。
+- AgentDock 面板可在后台。点击绑定截图时的前台目标窗口；失焦、窗口移动或点击落到其他窗口时重新观察，不检查窗口标题或工具链年份。
+- status.actions 当前为 `["click"]`。多击、键盘、文本、滚轮及拖拽仍未实现，返回明确 unsupported；不会静默转成其他动作。
+- Windows 使用 GDI 抓取当前显示画面、SendInput 提交一组移动/按下/抬起事件，报告 OS 接受数量。这是新的产品后端；P0 的 DXGI 真机结果不能当作此后端已经验证。缩放、旋转和多屏仍需本轮原生复测。
+- macOS 使用 ScreenCaptureKit（13+）和 CGEventPost；仅报告 submitted，不宣称输入已被应用接受或业务成功。旋转显示器暂未实现。
+- Windows helper 在当前交互用户的标准权限 Core 下运行；本轮不支持从 elevated Core 跨权限启动桌面 helper。锁屏、断开会话和安全桌面不执行输入。
+- 本地 enable / stop / disable 为命令入口，尚未加入桌面面板开关。操作日志保留以便去重；当前不自动清理，图像元数据在 30 秒后回收。
 
-后续按可运行闭环交付：用户会话内原生 helper 和本机 IPC；Go 服务装配与标准 MCP image 输出；会话控制、持久动作结果和取消；最后将预编译 helper 纳入安装包。上线工具前必须补齐这条执行链，不能把 P0 的自身校准点击直接包装成通用桌面能力。
+## 本地启用与诊断
+
+Windows：helper 与 `agentdock.exe` 放在同一目录，正式 Windows release zip / Setup 已增加这个文件。使用普通 PowerShell：
+
+```powershell
+.\agentdock-computer.exe enable
+.\agentdock-computer.exe diagnose
+```
+
+`diagnose` 自动查询交互桌面、截图并打印结果，将图片存入该用户私有目录的 `diagnostic.png`，不点击鼠标。运行中的 Core 下一次维护周期即可识别 enable。若安装 helper 前 Core 已启动，需要重启 Core 以发现新工具。
+
+macOS：正式包位于 `/Applications/AgentDock.app/Contents/Helpers/AgentDockComputer.app`。本地命令：
+
+```bash
+helper=/Applications/AgentDock.app/Contents/Helpers/AgentDockComputer.app/Contents/MacOS/agentdock-computer
+"$helper" enable
+"$helper" permissions
+"$helper" diagnose
+```
+
+系统权限授予 **AgentDock Computer**；P0 校准程序的权限身份不同。permissions 是用户主动调用，MCP status 不触发系统授权弹窗。测试源码时由构建机执行 `bash packaging/macos/build-computer-helper.sh`；正式用户不执行构建。
+
+任一平台使用 `agentdock-computer stop` 锁存本地停止，`enable` 才能解除。MCP 的 session acquire/renew 不能解除本地停止。`disable` 同时停止并关闭本地授权。
+
+MCP 顺序：status 获取 desktop/display → session acquire → observe → act 使用截图像素坐标和新的 operation_id → status 重读该 operation_id → stop。Nexus Deployment 配置 observe 或 control；默认 none。出现 outcome_unknown 时先查结果，不换 operation_id 重试。
+
+## 验证状态
+
+Linux 自动化已覆盖引擎及真实子进程管道：重复操作、崩溃后结果恢复、所有权隔离、撤权、过期、边界坐标、停止后不恢复、后图失败及原生拒绝原因保留；所有成功结果实际经过共享 output schema 校验。MCP 测试确认图片转为标准 content:image，structuredContent 不携带 base64、路径或公共 URL。
+
+本轮可以在 Linux 交叉编译 Windows Core/helper；macOS C/Objective-C 编译、两平台真实产品 helper 的输入测试和完整安装包测试仍须对应原生构建机执行，不能由 P0 测试或 mock 测试代替。
+
+使用 `MCP/go.work` 关联本地 protocol。独立发布前仍需发布更新后的 protocol 模块并同步依赖版本；本轮没有推送或发布模块。

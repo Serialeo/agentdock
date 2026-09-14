@@ -40,6 +40,8 @@ type Config struct {
 	NexusEndpoint                string
 	NexusDeviceToken             string
 	MCPAppsEnabled               bool
+	ComputerHelperPath           string
+	ComputerAvailable            bool // Runtime sets this only after a successful helper handshake.
 	BrowserEnabled               bool
 	BrowserExecutablePath        string
 	BrowserCDPURL                string
@@ -131,6 +133,7 @@ func FromEnv() (Config, error) {
 		OAuthAccessTokenNeverExpires: oauthAccessTokenNeverExpires,
 		LogLevel:                     getenv("AGENTDOCK_LOG_LEVEL", "info"),
 		MCPAppsEnabled:               mcpAppsEnabled,
+		ComputerHelperPath:           strings.TrimSpace(os.Getenv("AGENTDOCK_COMPUTER_HELPER_PATH")),
 		BrowserEnabled:               browserEnabled,
 		BrowserExecutablePath:        os.Getenv("AGENTDOCK_BROWSER_EXECUTABLE_PATH"),
 		BrowserCDPURL:                strings.TrimSpace(os.Getenv("AGENTDOCK_BROWSER_CDP_URL")),

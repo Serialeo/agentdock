@@ -34,7 +34,7 @@ if (( $# > 1 )); then
   exit 2
 fi
 
-for command_name in codesign ditto file hdiutil iconutil lipo plutil shasum sips swiftc unzip xcrun; do
+for command_name in go codesign ditto file hdiutil iconutil lipo plutil shasum sips swiftc unzip xcrun; do
   command -v "$command_name" >/dev/null 2>&1 || die "缺少命令：$command_name"
 done
 [[ -d "$SOURCE_DIR" ]] || die "缺少 macOS App 源码：$SOURCE_DIR"
@@ -198,6 +198,7 @@ else
   lipo -create "${helper_cloudflared_binaries[@]}" -output "$HELPERS_DIR/cloudflared"
 fi
 chmod 0755 "$HELPERS_DIR/agentdock" "$HELPERS_DIR/cloudflared"
+bash "$ROOT_DIR/packaging/macos/build-computer-helper.sh" "$HELPERS_DIR/AgentDockComputer.app"
 find "$CORE_SKILL_BUNDLE" -type d -exec chmod 0755 {} +
 find "$CORE_SKILL_BUNDLE" -type f -exec chmod 0644 {} +
 [[ -f "$CORE_SKILL_BUNDLE/manifest.json" && ! -L "$CORE_SKILL_BUNDLE/manifest.json" ]] || \

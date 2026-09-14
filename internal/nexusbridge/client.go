@@ -140,6 +140,15 @@ func (c *Client) connect(ctx context.Context) error {
 		return err
 	}
 	hello := bridgeHello(c.identity, tools, descriptors, c.node.UIResources(), c.node.ToolContractHash())
+	computerTools := 0
+	for _, name := range tools {
+		if protocol.IsComputerTool(name) {
+			computerTools++
+		}
+	}
+	if computerTools == 5 {
+		hello.BridgeCapabilities = append(hello.BridgeCapabilities, protocol.ComputerCapability)
+	}
 	if _, supported := c.node.(commandOutcomeAPI); supported {
 		hello.BridgeCapabilities = append(hello.BridgeCapabilities, protocol.CommandOutcomesCapability)
 	}

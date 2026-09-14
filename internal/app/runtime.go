@@ -12,6 +12,7 @@ import (
 
 	protocol "github.com/Serialeo/agentdock-protocol"
 	acpruntime "github.com/uvwt/agentdock/internal/acp"
+	"github.com/uvwt/agentdock/internal/computer"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/envstore"
 	"github.com/uvwt/agentdock/internal/evolution"
@@ -47,6 +48,7 @@ type Runtime struct {
 	files               *toolfile.Service
 	dynamicMCP          *toolmcp.Service
 	media               *toolmedia.Service
+	computer            *computer.Client
 	browser             *toolbrowser.Service
 	browserOwnerMu      sync.RWMutex
 	browserOwners       map[string]browserSessionOwner
@@ -63,6 +65,7 @@ type Runtime struct {
 }
 
 func NewRuntime(cfg config.Config) (*Runtime, error) {
+	cfg.ComputerAvailable = false
 	toolNames, toolValidators, err := compileAvailableToolContracts(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("initialize tool contracts: %w", err)
@@ -141,6 +144,32 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 		}
 		runtime.acp = toolacp.New(manager, ws)
 	}
+	if computer.Supported() {
+		path := cfg.ComputerHelperPath
+		if path == "" {
+			path = computer.BundledHelper()
+		}
+		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
+			if !filepath.IsAbs(path) {
+				_ = runtime.Close()
+				return nil, errors.New("computer helper path must be absolute")
+			}
+			startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			client, startErr := computer.Start(startup, path)
+			cancel()
+			if startErr != nil {
+				fmt.Fprintf(os.Stderr, "computer backend unavailable: %v\n", startErr)
+			} else {
+				runtime.computer = client
+				runtime.cfg.ComputerAvailable = true
+				runtime.toolNames, runtime.toolValidators, err = compileAvailableToolContracts(runtime.cfg)
+				if err != nil {
+					_ = runtime.Close()
+					return nil, err
+				}
+			}
+		}
+	}
 	return runtime, nil
 }
 
@@ -151,9 +180,14 @@ func (r *Runtime) ApplyProjectDeployment(deployment protocol.Deployment) (protoc
 	if r == nil || r.projects == nil {
 		return protocol.Deployment{}, errors.New("Project execution state is not initialized")
 	}
-	// P1 understands policy but does not yet advertise a production native backend.
-	if deployment.Permissions.Computer != protocol.ComputerPermissionNone {
-		return protocol.Deployment{}, toolErrorDetails(protocol.ErrorComputerUnsupported, "native computer backend is not integrated in this Node build", "capability", map[string]any{"required_capability": protocol.ComputerCapability})
+	// 授权不能代替原生后端：只有 IPC 握手成功才接受 computer Deployment。
+	if deployment.Permissions.Computer != protocol.ComputerPermissionNone && r.computer == nil {
+		return protocol.Deployment{}, toolErrorDetails(protocol.ErrorComputerUnsupported, "native computer helper is not available in this Node", "capability", map[string]any{"required_capability": protocol.ComputerCapability})
+	}
+	if r.computer != nil {
+		if old, ok := r.projects.Deployment(deployment.ID); ok && (old.AppliedRevision != deployment.AppliedRevision || old.Enabled != deployment.Enabled || old.Permissions != deployment.Permissions) {
+			r.computer.Revoke(computer.Owner{Deployment: old.ID, Revision: old.AppliedRevision})
+		}
 	}
 	return r.projects.ApplyDeployment(deployment)
 }
@@ -161,6 +195,9 @@ func (r *Runtime) ApplyProjectDeployment(deployment protocol.Deployment) (protoc
 func (r *Runtime) RemoveProjectDeployment(deploymentID string) error {
 	if r == nil || r.projects == nil {
 		return errors.New("Project execution state is not initialized")
+	}
+	if r.computer != nil {
+		r.computer.Revoke(computer.Owner{Deployment: deploymentID})
 	}
 	return r.projects.RemoveDeployment(deploymentID)
 }
@@ -210,12 +247,18 @@ func (r *Runtime) RebindProjectTarget(request protocol.ProjectTargetRebindReques
 func (r *Runtime) RevokeProjectTarget(targetID string) {
 	if r != nil && r.projects != nil {
 		r.projects.RevokeTarget(targetID)
+		if r.computer != nil {
+			r.computer.Revoke(computer.Owner{Target: targetID})
+		}
 	}
 }
 
 func (r *Runtime) RevokeProjectSession(workSessionID string) {
 	if r != nil && r.projects != nil {
 		r.projects.RevokeSession(workSessionID)
+		if r.computer != nil {
+			r.computer.Revoke(computer.Owner{WorkSession: workSessionID})
+		}
 	}
 }
 
@@ -274,6 +317,11 @@ func (r *Runtime) Close() error {
 		}
 		if commandCancel != nil {
 			commandCancel()
+		}
+		if r.computer != nil {
+			if err := r.computer.Close(); err != nil {
+				closeErrors = append(closeErrors, err)
+			}
 		}
 		if r.acp != nil {
 			if err := r.acp.Close(); err != nil {

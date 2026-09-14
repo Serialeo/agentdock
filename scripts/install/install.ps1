@@ -1046,9 +1046,12 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("agentdock-install-" + [Guid]:
 $archivePath = Join-Path $tempRoot $assetName
 $checksumPath = "$archivePath.sha256"
 $destinationBinary = Join-Path $InstallDir 'agentdock.exe'
+$destinationComputerBinary = Join-Path $InstallDir 'agentdock-computer.exe'
 $destinationTrayBinary = Join-Path $InstallDir 'agentdock-tray.exe'
 $destinationTrayIcon = Join-Path $InstallDir 'agentdock.ico'
 $cloudflaredBinary = Join-Path $InstallDir 'cloudflared.exe'
+$computerBackup = Join-Path $tempRoot 'agentdock-computer.exe.previous'
+$computerReplacementStarted = $false
 $binaryBackup = Join-Path $tempRoot 'agentdock.exe.previous'
 $trayBackup = Join-Path $tempRoot 'agentdock-tray.exe.previous'
 $trayIconBackup = Join-Path $tempRoot 'agentdock.ico.previous'
@@ -1212,6 +1215,10 @@ try {
     if (-not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
         throw "Release archive does not contain agentdock.exe: $assetName"
     }
+    $sourceComputerBinary = Join-Path $extractDir 'agentdock-computer.exe'
+    if (-not (Test-Path -LiteralPath $sourceComputerBinary -PathType Leaf)) {
+        throw "Release archive does not contain agentdock-computer.exe: $assetName"
+    }
     $sourceTrayBinary = Join-Path $extractDir 'agentdock-tray.exe'
     $sourceTrayIcon = Join-Path $extractDir 'agentdock.ico'
     $sourceManagerScript = Join-Path $extractDir 'manage-windows.ps1'
@@ -1286,6 +1293,12 @@ try {
 
     $binaryReplacementStarted = $true
     Install-AgentDockBinary -SourceBinary $sourceBinary -DestinationBinary $destinationBinary
+    # Core exit closes its private helper pipe. Install the matching precompiled helper.
+    if (Test-Path -LiteralPath $destinationComputerBinary -PathType Leaf) {
+        Copy-Item -LiteralPath $destinationComputerBinary -Destination $computerBackup -Force
+    }
+    $computerReplacementStarted = $true
+    Install-AgentDockBinary -SourceBinary $sourceComputerBinary -DestinationBinary $destinationComputerBinary
 
     $trayProcessWasRunning = @(Get-AgentDockTrayProcesses -BinaryPath $destinationTrayBinary).Count -gt 0
     $trayStopAttempted = $true
@@ -1685,6 +1698,14 @@ exit `$LASTEXITCODE
             }
             if (-not $cloudflaredBackupExists) {
                 Remove-Item -LiteralPath $cloudflaredBinary -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        if ($computerReplacementStarted) {
+            if (Test-Path -LiteralPath $computerBackup -PathType Leaf) {
+                Copy-Item -LiteralPath $computerBackup -Destination $destinationComputerBinary -Force
+            } else {
+                Remove-Item -LiteralPath $destinationComputerBinary -Force -ErrorAction SilentlyContinue
             }
         }
 

@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/Serialeo/agentdock-protocol/mcpcontract"
+	"github.com/uvwt/agentdock/internal/config"
 	projectstate "github.com/uvwt/agentdock/internal/project"
 	toolcontract "github.com/uvwt/agentdock/internal/tool/contract"
 	"math"
 	"testing"
 )
 
-func TestComputerContractsCompileAndRemainUnpublished(t *testing.T) {
+func TestComputerContractsCompileAndRequireAvailableBackend(t *testing.T) {
 	for _, name := range mcpcontract.ComputerToolNames() {
 		input, ok := mcpcontract.ComputerInputSchema(name)
 		if !ok {
@@ -26,8 +27,9 @@ func TestComputerContractsCompileAndRemainUnpublished(t *testing.T) {
 		if _, err := toolcontract.CompileInputSchema(output); err != nil {
 			t.Fatalf("%s output: %v", name, err)
 		}
-		if _, exists := toolSpecByName(name); exists {
-			t.Fatalf("P1 advertised unfinished native backend: %s", name)
+		spec, exists := toolSpecByName(name)
+		if !exists || spec.available(config.Config{}) || !spec.available(config.Config{ComputerAvailable: true}) {
+			t.Fatalf("computer registration is not gated by helper availability: %s", name)
 		}
 		if mcpcontract.IsCanonicalTool(name) {
 			t.Fatalf("Node-owned tool made canonical: %s", name)
