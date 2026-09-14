@@ -173,3 +173,18 @@ jobs:
 
       - name: Build and verify images
         run: ./scripts/test/test-docker-images.sh
+
+      - name: Checkout paired Bridge smoke
+        uses: actions/checkout@v4
+        with:
+          repository: Serialeo/nexusdock
+          ref: 68e6edaa33fb2d205f06696865f067701df8fc7d
+          path: .ci/nexusdock
+          sparse-checkout: scripts/test/test-private-ghcr-pair.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Verify locally built runtime with NexusDock
+        env:
+          AGENTDOCK_IMAGE: agentdock:test-runtime
+          NEXUS_IMAGE: ghcr.io/serialeo/nexusdock@sha256:dec0123eea9867a604b27489cb7899cf18401d2e213f8397c08fc4f2f83c75f8
+        run: bash .ci/nexusdock/scripts/test/test-private-ghcr-pair.sh

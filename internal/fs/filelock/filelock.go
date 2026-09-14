@@ -18,6 +18,7 @@ import (
 
 const (
 	ownerPrefix       = "owner-"
+	kernelOwnerPrefix = "kernel-owner-"
 	pollDelay         = 25 * time.Millisecond
 	staleAfter        = 10 * time.Minute
 	heartbeatInterval = staleAfter / 3
@@ -26,28 +27,44 @@ const (
 	removeRetryCount  = 50
 )
 
-// Acquire uses an owner-tagged directory as a portable cross-process lock.
-// A stale lock is removed only when its contents have the exact shape created
-// by this package; unknown files are never deleted automatically.
+// Acquire serializes independent callers, including processes sharing a volume.
+// Unix callers also hold a persistent path + ".flock" file. Do not unlink that
+// file while callers may be active: all contenders must lock the same inode.
 func Acquire(ctx context.Context, path string) (func(), error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("file lock path is required")
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create file lock parent: %w", err)
+	}
+	return acquirePlatform(ctx, path)
+}
+
+// kernelProtected requires exclusive ownership of the persistent sidecar flock.
+func acquireDirectoryLock(ctx context.Context, path string, kernelProtected bool) (func(), error) {
 	owner, err := newOwner()
 	if err != nil {
 		return nil, fmt.Errorf("create file lock owner: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create file lock parent: %w", err)
+	ownerData := strconv.Itoa(os.Getpid()) + "\n"
+	ownerName := ownerPrefix + owner
+	if kernelProtected {
+		// 文件名区分内核锁，创建后的空标记也可安全恢复，不依赖写入内容完成。
+		// 旧版不认识该前缀，会保留占用，不能绕过新版本的内核锁。
+		ownerName = kernelOwnerPrefix + owner
+		ownerData = ""
 	}
 
 	ticker := time.NewTicker(pollDelay)
 	defer ticker.Stop()
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("acquire file lock %s: %w", path, err)
+		}
 		err := os.Mkdir(path, 0o700)
 		if err == nil {
-			ownerPath := filepath.Join(path, ownerPrefix+owner)
-			if err := os.WriteFile(ownerPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+			ownerPath := filepath.Join(path, ownerName)
+			if err := os.WriteFile(ownerPath, []byte(ownerData), 0o600); err != nil {
 				cleanupErr := cleanupInitialization(path, ownerPath)
 				// 竞争者可能刚好清理了一个没有 owner 的残留目录；重新抢锁即可。
 				if errors.Is(err, os.ErrNotExist) && cleanupErr == nil {
@@ -60,14 +77,14 @@ func Acquire(ctx context.Context, path string) (func(), error) {
 			return func() {
 				releaseOnce.Do(func() {
 					stopHeartbeat()
-					release(path, owner)
+					release(path, ownerName)
 				})
 			}, nil
 		}
 		if !retryableLockCreationError(err) {
 			return nil, fmt.Errorf("acquire file lock %s: %w", path, err)
 		}
-		if removeSafeStale(path, time.Now()) {
+		if removeSafeStale(path, time.Now(), kernelProtected) {
 			continue
 		}
 		select {
@@ -124,8 +141,8 @@ func cleanupInitialization(lockPath, ownerPath string) error {
 	return errors.Join(cleanupErrors...)
 }
 
-func release(lockPath, owner string) {
-	ownerPath := filepath.Join(lockPath, ownerPrefix+owner)
+func release(lockPath, ownerName string) {
+	ownerPath := filepath.Join(lockPath, ownerName)
 	if err := os.Remove(ownerPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("remove file lock owner failed", "path", ownerPath, "error", err)
@@ -137,7 +154,7 @@ func release(lockPath, owner string) {
 	}
 }
 
-func removeSafeStale(lockPath string, now time.Time) bool {
+func removeSafeStale(lockPath string, now time.Time, kernelProtected bool) bool {
 	entries, err := os.ReadDir(lockPath)
 	if err != nil {
 		return errors.Is(err, os.ErrNotExist)
@@ -153,13 +170,19 @@ func removeSafeStale(lockPath string, now time.Time) bool {
 		}
 		return removeLockDirectory(lockPath)
 	}
-	if len(entries) != 1 || entries[0].IsDir() || !validOwnerName(entries[0].Name()) {
+	if len(entries) != 1 || !entries[0].Type().IsRegular() {
+		return false
+	}
+	name := entries[0].Name()
+	kernelMarker := kernelProtected && validOwnerName(name, kernelOwnerPrefix)
+	if !kernelMarker && !validOwnerName(name, ownerPrefix) {
 		return false
 	}
 	ownerPath := filepath.Join(lockPath, entries[0].Name())
-	// 强制退出不会执行 release。已确认 owner 进程结束时必须立即回收，
-	// 否则正常升级/重启也会被新鲜的遗留锁阻塞十分钟；活进程和未知 PID 仍受保护。
-	if ownerPIDAlive(ownerPath) {
+	// 强制退出不会执行 release；Unix 用已持有的内核锁确认新格式 owner 已退出，
+	// Windows 查询 PID。未知内容以及 Unix 上的旧 PID 标记始终受保护。
+	if !kernelMarker && (kernelProtected || ownerPIDAlive(ownerPath)) {
+		// 旧 PID 不包含命名空间身份，Unix 不能依据当前容器的 PID 表删除它。
 		return false
 	}
 	if err := os.Remove(ownerPath); err != nil {
@@ -185,8 +208,8 @@ func ownerPIDAlive(ownerPath string) bool {
 	return processAlive(pid)
 }
 
-func validOwnerName(name string) bool {
-	raw := strings.TrimPrefix(name, ownerPrefix)
+func validOwnerName(name, prefix string) bool {
+	raw := strings.TrimPrefix(name, prefix)
 	if raw == name || len(raw) != 32 {
 		return false
 	}

@@ -95,7 +95,7 @@ func TestAcquireDoesNotStealActiveLockWhenDirectoryTimestampIsOld(t *testing.T) 
 	}
 }
 
-func TestAcquireRecoversStaleLockOwnedByDeadProcess(t *testing.T) {
+func TestDirectoryLockRecoversStaleLockOwnedByDeadProcess(t *testing.T) {
 	for _, age := range []time.Duration{0, staleAfter + time.Minute} {
 		t.Run(age.String(), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.lock")
@@ -116,7 +116,7 @@ func TestAcquireRecoversStaleLockOwnedByDeadProcess(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
-			release, err := Acquire(ctx, path)
+			release, err := acquireDirectoryLock(ctx, path, false)
 			if err != nil {
 				t.Fatal(err)
 			}

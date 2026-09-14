@@ -14,11 +14,15 @@ max_dev_bytes="${AGENTDOCK_TEST_MAX_DEV_BYTES:-1100000000}"
 max_browser_bytes="${AGENTDOCK_TEST_MAX_BROWSER_BYTES:-1600000000}"
 
 runtime_container=""
+contender_container=""
 browser_container=""
 test_volume=""
 work_dir="$(mktemp -d)"
 
 cleanup() {
+  if [[ -n "$contender_container" ]]; then
+    docker rm -f "$contender_container" >/dev/null 2>&1 || true
+  fi
   if [[ -n "$runtime_container" ]]; then
     docker rm -f "$runtime_container" >/dev/null 2>&1 || true
   fi
@@ -168,10 +172,8 @@ docker run --rm -v "$test_volume:/home/agentdock/.agentdock" "$runtime_image" sh
   test "$(stat -c %u "$HOME/.agentdock/write-test")" = "10001"
   test "$(stat -c %g "$HOME/.agentdock/write-test")" = "10001"
 '
-docker volume rm -f "$test_volume" >/dev/null
-test_volume=""
-
 runtime_container="$(docker run -d --rm -p 127.0.0.1::8765 \
+  -v "$test_volume:/home/agentdock/.agentdock" \
   -e AGENTDOCK_AUTH_TOKEN=runtime-health-value \
   -e AGENTDOCK_ACP_ARGS_JSON=invalid-json "$runtime_image")"
 wait_for_healthy "$runtime_container" runtime
@@ -188,8 +190,39 @@ docker exec "$runtime_container" sh -c '
     test -f "$HOME/.agentdock/skill-store/installed/$skill/$version/SKILL.md"
   done
 '
+
+# 两个 PID 命名空间共享 home 时必须互斥，不能把另一个容器的 owner 当作死进程。
+contender_container="$(docker run -d \
+  -v "$test_volume:/home/agentdock/.agentdock" \
+  -e AGENTDOCK_AUTH_TOKEN=runtime-health-value "$runtime_image")"
+contender_exit="$(timeout 15s docker wait "$contender_container")"
+test "$contender_exit" != 0
+docker logs "$contender_container" >"$work_dir/contender.log" 2>&1
+grep -q 'AgentDock home is already in use or unavailable' "$work_dir/contender.log"
+docker rm "$contender_container" >/dev/null
+contender_container=""
+docker exec "$runtime_container" agentdock-healthcheck
+
+# 强杀后复用同一个 home 卷；新容器通常复用 core PID，不能再依赖 kill(pid, 0)。
+first_core_pid="$(docker exec "$runtime_container" sh -c 'cat /proc/1/task/1/children')"
 docker rm -f "$runtime_container" >/dev/null
 runtime_container=""
+runtime_container="$(docker run -d --rm -p 127.0.0.1::8765 \
+  -v "$test_volume:/home/agentdock/.agentdock" \
+  -e AGENTDOCK_AUTH_TOKEN=runtime-health-value "$runtime_image")"
+wait_for_healthy "$runtime_container" runtime-recreated
+recreated_core_pid="$(docker exec "$runtime_container" sh -c 'cat /proc/1/task/1/children')"
+printf 'Core PID before/after forced recreation: %s / %s\n' "$first_core_pid" "$recreated_core_pid"
+test "$first_core_pid" = "$recreated_core_pid"
+docker exec "$runtime_container" sh -c 'test -f "$HOME/.agentdock/write-test"'
+runtime_port="$(docker port "$runtime_container" 8765/tcp | awk -F: 'NR == 1 {print $NF}')"
+AGENTDOCK_SMOKE_URL="http://127.0.0.1:$runtime_port" \
+AGENTDOCK_AUTH_TOKEN=runtime-health-value \
+  ./packaging/docker/smoke-docker.sh
+docker rm -f "$runtime_container" >/dev/null
+runtime_container=""
+docker volume rm -f "$test_volume" >/dev/null
+test_volume=""
 
 test "$(docker run --rm "$dev_image" id -u)" = "10001"
 test "$(docker run --rm "$dev_image" id -g)" = "10001"

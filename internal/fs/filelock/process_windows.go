@@ -3,6 +3,7 @@
 package filelock
 
 import (
+	"context"
 	"errors"
 	"os"
 
@@ -10,6 +11,10 @@ import (
 )
 
 const stillActiveExitCode = 259
+
+func acquirePlatform(ctx context.Context, path string) (func(), error) {
+	return acquireDirectoryLock(ctx, path, false)
+}
 
 func openOwnerFile(path string) (*os.File, error) {
 	name, err := windows.UTF16PtrFromString(path)
