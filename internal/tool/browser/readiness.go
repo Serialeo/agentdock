@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// CheckReady probes configuration without opening a page or restoring any session.
+// CheckReady probes the default backend only; per-call CDP endpoints are validated by start.
 // Local browsers are launched only by browser_session; remote CDP must answer a read-only handshake.
 func (s *Service) CheckReady(ctx context.Context) error {
 	endpoint, _, err := s.resolveCDPConnection(ctx, StartRequest{})
@@ -25,7 +25,8 @@ func (s *Service) CheckReady(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	connection, response, err := websocket.DefaultDialer.DialContext(ctx, endpoint, nil)
+	dialer := websocket.Dialer{Proxy: nil, HandshakeTimeout: 5 * time.Second}
+	connection, response, err := dialer.DialContext(ctx, endpoint, nil)
 	if err != nil {
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
@@ -33,6 +34,7 @@ func (s *Service) CheckReady(ctx context.Context) error {
 		return fmt.Errorf("CDP backend is not reachable: %w", err)
 	}
 	defer connection.Close()
+	connection.SetReadLimit(64 << 10)
 	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
 	defer stop()
 	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))

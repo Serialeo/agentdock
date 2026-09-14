@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/uvwt/agentdock/internal/fs/filelock"
+	"path/filepath"
 	"time"
 )
 
@@ -37,6 +39,13 @@ func Serve(ctx context.Context, runtimeRoot string, handler Handler) error {
 	if handler == nil {
 		return errors.New("desktop control handler is required")
 	}
+	lockCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	release, err := filelock.Acquire(lockCtx, filepath.Join(runtimeRoot, "control.lock"))
+	cancel()
+	if err != nil {
+		return fmt.Errorf("control endpoint already owned or unavailable: %w", err)
+	}
+	defer release()
 	return servePlatform(ctx, runtimeRoot, func(requestData []byte) []byte {
 		return handleMessage(ctx, requestData, handler)
 	})

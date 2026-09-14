@@ -1,6 +1,7 @@
 package nexusbridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,15 +56,17 @@ type commandOutcomeAPI interface {
 }
 
 type Client struct {
-	identity  Identity
-	node      NodeAPI
-	runtime   runtimeapi.Runtime
-	artifacts publicartifacts.Store
-	state     *ConnectionState
-	invokeWG  sync.WaitGroup
-	writeMu   sync.Mutex
-	cancelMu  sync.Mutex
-	cancels   map[string]context.CancelFunc
+	lastSnapshotSocket *websocket.Conn
+	lastSnapshot       []byte
+	identity           Identity
+	node               NodeAPI
+	runtime            runtimeapi.Runtime
+	artifacts          publicartifacts.Store
+	state              *ConnectionState
+	invokeWG           sync.WaitGroup
+	writeMu            sync.Mutex
+	cancelMu           sync.Mutex
+	cancels            map[string]context.CancelFunc
 }
 
 func NewClient(identity Identity, node NodeAPI, runtime runtimeapi.Runtime, artifacts publicartifacts.Store, state *ConnectionState) *Client {
@@ -466,5 +469,16 @@ func (c *Client) writeSnapshot(socket *websocket.Conn) error {
 		return err
 	}
 	_ = socket.SetWriteDeadline(time.Now().Add(15 * time.Second))
-	return socket.WriteJSON(protocol.Message{Type: protocol.MessageNodeUpdated, ProtocolVersion: protocol.ConnectionProtocolVersion, Hello: snapshot})
+	data, err := json.Marshal(protocol.Message{Type: protocol.MessageNodeUpdated, ProtocolVersion: protocol.ConnectionProtocolVersion, Hello: snapshot})
+	if err != nil {
+		return err
+	}
+	if c.lastSnapshotSocket == socket && bytes.Equal(c.lastSnapshot, data) {
+		return nil
+	}
+	if err := socket.WriteMessage(websocket.TextMessage, data); err != nil {
+		return err
+	}
+	c.lastSnapshotSocket, c.lastSnapshot = socket, data
+	return nil
 }

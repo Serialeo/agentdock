@@ -63,3 +63,31 @@ func TestUnixRoundTrip(t *testing.T) {
 		t.Fatal("IPC server did not stop after cancellation")
 	}
 }
+
+func TestSecondServerCannotTakeOverEndpoint(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, root, func(context.Context, Request) (any, error) { return "original", nil })
+	}()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var value string
+		if Call(ctx, root, "ping", nil, &value) == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("not ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := Serve(ctx, root, func(context.Context, Request) (any, error) { return "replacement", nil }); err == nil {
+		t.Fatal("duplicate owner accepted")
+	}
+	var value string
+	if err := Call(ctx, root, "ping", nil, &value); err != nil || value != "original" {
+		t.Fatalf("original endpoint lost: %q %v", value, err)
+	}
+}

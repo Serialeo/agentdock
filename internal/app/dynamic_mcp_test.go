@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
@@ -82,7 +83,13 @@ func TestDynamicMCPToolsStaySeparateAndAppearLightweightInContext(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	projectCtx := projectContextForTest(t, runtime, cfg.AgentDockDefaultDir, fullProjectPermissionsForTest())
+	for _, group := range []string{"browser", "acp"} {
+		setBuiltinTest(t, runtime, group, false)
+		if stateBuiltinTest(runtime, group).Available {
+			t.Fatalf("%s still enabled", group)
+		}
+	}
+	projectCtx := projectContextForTest(t, runtime, cfg.AgentDockDefaultDir, protocol.DeploymentPermissions{Files: protocol.FileCapabilityNone, DynamicMCP: true})
 
 	added, err := runtime.Call(projectCtx, "mcp_manage", map[string]any{
 		"action":      "add",
@@ -171,6 +178,18 @@ func TestDynamicMCPToolsStaySeparateAndAppearLightweightInContext(t *testing.T) 
 	}
 	assertToolResultMatchestestOutputSchema(t, "mcp_tool_call", called)
 
+	denied := projectContextForTest(t, runtime, cfg.AgentDockDefaultDir, protocol.DeploymentPermissions{Files: protocol.FileCapabilityNone})
+	for _, name := range []string{"mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call"} {
+		args := map[string]any{"name": "demo:echo", "arguments": map[string]any{"text": "denied"}}
+		if name == "mcp_tool_search" {
+			args = map[string]any{"server": "demo", "query": "echo"}
+		}
+		if name == "mcp_tool_inspect" {
+			args = map[string]any{"name": "demo:echo"}
+		}
+		_, err := runtime.Call(denied, name, args)
+		requireAppToolErrorCode(t, err, protocol.ErrorCapabilityDenied)
+	}
 	for _, name := range runtime.ToolNames() {
 		if name == "demo:echo" {
 			t.Fatal("dynamic upstream tool leaked into AgentDock built-in tools/list")

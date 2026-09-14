@@ -684,7 +684,10 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     }
 
     private func setBusy(_ busy: Bool) {
-        if busy { settingsTicket = requests.beginChange() }
+        if busy {
+            settingsTicket = requests.beginChange()
+            builtinSnapshot = nil
+        }
         else if let ticket = settingsTicket { requests.endChange(ticket); settingsTicket = nil }
         updateBusyControls()
         if !busy { Task { await refreshBuiltins() } }

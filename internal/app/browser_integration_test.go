@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
@@ -103,7 +105,10 @@ func TestBrowserIntegrationCloseAfterWaitsForArtifactPublication(t *testing.T) {
 	if !ok || screenshot["artifact_id"] == "" {
 		t.Fatalf("browser_act screenshot artifact = %#v", result["screenshot"])
 	}
-	afterClose, err := runtime.Call(context.Background(), "browser_snapshot", map[string]any{"session_id": sessionID, "timeout_ms": 1000})
+	_, err := runtime.Call(context.Background(), "browser_snapshot", map[string]any{"session_id": sessionID, "timeout_ms": 1000})
+	requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
+	// Verify backend cleanup as well as the public admission fence.
+	afterClose, err := runtime.browser.HandleSnapshot(context.Background(), map[string]any{"session_id": sessionID, "timeout_ms": 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,5 +158,51 @@ func TestBrowserIntegrationRuntimeCloseClosesBrowserService(t *testing.T) {
 	}
 	if afterClose["browser_ok"] != false || afterClose["code"] != "SESSION_NOT_FOUND" {
 		t.Fatalf("runtime close left browser session addressable: %#v", afterClose)
+	}
+}
+
+func TestPerCallCDPWorksWithoutHealthyDefaultBackend(t *testing.T) {
+	executable := os.Getenv("AGENTDOCK_BROWSER_EXECUTABLE_PATH")
+	if executable == "" {
+		t.Fatal("integration browser required")
+	}
+	profile := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	command := exec.CommandContext(ctx, executable, "--headless", "--no-sandbox", "--remote-debugging-port=0", "--user-data-dir="+profile, "about:blank")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = command.Wait() }()
+	var endpoint string
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if err == nil && len(lines) >= 2 {
+			endpoint = "ws://127.0.0.1:" + lines[0] + lines[1]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if endpoint == "" {
+		t.Fatal("CDP startup timed out")
+	}
+	for _, badDefault := range []string{"", "http://127.0.0.1:1"} {
+		t.Run(badDefault, func(t *testing.T) {
+			cfg := config.Config{AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(), Builtins: builtin.Choices{Browser: true}, BrowserExecutablePath: "/missing/browser", BrowserCDPURL: badDefault}
+			r, err := NewRuntime(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			result, err := r.Call(t.Context(), "browser_session", map[string]any{"action": "start", "cdp_url": endpoint, "timeout_ms": 15000})
+			if err != nil || result["browser_ok"] != true {
+				t.Fatalf("per-call CDP: %v %#v", err, result)
+			}
+			setBuiltinTest(t, r, "browser", false)
+			_, err = r.Call(t.Context(), "browser_session", map[string]any{"action": "start", "cdp_url": endpoint})
+			requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
+		})
 	}
 }

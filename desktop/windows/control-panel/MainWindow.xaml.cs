@@ -10,6 +10,7 @@ using Clipboard = System.Windows.Clipboard;
 using Color = System.Windows.Media.Color;
 using MessageBox = System.Windows.MessageBox;
 using Forms = System.Windows.Forms;
+using CheckBox = System.Windows.Controls.CheckBox;
 
 namespace AgentDock.ControlPanel;
 

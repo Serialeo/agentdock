@@ -27,7 +27,7 @@ type builtinGroup struct {
 // builtinManager 串行化配置写入和后端替换；mu 只保护快照与调用准入，不跨后端等待。
 // 每次启用创建新的取消域，关闭后旧请求与旧任务不能进入下一代后端。
 type builtinManager struct {
-	updateMu     sync.Mutex
+	updates      chan struct{}
 	mu           sync.Mutex
 	groups       map[string]*builtinGroup
 	choices      builtin.Choices
@@ -41,7 +41,8 @@ func (r *Runtime) initBuiltins() error {
 	if err != nil {
 		return err
 	}
-	r.builtins = &builtinManager{choices: choices, groups: map[string]*builtinGroup{}, listeners: map[int]func(){}}
+	r.builtins = &builtinManager{updates: make(chan struct{}, 1), choices: choices, groups: map[string]*builtinGroup{}, listeners: map[int]func(){}}
+	r.builtins.updates <- struct{}{}
 	for _, id := range []string{"browser", "acp"} {
 		provided := config.BuiltinProvided(id)
 		enabled := choices.Browser
@@ -69,16 +70,17 @@ func (r *Runtime) initBuiltins() error {
 func (r *Runtime) startBuiltin(g *builtinGroup) {
 	g.ctx, g.cancel = context.WithCancel(context.Background())
 	var err error
+	var warning string
 	switch g.state.ID {
 	case "browser":
 		service := toolbrowser.New(toolbrowser.Config{AgentDockHome: r.cfg.AgentDockHome, ExecutablePath: r.cfg.BrowserExecutablePath, CDPURL: r.cfg.BrowserCDPURL, ReuseExistingCDP: r.cfg.BrowserReuseExistingCDP}, r.media.PublishBrowserScreenshot)
 		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
-		err = service.CheckReady(ctx)
+		defaultErr := service.CheckReady(ctx)
 		cancel()
-		if err == nil {
-			r.browser = service
-		} else {
-			_ = service.Close()
+		// 服务可接收按调用指定的 CDP；默认后端故障不能撤下这条公开入口。
+		r.browser = service
+		if defaultErr != nil {
+			warning = "默认浏览器后端不可用，可在启动会话时指定 cdp_url: " + defaultErr.Error()
 		}
 	case "acp":
 		cfg := r.cfg
@@ -114,17 +116,21 @@ func (r *Runtime) startBuiltin(g *builtinGroup) {
 		}
 	}
 	g.state.Ready = err == nil
-	g.state.Reason = ""
+	g.state.Reason = warning
 	if err != nil {
 		g.state.Reason = err.Error()
 		g.cancel()
 	}
 }
 
+func groupAvailable(g *builtinGroup) bool {
+	return g != nil && g.state.Provided && g.state.Enabled && g.state.Ready && !g.state.Transitioning
+}
+
 func builtinState(g *builtinGroup) protocol.BuiltinCapability {
 	state := g.state
 	state.Tools = append([]string{}, state.Tools...)
-	state.Available = state.Provided && state.Enabled && state.Ready && !state.Transitioning
+	state.Available = groupAvailable(g)
 	switch {
 	case !state.Provided:
 		state.Reason = "当前发行包不提供此能力"
@@ -146,7 +152,9 @@ func (r *Runtime) BuiltinCapabilities() []protocol.BuiltinCapability {
 	defer r.builtins.mu.Unlock()
 	states := make([]protocol.BuiltinCapability, 0, 2)
 	for _, id := range []string{"browser", "acp"} {
-		states = append(states, builtinState(r.builtins.groups[id]))
+		state := builtinState(r.builtins.groups[id])
+		state.Available = state.Available && !r.builtins.closed
+		states = append(states, state)
 	}
 	return states
 }
@@ -161,7 +169,7 @@ func (r *Runtime) builtinAvailable(id string) bool {
 	r.builtins.mu.Lock()
 	defer r.builtins.mu.Unlock()
 	g := r.builtins.groups[id]
-	return g != nil && builtinState(g).Available && !r.builtins.closed
+	return g != nil && groupAvailable(g) && !r.builtins.closed
 }
 
 func (r *Runtime) enterBuiltin(ctx context.Context, id string) (context.Context, func(), error) {
@@ -174,7 +182,7 @@ func (r *Runtime) enterBuiltin(ctx context.Context, id string) (context.Context,
 	}
 	m.mu.Lock()
 	g := m.groups[id]
-	if g == nil || !builtinState(g).Available || m.closed {
+	if g == nil || !groupAvailable(g) || m.closed {
 		reason := "built-in capability is unavailable"
 		if g != nil {
 			reason = builtinState(g).Reason
@@ -213,10 +221,42 @@ func (r *Runtime) notifyBuiltinChange() {
 	}
 }
 
+func (m *builtinManager) lockUpdates(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.updates:
+		return nil
+	}
+}
+func (m *builtinManager) unlockUpdates() { m.updates <- struct{}{} }
+
+// 已持久化的操作负责完成清理；请求超时只结束等待，不能提前替换仍被旧调用使用的后端。
 func (r *Runtime) SetBuiltin(ctx context.Context, update protocol.BuiltinUpdate) (Result, error) {
 	m := r.builtins
-	m.updateMu.Lock()
-	defer m.updateMu.Unlock()
+	if err := m.lockUpdates(ctx); err != nil {
+		return nil, err
+	}
+	type outcome struct {
+		result Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		defer m.unlockUpdates()
+		result, err := r.setBuiltin(ctx, update)
+		done <- outcome{result, err}
+	}()
+	select {
+	case value := <-done:
+		return value.result, value.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r *Runtime) setBuiltin(ctx context.Context, update protocol.BuiltinUpdate) (Result, error) {
+	m := r.builtins
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -234,7 +274,7 @@ func (r *Runtime) SetBuiltin(ctx context.Context, update protocol.BuiltinUpdate)
 		m.mu.Unlock()
 		return nil, toolError("CAPABILITY_NOT_PROVIDED", "当前发行包不提供此能力", "capability")
 	}
-	if g.state.Enabled == *update.Enabled && (!*update.Enabled || g.state.Ready) && !g.state.Transitioning && g.state.Reason == "" {
+	if g.state.Enabled == *update.Enabled && ((*update.Enabled && g.state.Ready) || (!*update.Enabled && g.state.Reason == "")) && !g.state.Transitioning {
 		m.mu.Unlock()
 		return r.RuntimeBuiltins(), nil
 	}
@@ -265,10 +305,13 @@ func (r *Runtime) SetBuiltin(ctx context.Context, update protocol.BuiltinUpdate)
 	g.calls.Wait()
 	m.mu.Lock()
 	g.state.Reason = ""
+	closing := m.closed
 	m.mu.Unlock()
-	if *update.Enabled && closeErr == nil {
+	if *update.Enabled && closeErr == nil && !closing {
 		// startBuiltin 只写本组工作副本，快照读取在整个启动期间仍显示 transitioning。
+		m.mu.Lock()
 		next := &builtinGroup{state: g.state}
+		m.mu.Unlock()
 		r.startBuiltin(next)
 		m.mu.Lock()
 		g.done = next.done
@@ -281,6 +324,13 @@ func (r *Runtime) SetBuiltin(ctx context.Context, update protocol.BuiltinUpdate)
 	g.state.Transitioning = false
 	if closeErr != nil {
 		g.state.Reason = fmt.Sprintf("后端清理失败: %v", closeErr)
+	}
+	if m.closed {
+		g.state.Ready = false
+		g.state.Reason = "AgentDock 正在关闭"
+		if g.cancel != nil {
+			g.cancel()
+		}
 	}
 	m.mu.Unlock()
 	r.notifyBuiltinChange()
@@ -307,17 +357,18 @@ func (r *Runtime) closeBuiltins() error {
 		return nil
 	}
 	m := r.builtins
-	m.updateMu.Lock()
-	defer m.updateMu.Unlock()
 	m.mu.Lock()
 	m.closed = true
 	for _, g := range m.groups {
 		g.state.Ready = false
+		g.state.Reason = "AgentDock 正在关闭"
 		if g.cancel != nil {
 			g.cancel()
 		}
 	}
 	m.mu.Unlock()
+	_ = m.lockUpdates(context.Background())
+	defer m.unlockUpdates()
 	var errs []error
 	for _, g := range m.groups {
 		errs = append(errs, r.stopBuiltin(g, "agentdock_shutdown"))
@@ -332,38 +383,39 @@ func (r *Runtime) RuntimeBuiltins() Result {
 
 // CatalogSnapshot prevents a switch from splitting tool names, descriptors and capability states across generations.
 func (r *Runtime) CatalogSnapshot() ([]ToolDefinition, []protocol.BuiltinCapability) {
-	m := r.builtins
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	states := r.BuiltinCapabilities()
+	allowed := make(map[string]bool, len(states))
+	for _, state := range states {
+		allowed[state.ID] = state.Available
+	}
 	definitions := make([]ToolDefinition, 0, len(r.toolNames))
 	for _, name := range r.toolNames {
 		spec, _ := toolSpecByName(name)
-		if spec.Group != "" && (!builtinState(m.groups[spec.Group]).Available || m.closed) {
+		if spec.Group != "" && !allowed[spec.Group] {
 			continue
 		}
-		definitions = append(definitions, spec.definition(r.cfg))
-	}
-	states := make([]protocol.BuiltinCapability, 0, 2)
-	for _, id := range []string{"browser", "acp"} {
-		states = append(states, builtinState(m.groups[id]))
+		definitions = append(definitions, cloneToolDefinition(r.toolDefinitions[name]))
 	}
 	return definitions, states
 }
 
 func (r *Runtime) watchBuiltin(g *builtinGroup) {
-	if g.done == nil || !g.state.Ready {
+	m := r.builtins
+	m.mu.Lock()
+	if m.closed || g.done == nil || !g.state.Ready {
+		m.mu.Unlock()
 		return
 	}
 	generation, done := g.ctx, g.done
+	m.mu.Unlock()
 	go func() {
 		select {
 		case <-generation.Done():
 			return
 		case <-done:
 		}
-		m := r.builtins
-		m.updateMu.Lock()
-		defer m.updateMu.Unlock()
+		_ = m.lockUpdates(context.Background())
+		defer m.unlockUpdates()
 		m.mu.Lock()
 		if m.closed || g.ctx != generation || generation.Err() != nil {
 			m.mu.Unlock()

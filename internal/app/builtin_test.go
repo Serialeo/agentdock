@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 	toolacp "github.com/uvwt/agentdock/internal/tool/acp"
 )
 
-func builtinTestRuntime(t *testing.T) (*Runtime, config.Config) {
+func builtinTestRuntime(t testing.TB) (*Runtime, config.Config) {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
@@ -130,7 +131,7 @@ func TestBuiltinMissingBackendDoesNotDisableCoreTools(t *testing.T) {
 	defer r.Close()
 	for _, id := range []string{"browser", "acp"} {
 		s := stateBuiltinTest(r, id)
-		if !s.Enabled || s.Ready || s.Available || s.Reason == "" {
+		if !s.Enabled || s.Ready != (id == "browser") || s.Available != (id == "browser") || s.Reason == "" {
 			t.Fatalf("%s state=%+v", id, s)
 		}
 	}
@@ -224,4 +225,84 @@ func TestBuiltinDisableInterruptsDetachedACPAndRetainsOutcome(t *testing.T) {
 	if record.LastStopReason != "capability_disabled" || record.Status == acpruntime.SessionRunning {
 		t.Fatalf("outcome not preserved: %#v", record)
 	}
+}
+
+func TestBuiltinDeadlineLeavesCleanupTransitioningAndShutdownFenced(t *testing.T) {
+	r, _ := builtinTestRuntime(t)
+	_, release, err := r.enterBuiltin(t.Context(), "browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	defer cancel()
+	no := false
+	if _, err = r.SetBuiltin(ctx, protocol.BuiltinUpdate{ID: "browser", Enabled: &no}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("deadline=%v", err)
+	}
+	if state := stateBuiltinTest(r, "browser"); !state.Transitioning || state.Available {
+		t.Fatalf("state=%+v", state)
+	}
+	other, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer stop()
+	if _, err = r.SetBuiltin(other, protocol.BuiltinUpdate{ID: "acp", Enabled: &no}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued request=%v", err)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- r.Close() }()
+	select {
+	case <-closed:
+		t.Fatal("closed before admitted handler drained")
+	case <-time.After(20 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown failed to drain")
+	}
+}
+
+func TestToolDefinitionSnapshotsDoNotShareMutableContracts(t *testing.T) {
+	r, _ := builtinTestRuntime(t)
+	first, _ := r.ToolDefinition("browser_session")
+	first.InputSchema["properties"].(map[string]any)["action"] = "mutated"
+	first.Annotations.Title = "mutated"
+	second, _ := r.ToolDefinition("browser_session")
+	if second.InputSchema["properties"].(map[string]any)["action"] == "mutated" || second.Annotations.Title == "mutated" {
+		t.Fatal("caller mutated cached contract")
+	}
+}
+
+func BenchmarkBuiltinToolNames(b *testing.B) {
+	r, _ := builtinTestRuntime(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = r.ToolNames()
+	}
+}
+func BenchmarkBuiltinCatalogSnapshot(b *testing.B) {
+	r, _ := builtinTestRuntime(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = r.CatalogSnapshot()
+	}
+}
+func BenchmarkBuiltinConcurrentAdmission(b *testing.B) {
+	r, _ := builtinTestRuntime(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, release, err := r.enterBuiltin(context.Background(), "browser")
+			if err != nil {
+				b.Fatal(err)
+			}
+			release()
+		}
+	})
 }

@@ -50,6 +50,7 @@ struct InstallerConfigurationTests {
         # preserved comment
         AGENTDOCK_PORT=8765
         AGENTDOCK_AUTH_TOKEN='secret-token'
+        AGENTDOCK_ACP_ENV_FROM_ENV_JSON='{"API_KEY":"CUSTOM_ADAPTER_API_KEY"}'
         AGENTDOCK_NEXUS_ENDPOINT=https://nexus.example.com
         AGENTDOCK_NEXUS_TOKEN=obsolete-secret
         AGENTDOCK_PORT=9999
@@ -70,6 +71,7 @@ struct InstallerConfigurationTests {
         precondition(updatedValues["AGENTDOCK_PORT"] == "8877")
         precondition(updatedValues["AGENTDOCK_AUTH_TOKEN"] == "secret-token")
         precondition(updatedValues["AGENTDOCK_LOG_LEVEL"] == "debug")
+        precondition(updatedValues["AGENTDOCK_ACP_ENV_FROM_ENV_JSON"] == #"{"API_KEY":"CUSTOM_ADAPTER_API_KEY"}"#)
         precondition(updatedValues["AGENTDOCK_NEXUS_ENDPOINT"] == nil)
         precondition(updatedValues["AGENTDOCK_NEXUS_TOKEN"] == nil)
         precondition(updatedValues["AGENTDOCK_BROWSER_CDP_URL"] == "http://127.0.0.1:9222")
@@ -102,6 +104,7 @@ struct InstallerConfigurationTests {
         ], removing: ServiceConfiguration.removableLegacyKeys)
         let acpValues = ManagedEnvironment.parseValues(String(decoding: acpEnvironmentData, as: UTF8.self))
         precondition(acpValues["AGENTDOCK_ACP_AGENT"] == "grok")
+        precondition(acpValues["AGENTDOCK_ACP_ENV_FROM_ENV_JSON"] == #"{"API_KEY":"CUSTOM_ADAPTER_API_KEY"}"#)
         precondition(acpValues["AGENTDOCK_ACP_ARGS_JSON"] == "[\"agent\",\"stdio\"]")
         precondition(acpValues["AGENTDOCK_ACP_ALLOWED_ROOTS"] == nil)
         precondition(ACPAgentPreset.grok.arguments == ["agent", "stdio"])

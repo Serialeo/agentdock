@@ -177,3 +177,35 @@ func canonicalToolAnnotations(value mcpcontract.Annotations) *ToolAnnotations {
 func ctxToolHandler(fn func(*Runtime, context.Context, map[string]any) (Result, error)) ToolHandler {
 	return func(ctx context.Context, r *Runtime, args map[string]any) (Result, error) { return fn(r, ctx, args) }
 }
+
+// Cached contracts are normalized JSON trees. Callers always receive owned mutable copies.
+func cloneToolDefinition(def ToolDefinition) ToolDefinition {
+	def.InputSchema = cloneContractValue(def.InputSchema).(map[string]any)
+	def.OutputSchema = cloneContractValue(def.OutputSchema).(map[string]any)
+	def.FileArgRewritePaths = append([]string(nil), def.FileArgRewritePaths...)
+	def.FileResultRewritePaths = append([]string(nil), def.FileResultRewritePaths...)
+	def.Annotations = cloneToolAnnotations(def.Annotations)
+	if def.UIBinding != nil {
+		binding := *def.UIBinding
+		def.UIBinding = &binding
+	}
+	return def
+}
+func cloneContractValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(value))
+		for key, item := range value {
+			result[key] = cloneContractValue(item)
+		}
+		return result
+	case []any:
+		result := make([]any, len(value))
+		for i, item := range value {
+			result[i] = cloneContractValue(item)
+		}
+		return result
+	default:
+		return value
+	}
+}

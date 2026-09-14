@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -35,6 +36,7 @@ type Result = toolcore.Result
 type Runtime struct {
 	builtins            *builtinManager
 	cfg                 config.Config
+	toolDefinitions     map[string]ToolDefinition
 	toolNames           []string
 	toolValidators      map[string]*toolcontract.InputValidator
 	ws                  *workspace.Workspace
@@ -65,6 +67,18 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize tool contracts: %w", err)
 	}
+	definitions := make(map[string]ToolDefinition, len(toolNames))
+	for _, name := range toolNames {
+		definition, _ := toolDefinitionForConfig(name, cfg)
+		data, err := json.Marshal(definition)
+		if err != nil {
+			return nil, fmt.Errorf("cache tool %s: %w", name, err)
+		}
+		if err := json.Unmarshal(data, &definition); err != nil {
+			return nil, err
+		}
+		definitions[name] = definition
+	}
 	ws, err := workspace.New(cfg.AgentDockDefaultDir)
 	if err != nil {
 		return nil, err
@@ -93,7 +107,7 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 	commandCtx, commandCancel := context.WithCancel(context.Background())
 	runtime := &Runtime{
 		cfg: cfg, ws: ws, projects: projects, projectInstructions: projectinstructions.NewLoader(cfg.AgentDockDefaultDir), skills: skills,
-		toolNames: toolNames, toolValidators: toolValidators,
+		toolNames: toolNames, toolValidators: toolValidators, toolDefinitions: definitions,
 		commandCtx: commandCtx, commandCancel: commandCancel,
 		browserOwners: make(map[string]browserSessionOwner),
 	}
@@ -273,10 +287,16 @@ func (r *Runtime) commandExecutionContext() (context.Context, error) {
 }
 
 func (r *Runtime) ToolNames() []string {
-	definitions, _ := r.CatalogSnapshot()
-	names := make([]string, 0, len(definitions))
-	for _, definition := range definitions {
-		names = append(names, definition.Name)
+	m := r.builtins
+	m.mu.Lock()
+	allowed := map[string]bool{"browser": groupAvailable(m.groups["browser"]) && !m.closed, "acp": groupAvailable(m.groups["acp"]) && !m.closed}
+	m.mu.Unlock()
+	names := make([]string, 0, len(r.toolNames))
+	for _, name := range r.toolNames {
+		spec, _ := toolSpecByName(name)
+		if spec.Group == "" || allowed[spec.Group] {
+			names = append(names, name)
+		}
 	}
 	return names
 }
@@ -293,7 +313,7 @@ func (r *Runtime) ToolDefinition(name string) (ToolDefinition, bool) {
 	if spec, ok := toolSpecByName(name); !ok || !r.builtinAvailable(spec.Group) {
 		return ToolDefinition{}, false
 	}
-	return toolDefinitionForConfig(name, r.cfg)
+	return cloneToolDefinition(r.toolDefinitions[name]), true
 }
 
 func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (Result, error) {

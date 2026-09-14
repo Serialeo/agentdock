@@ -9,8 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/cmd/agentdock/internal/logx"
@@ -18,6 +20,7 @@ import (
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/desktopcontrol"
 	"github.com/uvwt/agentdock/internal/desktopruntime"
+	"github.com/uvwt/agentdock/internal/fs/filelock"
 	"github.com/uvwt/agentdock/internal/httpx"
 	"github.com/uvwt/agentdock/internal/mcp"
 	"github.com/uvwt/agentdock/internal/nexusbridge"
@@ -57,6 +60,7 @@ func runServer(ctx context.Context, args []string, stderr io.Writer) error {
 	flags.StringVar(&cfg.BrowserExecutablePath, "browser-executable-path", cfg.BrowserExecutablePath, "optional absolute Chrome, Chromium, or Edge executable path")
 	flags.StringVar(&cfg.BrowserCDPURL, "browser-cdp-url", cfg.BrowserCDPURL, "optional existing Chromium CDP endpoint to attach")
 	flags.BoolVar(&cfg.BrowserReuseExistingCDP, "browser-reuse-existing-cdp", cfg.BrowserReuseExistingCDP, "discover and reuse a unique local existing CDP browser before launching one")
+	runtimeRootFlag := flags.String("runtime-root", "", "instance local control directory; stdio defaults to <AGENTDOCK_HOME>/runtime/stdio")
 	flags.BoolVar(&cfg.Stdio, "stdio", cfg.Stdio, "serve JSON-RPC over stdio")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -89,6 +93,14 @@ func runServer(ctx context.Context, args []string, stderr io.Writer) error {
 		slog.Warn("desktop runtime repair skipped", "error", err)
 	}
 	slog.Info("server starting", "agentdock_home", cfg.AgentDockHome, "agentdock_default_dir", cfg.AgentDockDefaultDir, "path_model", config.PathModel, "host", cfg.Host, "port", cfg.Port, "stdio", cfg.Stdio, "log_level", cfg.LogLevel, "recall_enabled", cfg.NexusEndpoint != "", "nexus_enabled", cfg.NexusEndpoint != "", "mcp_apps_enabled", cfg.MCPAppsEnabled)
+	// 同一配置真源只能由一个 Core 实例写入；不同实例须使用独立 home。
+	lockCtx, cancelLock := context.WithTimeout(ctx, 100*time.Millisecond)
+	releaseInstance, err := filelock.Acquire(lockCtx, filepath.Join(cfg.AgentDockHome, "runtime-owner.lock"))
+	cancelLock()
+	if err != nil {
+		return fmt.Errorf("AgentDock home is already in use or unavailable: %w", err)
+	}
+	defer releaseInstance()
 	runtime, err := app.NewRuntime(cfg)
 	if err != nil {
 		return err
@@ -99,9 +111,6 @@ func runServer(ctx context.Context, args []string, stderr io.Writer) error {
 		}
 	}()
 	server := mcp.NewServer(runtime, cfg)
-	if cfg.Stdio {
-		return serveStdio(ctx, server)
-	}
 	nexusStatus := &nexusbridge.ConnectionState{}
 	serviceCtx, cancelServices := context.WithCancel(ctx)
 	var bridgeWG sync.WaitGroup
@@ -118,7 +127,16 @@ func runServer(ctx context.Context, args []string, stderr io.Writer) error {
 			nexusbridge.NewClient(identity, server, runtime, artifactStore, nexusStatus).Run(serviceCtx)
 		}()
 	}
-	runtimeRoot := strings.TrimSpace(os.Getenv("AGENTDOCK_RUNTIME_ROOT"))
+	runtimeRoot := strings.TrimSpace(*runtimeRootFlag)
+	if runtimeRoot == "" {
+		if cfg.Stdio {
+			runtimeRoot = filepath.Join(cfg.AgentDockHome, "runtime", "stdio")
+		} else {
+			runtimeRoot = strings.TrimSpace(os.Getenv("AGENTDOCK_RUNTIME_ROOT"))
+		}
+	}
+	slog.Info("local control", "runtime_root", runtimeRoot)
+
 	if runtimeRoot == "" {
 		return httpx.Serve(serviceCtx, server, runtime, cfg)
 	}
@@ -126,7 +144,13 @@ func runServer(ctx context.Context, args []string, stderr io.Writer) error {
 	// 桌面控制端点与 HTTP/MCP 服务共享同一生命周期；任一端点异常退出时，
 	// 取消另一个端点并返回明确错误，避免后台只剩半套控制面。
 	done := make(chan error, 2)
-	go func() { done <- httpx.Serve(serviceCtx, server, runtime, cfg) }()
+	go func() {
+		if cfg.Stdio {
+			done <- serveStdio(serviceCtx, server)
+		} else {
+			done <- httpx.Serve(serviceCtx, server, runtime, cfg)
+		}
+	}()
 	go func() {
 		done <- desktopcontrol.Serve(serviceCtx, runtimeRoot, func(controlCtx context.Context, request desktopcontrol.Request) (any, error) {
 			if request.Method == "builtins.list" {
