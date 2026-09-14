@@ -18,7 +18,8 @@ xcrun swiftc -swift-version 5 -sdk "$sdk" -target "$arch-apple-macosx13.0" \
   "$source_dir/Sources/Geometry.swift" "$source_dir/Tests/GeometryTests.swift" \
   -o "$build_dir/geometry-tests"
 "$build_dir/geometry-tests"
-xcrun swiftc -swift-version 5 -sdk "$sdk" -target "$arch-apple-macosx13.0" \
+# main.swift uses an explicit @main entry point instead of top-level statements.
+xcrun swiftc -parse-as-library -swift-version 5 -sdk "$sdk" -target "$arch-apple-macosx13.0" \
   "$source_dir/Sources/Geometry.swift" "$source_dir/Sources/Capture.swift" "$source_dir/Sources/main.swift" \
   -framework AppKit -framework ApplicationServices -framework ScreenCaptureKit -framework CoreImage \
   -o "$build_dir/AgentDockComputer"

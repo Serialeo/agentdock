@@ -203,8 +203,17 @@ final class CalibrationView: NSView {
     }
 }
 
-let application = NSApplication.shared
-application.setActivationPolicy(.regular)
-let delegate = SpikeApp()
-application.delegate = delegate
-application.run()
+@main
+struct ComputerSpikeMain {
+    @MainActor
+    static func main() {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
+        let delegate = SpikeApp()
+        application.delegate = delegate
+        // NSApplication's delegate is weak; retain it throughout the event loop.
+        withExtendedLifetime(delegate) {
+            application.run()
+        }
+    }
+}
