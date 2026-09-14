@@ -20,7 +20,7 @@ func computerToolSpecs() []ToolSpec {
 		protocol.ToolComputerStatus:  "Read native desktop availability and supported actions, or reread a saved operation_id without replaying input.",
 		protocol.ToolComputerSession: "Acquire, renew or release a 15-second desktop control lease. Local user opt-in and Deployment control permission are required.",
 		protocol.ToolComputerObserve: "Capture a display as a private MCP image with observation_id and image pixel coordinates. Does not focus or acquire control. max_size is a preference.",
-		protocol.ToolComputerAct:     "Perform a supported action using a fresh observation and control session. This backend implements a single click. Reuse operation_id only to retrieve the same result; never retry uncertain input with a new ID. OS input submission is not business success.",
+		protocol.ToolComputerAct:     "Perform a desktop action using a fresh observation and control session. Supports pointer movement, single/double/triple click, window or item dragging, scrolling, keyboard shortcuts and Unicode text. Reuse operation_id only to retrieve the same result; never retry uncertain input with a new ID. OS input submission is not business success.",
 		protocol.ToolComputerStop:    "Stop a desktop control session immediately. In-flight OS input may already have occurred; query its operation_id. Stopped sessions never resume.",
 	}
 	specs := make([]ToolSpec, 0, 5)

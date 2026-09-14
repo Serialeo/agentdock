@@ -16,6 +16,7 @@ import (
 )
 
 const maxFrame = 40 << 20
+const cleanupGrace = 4 * time.Second
 
 // HelperHome is fixed per OS user, independent of Core's configurable HOME.
 // Two Core installations therefore cannot acquire separate locks on one desktop.
@@ -46,8 +47,17 @@ func BundledHelper() string {
 // bearer secret on disk, network port, shell command or model-selected executable.
 func Run(ctx context.Context, in io.Reader, out io.Writer, e *Engine) error {
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	defer e.Close()
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		e.Close()
+		done := make(chan struct{})
+		go func() { workers.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(cleanupGrace):
+		}
+	}()
 	var outputMu sync.Mutex
 	var requestsMu sync.Mutex
 	pending := map[string]context.CancelFunc{}
@@ -79,6 +89,10 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, e *Engine) error {
 			continue
 		}
 		callCtx, stop := context.WithCancel(ctx)
+		if req.DeadlineMS != 0 {
+			stop()
+			callCtx, stop = context.WithDeadline(ctx, time.UnixMilli(req.DeadlineMS))
+		}
 		requestsMu.Lock()
 		if _, exists := pending[req.ID]; exists {
 			requestsMu.Unlock()
@@ -87,8 +101,10 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, e *Engine) error {
 		}
 		pending[req.ID] = stop
 		requestsMu.Unlock()
+		workers.Add(1)
 		go func(req Request) {
 			result, png, err := e.Call(callCtx, req)
+			workers.Done()
 			reply := Reply{ID: req.ID, Result: result, PNG: png}
 			if err != nil {
 				reply.Error = remoteError(err)
@@ -190,8 +206,10 @@ func (c *Client) connect() (*connection, error) {
 			}
 		}
 		in.Close()
-		_ = cmd.Process.Kill()
+		// EOF cancels helper actions; allow their paired input release before forcing exit.
+		killTimer := time.AfterFunc(cleanupGrace, func() { _ = cmd.Process.Kill() })
 		err := cmd.Wait()
+		killTimer.Stop()
 		if err == nil {
 			err = io.EOF
 		}
@@ -207,7 +225,13 @@ func (c *Client) Call(ctx context.Context, req Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, failure(protocol.ErrorComputerHelperOffline, err.Error())
 	}
+	if err := ctx.Err(); err != nil {
+		return Reply{}, err
+	}
 	req.ID = id()
+	if deadline, ok := ctx.Deadline(); ok {
+		req.DeadlineMS = deadline.UnixMilli()
+	}
 	ch := make(chan Reply, 1)
 	p.mu.Lock()
 	p.pending[req.ID] = ch
@@ -215,14 +239,24 @@ func (c *Client) Call(ctx context.Context, req Request) (Reply, error) {
 	defer func() { p.mu.Lock(); delete(p.pending, req.ID); p.mu.Unlock() }()
 	// 写入本身也受取消约束：helper 不读 stdin 时，不能让 stop 卡在管道锁后。
 	written := make(chan error, 1)
-	go func() { p.writeMu.Lock(); defer p.writeMu.Unlock(); written <- json.NewEncoder(p.in).Encode(req) }()
+	go func() {
+		p.writeMu.Lock()
+		defer p.writeMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			written <- err
+			return
+		}
+		written <- json.NewEncoder(p.in).Encode(req)
+	}()
 	select {
 	case err = <-written:
 		if err != nil {
 			return Reply{}, err
 		}
 	case <-ctx.Done():
-		_ = p.cmd.Process.Kill()
+		// Interrupt an incomplete frame rather than enqueue it after cancellation.
+		p.in.Close()
+		p.awaitExit()
 		return Reply{}, ctx.Err()
 	case <-p.done:
 		return Reply{}, failure(protocol.ErrorComputerHelperOffline, "helper exited")
@@ -234,9 +268,8 @@ func (c *Client) Call(ctx context.Context, req Request) (Reply, error) {
 		}
 		return reply, nil
 	case <-ctx.Done():
-		// 不重试输入。终止 helper 会撤销全部租约，下一次显式 status 可以读取持久化结果。
-		_ = p.cmd.Process.Kill()
-		return Reply{}, ctx.Err()
+		// Cancel the request, then let native finally release held input. No replay.
+		return p.cancelRequest(req.ID, ch, ctx.Err())
 	case <-p.done:
 		return Reply{}, failure(protocol.ErrorComputerExecutionUnknown, "helper exited; query operation_id before any new input")
 	}
@@ -259,7 +292,53 @@ func (c *Client) Close() error {
 	select {
 	case <-c.process.done:
 		return nil
-	case <-time.After(time.Second):
-		return c.process.cmd.Process.Kill()
+	case <-time.After(cleanupGrace):
+		_ = c.process.cmd.Process.Kill()
+		return failure(protocol.ErrorComputerExecutionUnknown, "helper cleanup timed out; held input release is unconfirmed")
+	}
+}
+
+func (p *connection) awaitExit() {
+	select {
+	case <-p.done:
+	case <-time.After(cleanupGrace):
+		_ = p.cmd.Process.Kill()
+	}
+}
+func (p *connection) cancelRequest(id string, ch <-chan Reply, cause error) (Reply, error) {
+	written := make(chan error, 1)
+	go func() {
+		p.writeMu.Lock()
+		defer p.writeMu.Unlock()
+		written <- json.NewEncoder(p.in).Encode(Request{CancelID: id})
+	}()
+	timer := time.NewTimer(cleanupGrace)
+	defer timer.Stop()
+	select {
+	case err := <-written:
+		if err != nil {
+			p.in.Close()
+			p.awaitExit()
+			return Reply{}, cause
+		}
+	case <-p.done:
+		return Reply{}, cause
+	case <-timer.C:
+		p.in.Close()
+		p.awaitExit()
+		return Reply{}, failure(protocol.ErrorComputerExecutionUnknown, "could not deliver input cancellation; query operation status")
+	}
+	select {
+	case reply := <-ch:
+		if reply.Error != nil {
+			return reply, reply.Error
+		}
+		return reply, nil
+	case <-p.done:
+		return Reply{}, failure(protocol.ErrorComputerExecutionUnknown, "helper exited while releasing input; query operation status")
+	case <-timer.C:
+		p.in.Close()
+		p.awaitExit()
+		return Reply{}, failure(protocol.ErrorComputerExecutionUnknown, "input cleanup timed out; query operation status")
 	}
 }

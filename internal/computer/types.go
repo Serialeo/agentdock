@@ -19,11 +19,12 @@ type Owner struct {
 	Revision    string `json:"revision"`
 }
 type Request struct {
-	ID       string          `json:"id"`
-	Tool     string          `json:"tool"`
-	Owner    Owner           `json:"owner"`
-	Args     json.RawMessage `json:"args,omitempty"`
-	CancelID string          `json:"cancel_id,omitempty"`
+	ID         string          `json:"id"`
+	Tool       string          `json:"tool"`
+	Owner      Owner           `json:"owner"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	DeadlineMS int64           `json:"deadline_ms,omitempty"`
+	CancelID   string          `json:"cancel_id,omitempty"`
 }
 type Reply struct {
 	ID     string                `json:"id"`
@@ -38,11 +39,13 @@ type Snapshot struct {
 	Width, Height             int
 	Display, Target, Geometry string
 	Transform                 [6]float64
+	BoundWindow               bool
+	TargetPID                 uint32
 }
 type Backend interface {
 	Status(context.Context) (protocol.ComputerBackendStatus, error)
 	Capture(context.Context, string, string, int) (Snapshot, error)
-	Click(context.Context, Snapshot, protocol.ComputerPoint, string) (protocol.ComputerInputResult, error)
+	Act(context.Context, Snapshot, protocol.ComputerAction) (protocol.ComputerInputResult, error)
 }
 
 func failure(code, message string) error {

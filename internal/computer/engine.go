@@ -2,6 +2,7 @@ package computer
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,7 +10,6 @@ import (
 	"fmt"
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/fs/securepath"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -37,6 +37,7 @@ type record struct {
 	Result protocol.ComputerActionResult `json:"result"`
 }
 type Engine struct {
+	digestKey    []byte
 	mu           sync.Mutex
 	backend      Backend
 	home, epoch  string
@@ -59,6 +60,11 @@ func NewEngine(home string, backend Backend, enabled bool) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{backend: backend, home: home, epoch: id(), enabled: enabled, observations: map[string]evidence{}, records: map[string]record{}}
+	key, keyErr := operationKey(home)
+	if keyErr != nil {
+		return nil, keyErr
+	}
+	e.digestKey = key
 	entries, err := os.ReadDir(home)
 	if err != nil {
 		return nil, err
@@ -414,24 +420,20 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 	if err := json.Unmarshal(req.Args, &a); err != nil {
 		return nil, nil, err
 	}
-	// 本阶段只宣告单次点击；不把未实现的按键/拖拽悄悄降级成其他动作。
-	if a.Action.Kind != "click" || (a.Action.Count != 0 && a.Action.Count != 1) {
-		return nil, nil, failure(protocol.ErrorComputerUnsupported, "this backend supports single click only; use status.actions")
+	var validationErr error
+	a.Action, validationErr = normalizeAction(a.Action)
+	if validationErr != nil {
+		return nil, nil, validationErr
 	}
-	if a.Operation == "" || a.Action.Point == nil {
-		return nil, nil, failure(protocol.ErrorComputerInputRejected, "click requires operation_id and point")
+	if a.Operation == "" {
+		return nil, nil, failure(protocol.ErrorComputerInputRejected, "operation_id is required")
 	}
-	if a.Action.Button == "" {
-		a.Action.Button = "left"
-	}
-	if a.Action.Count == 0 {
-		a.Action.Count = 1
-	}
-	h := sha256.Sum256(raw(struct {
+	h := hmac.New(sha256.New, e.digestKey)
+	h.Write(raw(struct {
 		Session, Observation string
 		Action               protocol.ComputerAction
 	}{a.Session, a.Observation, a.Action}))
-	digest := hex.EncodeToString(h[:])
+	digest := hex.EncodeToString(h.Sum(nil))
 	key := recordKey(req.Owner, a.Operation)
 	e.mu.Lock()
 	prior, exists := e.records[key]
@@ -472,10 +474,9 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 		e.mu.Unlock()
 		return nil, nil, failure(protocol.ErrorComputerObservationStale, "capture a fresh observation for this owner before input")
 	}
-	p := a.Action.Point
-	if math.IsNaN(p.X) || math.IsInf(p.X, 0) || math.IsNaN(p.Y) || math.IsInf(p.Y, 0) || p.X < 0 || p.Y < 0 || p.X >= float64(ev.Metadata.Width) || p.Y >= float64(ev.Metadata.Height) {
+	if boundsErr := validateActionBounds(a.Action, ev.Metadata.Width, ev.Metadata.Height); boundsErr != nil {
 		e.mu.Unlock()
-		return nil, nil, failure(protocol.ErrorComputerInputRejected, "point is outside the observed image")
+		return nil, nil, boundsErr
 	}
 	if e.stoppedLocally() {
 		e.cancelLocked()
@@ -494,21 +495,21 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 		return nil, nil, fmt.Errorf("persist input intent: %w", err)
 	}
 	e.mu.Lock()
-	clickErr := e.validLease(req.Owner, a.Session)
-	if clickErr == nil {
-		clickErr = ctx.Err()
+	actionErr := e.validLease(req.Owner, a.Session)
+	if actionErr == nil {
+		actionErr = ctx.Err()
 	}
-	if clickErr == nil && e.stoppedLocally() {
+	if actionErr == nil && e.stoppedLocally() {
 		e.cancelLocked()
-		clickErr = failure(protocol.ErrorComputerSessionRevoked, "local stop is latched")
+		actionErr = failure(protocol.ErrorComputerSessionRevoked, "local stop is latched")
 	}
 	e.sequence++
 	e.mu.Unlock()
 	input := protocol.ComputerInputResult{Status: "not_submitted"}
 	inputCtx, inputCancel := context.WithDeadline(ctx, until)
 	defer inputCancel()
-	if clickErr == nil {
-		input, clickErr = e.backend.Click(inputCtx, ev.Snapshot, *p, a.Action.Button)
+	if actionErr == nil {
+		input, actionErr = e.backend.Act(inputCtx, ev.Snapshot, a.Action)
 	}
 	r.Result.Input = input
 	r.Result.State = "finished"
@@ -522,10 +523,10 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 	default:
 		r.Result.Effects = "none"
 	}
-	if clickErr != nil {
-		r.Result.ErrorCode = remoteError(clickErr).Code
-		r.Result.ErrorMessage = clickErr.Error()
-		if errors.Is(clickErr, context.Canceled) || errors.Is(clickErr, context.DeadlineExceeded) {
+	if actionErr != nil {
+		r.Result.ErrorCode = remoteError(actionErr).Code
+		r.Result.ErrorMessage = actionErr.Error()
+		if errors.Is(actionErr, context.Canceled) || errors.Is(actionErr, context.DeadlineExceeded) {
 			r.Result.State = "cancelled"
 		}
 		if input.Status == "unknown" || input.Status == "partial" {
@@ -540,7 +541,7 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 	if err != nil {
 		return nil, nil, failure(protocol.ErrorComputerExecutionUnknown, "input returned but durable outcome could not be saved; do not repeat this operation")
 	}
-	if clickErr != nil && input.Status == "not_submitted" {
+	if actionErr != nil && input.Status == "not_submitted" {
 		return raw(r.Result), nil, nil
 	}
 	r.Result.ObservationStatus = "unavailable"

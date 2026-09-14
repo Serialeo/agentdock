@@ -37,7 +37,7 @@ func nativeErr(code C.int) error {
 func (n *nativeBackend) Status(ctx context.Context) (protocol.ComputerBackendStatus, error) {
 	var observe, control C.int
 	ready := C.ad_status(&observe, &control)
-	s := protocol.ComputerBackendStatus{BackendState: "ready", DesktopState: "interactive", DesktopID: "macos/console", Actions: []string{"click"}, Permissions: protocol.ComputerNativePermissions{Observe: "denied", Control: "denied"}}
+	s := protocol.ComputerBackendStatus{BackendState: "ready", DesktopState: "interactive", DesktopID: "macos/console", Actions: actionNames(), Permissions: protocol.ComputerNativePermissions{Observe: "denied", Control: "denied"}}
 	if observe != 0 {
 		s.Permissions.Observe = "granted"
 	}
@@ -80,63 +80,8 @@ func (n *nativeBackend) Capture(ctx context.Context, display, window string, siz
 	if window != "" && window != target {
 		return Snapshot{}, failure(protocol.ErrorComputerObservationStale, "requested window is not foreground")
 	}
-	return Snapshot{PNG: C.GoBytes(shot.png, C.int(shot.length)), Width: int(shot.width), Height: int(shot.height), Display: display, Target: target, Geometry: shotGeometry(shot), Transform: [6]float64{float64(shot.w) / float64(shot.width), 0, 0, float64(shot.h) / float64(shot.height), float64(shot.x), float64(shot.y)}}, nil
+	return Snapshot{BoundWindow: window != "", TargetPID: uint32(shot.pid), PNG: C.GoBytes(shot.png, C.int(shot.length)), Width: int(shot.width), Height: int(shot.height), Display: display, Target: target, Geometry: shotGeometry(shot), Transform: [6]float64{float64(shot.w) / float64(shot.width), 0, 0, float64(shot.h) / float64(shot.height), float64(shot.x), float64(shot.y)}}, nil
 }
-func (n *nativeBackend) Click(ctx context.Context, s Snapshot, p protocol.ComputerPoint, button string) (protocol.ComputerInputResult, error) {
-	result := protocol.ComputerInputResult{Status: "not_submitted"}
-	if err := ctx.Err(); err != nil {
-		return result, err
-	}
-	var x, y, w, h, wx, wy, ww, wh float64
-	var target uint64
-	if _, err := fmt.Sscanf(s.Geometry, "%g,%g,%g,%g/%d/%g,%g,%g,%g", &x, &y, &w, &h, &target, &wx, &wy, &ww, &wh); err != nil {
-		return result, err
-	}
-	display, _ := strconv.ParseUint(s.Display, 10, 32)
-	shot := C.ADShot{display: C.uint32_t(display), target: C.uint64_t(target), x: C.double(x), y: C.double(y), w: C.double(w), h: C.double(h), wx: C.double(wx), wy: C.double(wy), ww: C.double(ww), wh: C.double(wh)}
-	b := 0
-	switch button {
-	case "left":
-	case "right":
-		b = 1
-	case "middle":
-		b = 2
-	default:
-		return result, failure(protocol.ErrorComputerInputRejected, "unknown mouse button")
-	}
-	flag := C.ad_cancellation()
-	if flag == nil {
-		return result, failure(protocol.ErrorComputerInputRejected, "allocate cancellation state")
-	}
-	stopped := make(chan struct{})
-	stopWatch := context.AfterFunc(ctx, func() { C.ad_cancel(flag); close(stopped) })
-	defer func() {
-		if !stopWatch() {
-			<-stopped
-		}
-		C.free(flag)
-	}()
-	if ctx.Err() != nil {
-		C.ad_cancel(flag)
-	}
-	code := C.ad_click(&shot, C.double(s.Transform[0]*p.X+s.Transform[4]), C.double(s.Transform[3]*p.Y+s.Transform[5]), C.int(b), flag)
-	if code == 6 {
-		if ctx.Err() == nil {
-			return result, failure(protocol.ErrorComputerDesktopUnavailable, "desktop unavailable before input")
-		}
-		return result, ctx.Err()
-	}
-	if code != 0 {
-		return result, nativeErr(code)
-	}
-	count := 3
-	result.Status = "submitted"
-	result.RequestedEvents = &count
-	return result, nil
-}
-
-var _ unsafe.Pointer
-
 func platformConfigDir() (string, error) {
 	home := C.ad_user_home()
 	if home == nil {

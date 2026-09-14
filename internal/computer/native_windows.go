@@ -115,7 +115,7 @@ func withDPI() func() {
 func (n *nativeBackend) Status(ctx context.Context) (protocol.ComputerBackendStatus, error) {
 	done := withDPI()
 	defer done()
-	s := protocol.ComputerBackendStatus{BackendState: "ready", DesktopState: "interactive", DesktopID: "windows/default", Actions: []string{"click"}, Permissions: protocol.ComputerNativePermissions{Observe: "granted", Control: "granted"}}
+	s := protocol.ComputerBackendStatus{BackendState: "ready", DesktopState: "interactive", DesktopID: "windows/default", Actions: actionNames(), Permissions: protocol.ComputerNativePermissions{Observe: "granted", Control: "granted"}}
 	if !interactive() {
 		s.DesktopState = "locked"
 		s.Permissions.Observe = "unavailable"
@@ -219,91 +219,8 @@ func (n *nativeBackend) Capture(ctx context.Context, display, window string, siz
 	if now != h || nowRect != wr {
 		return Snapshot{}, failure(protocol.ErrorComputerObservationStale, "target changed during capture; observe again")
 	}
-	return Snapshot{PNG: encoded.Bytes(), Width: w, Height: height, Display: display, Target: target, Geometry: geometry(r, h, wr), Transform: [6]float64{float64(sw) / float64(w), 0, 0, float64(sh) / float64(height), float64(r.Left), float64(r.Top)}}, nil
+	return Snapshot{BoundWindow: window != "", PNG: encoded.Bytes(), Width: w, Height: height, Display: display, Target: target, Geometry: geometry(r, h, wr), Transform: [6]float64{float64(sw) / float64(w), 0, 0, float64(sh) / float64(height), float64(r.Left), float64(r.Top)}}, nil
 }
-func (n *nativeBackend) Click(ctx context.Context, s Snapshot, p protocol.ComputerPoint, button string) (protocol.ComputerInputResult, error) {
-	none := protocol.ComputerInputResult{Status: "not_submitted"}
-	done := withDPI()
-	defer done()
-	if err := ctx.Err(); err != nil {
-		return none, err
-	}
-	if !interactive() {
-		return none, failure(protocol.ErrorComputerDesktopUnavailable, "desktop locked or disconnected")
-	}
-	h, r, err := windowState()
-	if err != nil {
-		return none, err
-	}
-	display, ok := monitors()[s.Display]
-	if !ok || geometry(display, h, r) != s.Geometry {
-		return none, failure(protocol.ErrorComputerObservationStale, "target focus or geometry changed; observe again")
-	}
-	x := math.Max(float64(display.Left), math.Min(float64(display.Right-1), s.Transform[0]*p.X+s.Transform[4]))
-	y := math.Max(float64(display.Top), math.Min(float64(display.Bottom-1), s.Transform[3]*p.Y+s.Transform[5]))
-	// Whole-display images can include other windows: only hit the observed foreground window.
-	point := uintptr(uint64(uint32(int32(math.Round(x)))) | uint64(uint32(int32(math.Round(y))))<<32)
-	hit := ucall("WindowFromPoint", point)
-	root := ucall("GetAncestor", hit, 2)
-	if root != h {
-		return none, failure(protocol.ErrorComputerObservationStale, "point no longer hits the observed foreground window")
-	}
-	for _, key := range []uintptr{1, 2, 4} {
-		if ucall("GetAsyncKeyState", key)&0x8000 != 0 {
-			return none, failure(protocol.ErrorComputerInputRejected, "release held mouse buttons before automated input")
-		}
-	}
-	down, up := uint32(2), uint32(4)
-	switch button {
-	case "left":
-	case "right":
-		down, up = 8, 16
-	case "middle":
-		down, up = 32, 64
-	default:
-		return none, failure(protocol.ErrorComputerInputRejected, "unknown mouse button")
-	}
-	vx, vy, vw, vh := metric(76), metric(77), metric(78), metric(79)
-	if vw <= 1 || vh <= 1 {
-		return none, failure(protocol.ErrorComputerDesktopUnavailable, "invalid virtual desktop bounds")
-	}
-	type mouseInput struct {
-		Type              uint32
-		Padding           uint32
-		DX, DY            int32
-		Data, Flags, Time uint32
-		Extra             uintptr
-	}
-	// amd64/arm64 INPUT is 40 bytes; release packages support these 64-bit targets.
-	inputs := [3]mouseInput{{DX: int32(math.Round((x - float64(vx)) * 65535 / float64(vw-1))), DY: int32(math.Round((y - float64(vy)) * 65535 / float64(vh-1))), Flags: 0xC001}, {Flags: down}, {Flags: up}}
-	if err = ctx.Err(); err != nil {
-		return none, err
-	}
-	if !interactive() {
-		return none, failure(protocol.ErrorComputerDesktopUnavailable, "desktop unavailable before input")
-	}
-	current, currentRect, checkErr := windowState()
-	if checkErr != nil || current != h || currentRect != r {
-		return none, failure(protocol.ErrorComputerObservationStale, "target changed before input")
-	}
-	if err = ctx.Err(); err != nil {
-		return none, err
-	}
-	accepted := int(ucall("SendInput", 3, uintptr(unsafe.Pointer(&inputs[0])), unsafe.Sizeof(inputs[0])))
-	requested := 3
-	result := protocol.ComputerInputResult{Status: "accepted", RequestedEvents: &requested, AcceptedEvents: &accepted}
-	if accepted != 3 {
-		result.Status = "partial"
-		if accepted == 0 {
-			result.Status = "rejected"
-		}
-		release := mouseInput{Flags: up}
-		ucall("SendInput", 1, uintptr(unsafe.Pointer(&release)), unsafe.Sizeof(release))
-		return result, failure(protocol.ErrorComputerInputRejected, "Windows did not accept all input events (for example, target elevation differs)")
-	}
-	return result, nil
-}
-
 func monitorRotation(id string) int {
 	handle, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {

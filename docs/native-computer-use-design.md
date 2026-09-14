@@ -1,6 +1,6 @@
 # 原生 Computer Use 设计草案
 
-> P2 当前实现和验证范围以 [接入进度](native-computer-use-integration.md) 为准。原设计中的 named pipe / Unix socket 改为父子匿名管道；本轮先交付截图与单击，其余动作和本地面板入口仍待实现。
+> P2 当前实现和验证范围以 [接入进度](native-computer-use-integration.md) 为准。原设计中的 named pipe / Unix socket 改为父子匿名管道；现已接入截图及六类动作，本地面板入口仍待实现；各平台实际验证结果见接入进度。
 
 状态：设计 v0.2。P1 共享契约与权限已实现；原生执行与 IPC 尚未接入。当前边界见 [MCP 接入进度](native-computer-use-integration.md)。
 日期：2026-09-13（America/Los_Angeles）。
@@ -277,4 +277,4 @@ Nexus 具体同步点：`ProjectsPage.tsx` 的权限类型、`ProjectDetailPage.
 
 分段指标：queue_wait、grant_validate、native_connect、capture_wait、encode、input_submit、post_observe、journal_fsync、bridge_bytes、outcome_unknown_count。初始建议本地 stop 控制请求 P95 <100ms、普通暖截图 P95 <500ms；这些是待 P0 校准的工程目标，不是已有性能数据。磁盘/队列/图像上限是资源边界，不增加“必须写若干条说明”之类执行策略门槛。
 
-P0 基本真机反馈已记录，P1 类型/schema/权限及边界测试已落实。下一步接入原生 helper IPC 与完整运行时。正式客户端携带预编译 helper，终端用户无需安装 Visual Studio、CMake 或 Xcode。
+P0 基本真机反馈已记录，P1 类型/schema/权限及边界测试已落实；原生 helper IPC、运行时和六类动作已接入，新增动作的产品后端真机验证仍待完成。正式客户端携带预编译 helper，终端用户无需安装 Visual Studio、CMake 或 Xcode。

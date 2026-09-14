@@ -5,9 +5,6 @@
 #import <CoreImage/CoreImage.h>
 #import <CoreMedia/CoreMedia.h>
 #import "native_darwin.h"
-#include <stdatomic.h>
-void *ad_cancellation(void){return calloc(1,sizeof(_Atomic int));}
-void ad_cancel(void *flag){atomic_store((_Atomic int*)flag,1);}
 
 static BOOL desktopReady(void) {
  NSDictionary *session=CFBridgingRelease(CGSessionCopyCurrentDictionary());
@@ -25,8 +22,10 @@ int ad_displays(uint32_t *ids,int capacity) { uint32_t count=0; if(CGGetActiveDi
 void ad_display(uint32_t id,int *width,int *height,int *rotation) { *width=(int)CGDisplayPixelsWide(id);*height=(int)CGDisplayPixelsHigh(id);*rotation=(int)CGDisplayRotation(id); }
 static AXUIElementRef focusedWindow(pid_t *pid) {
  AXUIElementRef system=AXUIElementCreateSystemWide();CFTypeRef application=NULL,window=NULL;
+ AXUIElementSetMessagingTimeout(system,0.25);
  AXError err=AXUIElementCopyAttributeValue(system,kAXFocusedApplicationAttribute,&application);CFRelease(system);
  if(err!=kAXErrorSuccess||!application)return NULL;
+ AXUIElementSetMessagingTimeout((AXUIElementRef)application,0.25);
  AXUIElementGetPid((AXUIElementRef)application,pid);
  AXUIElementCopyAttributeValue((AXUIElementRef)application,kAXFocusedWindowAttribute,&window);CFRelease(application);
  return (AXUIElementRef)window;
@@ -34,7 +33,7 @@ static AXUIElementRef focusedWindow(pid_t *pid) {
 static BOOL targetState(ADShot *shot) {
  // CGWindowList 的前台窗口 ID/边界用于快照，AX 在输入前确认实际命中窗口。
  pid_t pid=0;AXUIElementRef focused=focusedWindow(&pid);
- if(focused)CFRelease(focused);
+ if(focused)CFRelease(focused);shot->pid=pid;
  // Observe-only users may not grant AX. Window metadata still comes from CG.
  NSArray *windows=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID));
  for(NSDictionary *window in windows){
@@ -42,10 +41,11 @@ static BOOL targetState(ADShot *shot) {
   if(pid && [window[(__bridge NSString*)kCGWindowOwnerPID] intValue]!=pid)continue;
   CGRect rect;
   if(!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)window[(__bridge NSString*)kCGWindowBounds],&rect))continue;
+  if(!shot->pid)shot->pid=[window[(__bridge NSString*)kCGWindowOwnerPID] intValue];
   shot->target=[window[(__bridge NSString*)kCGWindowNumber] unsignedLongLongValue];
   shot->wx=rect.origin.x;shot->wy=rect.origin.y;shot->ww=rect.size.width;shot->wh=rect.size.height;return YES;
  }
- return NO;
+ return pid>0;
 }
 @interface ADCapture : NSObject<SCStreamOutput>
 @property(nonatomic,strong) NSData *png;
@@ -95,27 +95,54 @@ int ad_capture(uint32_t display,int size,ADShot *shot) { @autoreleasepool {
  if(!desktopReady()||now.target!=shot->target||now.wx!=shot->wx||now.wy!=shot->wy||now.ww!=shot->ww||now.wh!=shot->wh){free(shot->png);shot->png=NULL;return 3;}
  return 0;
 }}
-int ad_click(ADShot *shot,double x,double y,int button,void *cancelled) { @autoreleasepool {
- if(!desktopReady())return 1;if(!AXIsProcessTrusted())return 2;
- ADShot now={0};CGRect bounds=CGDisplayBounds(shot->display);
- if(!targetState(&now)||now.target!=shot->target||now.wx!=shot->wx||now.wy!=shot->wy||now.ww!=shot->ww||now.wh!=shot->wh||bounds.origin.x!=shot->x||bounds.origin.y!=shot->y||bounds.size.width!=shot->w||bounds.size.height!=shot->h)return 3;
- pid_t pid=0;AXUIElementRef focused=focusedWindow(&pid);if(!focused)return 3;
- AXUIElementRef system=AXUIElementCreateSystemWide(),hit=NULL;CFTypeRef window=NULL;
+uint64_t ad_target(double x,double y,int32_t *owner) {@autoreleasepool{
+ AXUIElementRef system=AXUIElementCreateSystemWide(),hit=NULL;
+ AXUIElementSetMessagingTimeout(system,0.25);
  AXUIElementCopyElementAtPosition(system,x,y,&hit);CFRelease(system);
- if(hit)AXUIElementCopyAttributeValue(hit,kAXWindowAttribute,&window);
- BOOL same=(window&&CFEqual(window,focused))||(hit&&CFEqual(hit,focused));
- if(window)CFRelease(window);if(hit)CFRelease(hit);CFRelease(focused);if(!same)return 3;
- for(int i=0;i<3;i++){if(CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState,(CGMouseButton)i))return 5;}
- CGMouseButton btn=button==1?kCGMouseButtonRight:(button==2?kCGMouseButtonCenter:kCGMouseButtonLeft);
- CGEventType down=button==1?kCGEventRightMouseDown:(button==2?kCGEventOtherMouseDown:kCGEventLeftMouseDown);
- CGEventType up=button==1?kCGEventRightMouseUp:(button==2?kCGEventOtherMouseUp:kCGEventLeftMouseUp);
- CGPoint point=CGPointMake(x,y);CGEventRef move=CGEventCreateMouseEvent(NULL,kCGEventMouseMoved,point,btn);
- CGEventRef press=CGEventCreateMouseEvent(NULL,down,point,btn),release=CGEventCreateMouseEvent(NULL,up,point,btn);
- if(!move||!press||!release){if(move)CFRelease(move);if(press)CFRelease(press);if(release)CFRelease(release);return 5;}
- CGEventSetIntegerValueField(press,kCGMouseEventClickState,1);CGEventSetIntegerValueField(release,kCGMouseEventClickState,1);
- if(!desktopReady() || atomic_load((_Atomic int*)cancelled)){CFRelease(move);CFRelease(press);CFRelease(release);return 6;}
- CGEventPost(kCGHIDEventTap,move);CGEventPost(kCGHIDEventTap,press);CGEventPost(kCGHIDEventTap,release);
- CFRelease(move);CFRelease(press);CFRelease(release);return 0;
+ *owner=0;if(hit){pid_t pid=0;AXUIElementGetPid(hit,&pid);*owner=pid;CFRelease(hit);}
+ NSArray *windows=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly,kCGNullWindowID));
+ for(NSDictionary *window in windows){
+  if(*owner && [window[(__bridge NSString*)kCGWindowOwnerPID] intValue]!=*owner)continue;
+  if([window[(__bridge NSString*)kCGWindowAlpha] doubleValue]==0)continue;
+  CGRect rect;if(!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)window[(__bridge NSString*)kCGWindowBounds],&rect))continue;
+  if(CGRectContainsPoint(rect,CGPointMake(x,y))){if(!*owner)*owner=[window[(__bridge NSString*)kCGWindowOwnerPID] intValue];return [window[(__bridge NSString*)kCGWindowNumber] unsignedLongLongValue];}
+ }
+ return 0;
+}}
+int ad_check(ADShot *shot,int continuing,int pointer,uint64_t target,int32_t targetPID,double x,double y) {@autoreleasepool{
+ if(!desktopReady())return 1;if(!AXIsProcessTrusted())return 2;
+ CGRect bounds=CGDisplayBounds(shot->display);
+ if(!CGDisplayIsActive(shot->display)||bounds.origin.x!=shot->x||bounds.origin.y!=shot->y||bounds.size.width!=shot->w||bounds.size.height!=shot->h)return 3;
+ ADShot now={0};if(!targetState(&now))return 3;
+ if(!continuing){
+  if(now.target!=shot->target||now.pid!=shot->pid||now.wx!=shot->wx||now.wy!=shot->wy||now.ww!=shot->ww||now.wh!=shot->wh)return 3;
+  if(pointer&&target&&now.target==target)shot->inputFocused=1;
+  if(pointer&&shot->bound){
+   pid_t pid=0;AXUIElementRef focused=focusedWindow(&pid);if(!focused)return 3;
+   AXUIElementRef system=AXUIElementCreateSystemWide(),hit=NULL;CFTypeRef window=NULL;
+   AXUIElementSetMessagingTimeout(system,0.25);
+ AXUIElementCopyElementAtPosition(system,x,y,&hit);CFRelease(system);
+   if(hit)AXUIElementCopyAttributeValue(hit,kAXWindowAttribute,&window);
+   BOOL same=(window&&CFEqual(window,focused))||(hit&&CFEqual(hit,focused));
+   if(window)CFRelease(window);if(hit)CFRelease(hit);CFRelease(focused);if(!same)return 3;
+  }
+  for(int i=0;i<3;i++)if(CGEventSourceButtonState(kCGEventSourceStateCombinedSessionState,(CGMouseButton)i))return 5;
+ }else{
+  if(pointer){
+   if(now.pid!=shot->pid && now.pid!=targetPID)return 3;
+   if(shot->bound && now.target!=shot->target)return 3;
+   if(target){
+    NSArray *windows=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,(CGWindowID)target));
+    NSDictionary *window=windows.firstObject;if(!window)return 3;
+    if([window[(__bridge NSString*)kCGWindowLayer] intValue]==0){
+     if(now.target==target)shot->inputFocused=1;
+     else if(shot->inputFocused||now.target!=shot->target)return 3;
+    }
+   }
+  }
+  else if(now.pid!=shot->pid||now.target!=shot->target)return 3;
+ }
+ return desktopReady()?0:1;
 }}
 
 #include <pwd.h>

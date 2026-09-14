@@ -21,7 +21,7 @@ type fakeBackend struct {
 }
 
 func (f *fakeBackend) Status(context.Context) (protocol.ComputerBackendStatus, error) {
-	return protocol.ComputerBackendStatus{BackendState: "ready", DesktopState: "interactive", DesktopID: "desktop", Actions: []string{"click"}, Permissions: protocol.ComputerNativePermissions{Observe: "granted", Control: "granted"}}, nil
+	return protocol.ComputerBackendStatus{BackendState: "ready", DesktopState: "interactive", DesktopID: "desktop", Actions: actionNames(), Permissions: protocol.ComputerNativePermissions{Observe: "granted", Control: "granted"}}, nil
 }
 func (f *fakeBackend) Capture(ctx context.Context, display, window string, size int) (Snapshot, error) {
 	if f.capture != nil {
@@ -29,7 +29,7 @@ func (f *fakeBackend) Capture(ctx context.Context, display, window string, size 
 	}
 	return Snapshot{PNG: []byte("private screenshot"), Width: 100, Height: 80, Target: "external-app", Display: display, Geometry: "geometry", Transform: [6]float64{2, 0, 0, 2, -100, 0}}, nil
 }
-func (f *fakeBackend) Click(ctx context.Context, s Snapshot, p protocol.ComputerPoint, button string) (protocol.ComputerInputResult, error) {
+func (f *fakeBackend) Act(ctx context.Context, s Snapshot, action protocol.ComputerAction) (protocol.ComputerInputResult, error) {
 	f.clicks.Add(1)
 	if f.click != nil {
 		return f.click(ctx)
