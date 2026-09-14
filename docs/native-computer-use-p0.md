@@ -41,16 +41,17 @@ open dist/computer-spike-macos/AgentDockComputer.app
 
 ## 3. Windows：构建并打开
 
-要求：Windows 10/11 x64，使用本机登录的普通桌面用户。安装 **Visual Studio 2022 Build Tools** 或 Visual Studio 2022，选择“使用 C++ 的桌面开发”，包含 MSVC x64、Windows SDK 和 C++ CMake 工具。
+要求：Windows 10/11 x64，使用本机登录的普通桌面用户。安装 **Visual Studio 2022 或 2026**（完整 IDE 或 Build Tools 均可），选择“使用 C++ 的桌面开发”，包含 MSVC x64、Windows SDK 和 C++ CMake 工具。
 
 在源码根目录的 PowerShell 中执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop\windows\computer-helper\build.ps1
-& .\dist\computer-spike-windows\build\Release\AgentDockComputerSpike.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File .\desktop\windows\computer-helper\build.ps1 -Run
 ```
 
-`ExecutionPolicy Bypass` 仅用于这次脚本进程。脚本构建 Release 并运行几何测试；运行 App 无需管理员权限。
+`ExecutionPolicy Bypass` 仅用于这次脚本进程。脚本自动识别已安装且带 C++ x64 工具链的 VS 2022／2026，选择支持对应构建器的 CMake，构建 Release 并运行几何测试；`-Run` 在成功后打开 App。运行 App 无需管理员权限。
+
+VS 2026 需要 CMake 4.2+；VS 2022 需要 CMake 3.21+。脚本优先检查所选 VS 自带的 CMake，再检查 PATH 中的 CMake。若提示没有兼容的 CMake，在 Visual Studio Installer 更新 C++ CMake 工具，或安装新版 Windows CMake 并加入 PATH。脚本按 VS 版本和安装实例使用独立构建目录，不需要删除旧缓存。去掉 `-Run` 则仅构建，末尾会打印可执行文件的完整路径。依据：[CMake VS 2026 构建器说明](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2018%202026.html)。
 
 打开后：
 
