@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
@@ -173,8 +174,31 @@ func TestPerCallCDPWorksWithoutHealthyDefaultBackend(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { cancel(); _ = command.Wait() }()
 	var endpoint string
+	defer func() {
+		// 先让 Chromium 正常关闭子进程和 profile，直接 Kill 父进程会与 TempDir 清理竞争。
+		shutdown, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		if endpoint != "" {
+			if socket, _, err := (&websocket.Dialer{Proxy: nil}).DialContext(shutdown, endpoint, nil); err == nil {
+				deadline, _ := shutdown.Deadline()
+				_ = socket.SetWriteDeadline(deadline)
+				_ = socket.SetReadDeadline(deadline)
+				if err := socket.WriteJSON(map[string]any{"id": 1, "method": "Browser.close"}); err == nil {
+					_, _, _ = socket.ReadMessage()
+				}
+				_ = socket.Close()
+			}
+		}
+		waited := make(chan error, 1)
+		go func() { waited <- command.Wait() }()
+		select {
+		case <-waited:
+		case <-shutdown.Done():
+			cancel()
+			<-waited
+		}
+	}()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))

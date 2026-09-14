@@ -233,7 +233,11 @@ func TestBuiltinDeadlineLeavesCleanupTransitioningAndShutdownFenced(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Millisecond)
+	// 断言失败也必须释放准入，否则测试清理会把真正失败掩盖成十分钟超时。
+	release = sync.OnceFunc(release)
+	defer release()
+	// Windows 的持久化可能受文件扫描影响，不能把磁盘写入限定在 40ms 内。
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	no := false
 	if _, err = r.SetBuiltin(ctx, protocol.BuiltinUpdate{ID: "browser", Enabled: &no}); !errors.Is(err, context.DeadlineExceeded) {
