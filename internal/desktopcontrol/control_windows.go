@@ -69,10 +69,14 @@ func connectNamedPipe(ctx context.Context, pipe windows.Handle) error {
 
 	ready := make(chan connectorState, 1)
 	connected := make(chan error, 1)
+	released := make(chan struct{})
+	defer close(released)
 	go func() {
 		// CancelSynchronousIo 只会取消指定线程发起的同步 I/O，因此连接调用必须固定在同一个 OS 线程。
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
+		// 取消方确认结果前不复用此线程，避免 CancelSynchronousIo 命中其他调用。
+		defer func() { <-released }()
 
 		thread, err := windows.OpenThread(windows.THREAD_TERMINATE, false, windows.GetCurrentThreadId())
 		ready <- connectorState{thread: thread, err: err}
@@ -98,15 +102,24 @@ func connectNamedPipe(ctx context.Context, pipe windows.Handle) error {
 	case connectErr := <-connected:
 		return connectErr
 	case <-ctx.Done():
-		cancelErr := cancelSynchronousIO(connector.thread)
-		connectErr := <-connected
-		if cancelErr != nil && !errors.Is(cancelErr, windows.ERROR_NOT_FOUND) {
-			return fmt.Errorf("cancel desktop control named pipe connection: %w", cancelErr)
+		// ready 发送与 ConnectNamedPipe 开始之间仍有窗口。ERROR_NOT_FOUND
+		// 只代表此刻没有 I/O，必须继续取消，不能转成永久等待连接。
+		retry := time.NewTicker(time.Millisecond)
+		defer retry.Stop()
+		for {
+			cancelErr := cancelSynchronousIO(connector.thread)
+			if cancelErr != nil && !errors.Is(cancelErr, windows.ERROR_NOT_FOUND) {
+				return fmt.Errorf("cancel desktop control named pipe connection: %w", cancelErr)
+			}
+			select {
+			case connectErr := <-connected:
+				if connectErr != nil && !errors.Is(connectErr, windows.ERROR_OPERATION_ABORTED) {
+					return connectErr
+				}
+				return ctx.Err()
+			case <-retry.C:
+			}
 		}
-		if connectErr != nil && !errors.Is(connectErr, windows.ERROR_OPERATION_ABORTED) {
-			return connectErr
-		}
-		return ctx.Err()
 	}
 }
 
