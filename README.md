@@ -161,9 +161,7 @@ Official and community Skill sources live in [uvwt/agentdock-skills](https://git
 
 ### Native ACP
 
-Host installations of AgentDock can optionally act as a native ACP client and host a local coding-agent adapter. Official Docker images do not provide ACP or native computer use; Docker browser images continue to support CDP browser tools.
-
-Native computer use is unfinished and disabled in all current distributions. Computer MCP tools are not published or started, and desktop packages do not include the computer helper.
+Host installations of AgentDock can optionally act as a native ACP client and host a local coding-agent adapter. Official Docker images do not provide ACP; Docker browser images continue to support CDP browser tools.
 
 - Desktop control panels provide presets for Codex, Claude, and Grok; the running Core persists capability switches; advanced settings configure the adapter.
 - Use `acp_session` to create and manage sessions, `acp_prompt` to run and observe prompts, and `acp_interaction` to answer agent permission requests.
@@ -290,4 +288,4 @@ Apache License 2.0. See [LICENSE](./LICENSE).
 
 ### Built-in capability switches
 
-Use the native panel or Nexus Nodes → Built-in capabilities to toggle browser/ACP on a specific node. AgentDock owns the persisted choice. Disabling removes tools and cancels active sessions; enabling does not resume previous work. Computer use remains excluded everywhere, and official Docker images cannot enable ACP. See [capability management](docs/builtin-capabilities.md).
+Use the native panel or Nexus Nodes → Built-in capabilities to toggle browser/ACP on a specific node. AgentDock owns the persisted choice. Disabling removes tools and cancels active sessions; enabling does not resume previous work. Official Docker images cannot enable ACP. See [capability management](docs/builtin-capabilities.md).

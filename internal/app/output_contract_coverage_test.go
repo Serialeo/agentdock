@@ -16,11 +16,6 @@ type outputContractCoverageEntry struct {
 // ToolDefinitions 是公开工具定义的单一事实源，tools/list 从同一 registry 派生；新增工具但忘记补契约测试时，门禁会直接失败。
 var outputContractCoverageInventory = map[string]outputContractCoverageEntry{
 	// Engine tests validate these results against the shared output schemas.
-	"computer_status":          {Variants: []string{"success"}},
-	"computer_session":         {Variants: []string{"acquire", "renew", "release"}},
-	"computer_observe":         {Variants: []string{"success"}},
-	"computer_act":             {Variants: []string{"success"}},
-	"computer_stop":            {Variants: []string{"success"}},
 	"agentdock_context":        {Variants: []string{"success"}},
 	"read_file":                {Variants: []string{"success"}},
 	"list_dir":                 {Variants: []string{"success"}},

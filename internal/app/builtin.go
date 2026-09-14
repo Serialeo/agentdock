@@ -42,14 +42,11 @@ func (r *Runtime) initBuiltins() error {
 		return err
 	}
 	r.builtins = &builtinManager{choices: choices, groups: map[string]*builtinGroup{}, listeners: map[int]func(){}}
-	for _, id := range []string{"browser", "acp", "computer"} {
+	for _, id := range []string{"browser", "acp"} {
 		provided := config.BuiltinProvided(id)
 		enabled := choices.Browser
 		if id == "acp" {
 			enabled = choices.ACP
-		}
-		if id == "computer" {
-			enabled = choices.Computer
 		}
 		state := protocol.BuiltinCapability{ID: id, Provided: provided, Enabled: enabled, Tools: []string{}}
 		for _, spec := range toolSpecs {
@@ -147,8 +144,8 @@ func (r *Runtime) BuiltinCapabilities() []protocol.BuiltinCapability {
 	}
 	r.builtins.mu.Lock()
 	defer r.builtins.mu.Unlock()
-	states := make([]protocol.BuiltinCapability, 0, 3)
-	for _, id := range []string{"browser", "acp", "computer"} {
+	states := make([]protocol.BuiltinCapability, 0, 2)
+	for _, id := range []string{"browser", "acp"} {
 		states = append(states, builtinState(r.builtins.groups[id]))
 	}
 	return states
@@ -247,8 +244,6 @@ func (r *Runtime) SetBuiltin(ctx context.Context, update protocol.BuiltinUpdate)
 		choices.Browser = *update.Enabled
 	case "acp":
 		choices.ACP = *update.Enabled
-	case "computer":
-		choices.Computer = *update.Enabled
 	}
 	m.mu.Unlock()
 	// 先完成持久化再改变准入；写入失败不能给 GUI 返回已生效的假象。
@@ -348,8 +343,8 @@ func (r *Runtime) CatalogSnapshot() ([]ToolDefinition, []protocol.BuiltinCapabil
 		}
 		definitions = append(definitions, spec.definition(r.cfg))
 	}
-	states := make([]protocol.BuiltinCapability, 0, 3)
-	for _, id := range []string{"browser", "acp", "computer"} {
+	states := make([]protocol.BuiltinCapability, 0, 2)
+	for _, id := range []string{"browser", "acp"} {
 		states = append(states, builtinState(m.groups[id]))
 	}
 	return definitions, states

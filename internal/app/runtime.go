@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	protocol "github.com/Serialeo/agentdock-protocol"
-	"github.com/uvwt/agentdock/internal/computer"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/envstore"
 	"github.com/uvwt/agentdock/internal/evolution"
@@ -46,7 +45,6 @@ type Runtime struct {
 	files               *toolfile.Service
 	dynamicMCP          *toolmcp.Service
 	media               *toolmedia.Service
-	computer            *computer.Client
 	browser             *toolbrowser.Service
 	browserOwnerMu      sync.RWMutex
 	browserOwners       map[string]browserSessionOwner
@@ -127,24 +125,12 @@ func (r *Runtime) ApplyProjectDeployment(deployment protocol.Deployment) (protoc
 	if r == nil || r.projects == nil {
 		return protocol.Deployment{}, errors.New("Project execution state is not initialized")
 	}
-	// 授权不能代替原生后端：只有 IPC 握手成功才接受 computer Deployment。
-	if deployment.Permissions.Computer != protocol.ComputerPermissionNone && r.computer == nil {
-		return protocol.Deployment{}, toolErrorDetails(protocol.ErrorComputerUnsupported, "native computer helper is not available in this Node", "capability", map[string]any{"required_capability": protocol.ComputerCapability})
-	}
-	if r.computer != nil {
-		if old, ok := r.projects.Deployment(deployment.ID); ok && (old.AppliedRevision != deployment.AppliedRevision || old.Enabled != deployment.Enabled || old.Permissions != deployment.Permissions) {
-			r.computer.Revoke(computer.Owner{Deployment: old.ID, Revision: old.AppliedRevision})
-		}
-	}
 	return r.projects.ApplyDeployment(deployment)
 }
 
 func (r *Runtime) RemoveProjectDeployment(deploymentID string) error {
 	if r == nil || r.projects == nil {
 		return errors.New("Project execution state is not initialized")
-	}
-	if r.computer != nil {
-		r.computer.Revoke(computer.Owner{Deployment: deploymentID})
 	}
 	return r.projects.RemoveDeployment(deploymentID)
 }
@@ -194,18 +180,12 @@ func (r *Runtime) RebindProjectTarget(request protocol.ProjectTargetRebindReques
 func (r *Runtime) RevokeProjectTarget(targetID string) {
 	if r != nil && r.projects != nil {
 		r.projects.RevokeTarget(targetID)
-		if r.computer != nil {
-			r.computer.Revoke(computer.Owner{Target: targetID})
-		}
 	}
 }
 
 func (r *Runtime) RevokeProjectSession(workSessionID string) {
 	if r != nil && r.projects != nil {
 		r.projects.RevokeSession(workSessionID)
-		if r.computer != nil {
-			r.computer.Revoke(computer.Owner{WorkSession: workSessionID})
-		}
 	}
 }
 
@@ -264,11 +244,6 @@ func (r *Runtime) Close() error {
 		}
 		if commandCancel != nil {
 			commandCancel()
-		}
-		if r.computer != nil {
-			if err := r.computer.Close(); err != nil {
-				closeErrors = append(closeErrors, err)
-			}
 		}
 		if err := r.closeBuiltins(); err != nil {
 			closeErrors = append(closeErrors, err)
@@ -339,7 +314,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 		return nil, err
 	}
 	var err error
-	ctx, err = r.refreshPreparedProjectExecution(ctx, name, args)
+	ctx, err = r.refreshPreparedProjectExecution(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +330,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 	return spec.Handler(ctx, r, args)
 }
 
-func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string, arguments ...map[string]any) (context.Context, error) {
+func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string) (context.Context, error) {
 	execution, ok := projectstate.ExecutionFromContext(ctx)
 	if !ok || r == nil || r.projects == nil || r.ws == nil {
 		return ctx, nil
@@ -363,13 +338,7 @@ func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName 
 	executionContext := execution.Context
 	var refreshed projectstate.Execution
 	var err error
-	var args map[string]any
-	if len(arguments) > 0 {
-		args = arguments[0]
-	}
 	switch {
-	case protocol.AllowsHistoricalComputerControl(toolName, args):
-		refreshed, err = r.projects.ResolveSessionControlExecution(&executionContext)
 	case toolName == "session_observe" || toolName == "session_act" || toolName == "acp_session" || toolName == "acp_prompt" || toolName == "acp_interaction":
 		refreshed, err = r.projects.ResolveSessionControlExecution(&executionContext)
 	default:

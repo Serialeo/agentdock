@@ -21,8 +21,6 @@ const (
 	ServerName      = "agentdock"
 	PathModel       = "host"
 	RecallTimeoutMS = 30000
-	// Computer use is unfinished and disabled in all current distributions.
-	ComputerUseEnabled = false
 
 	defaultOAuthAccessTokenTTLSeconds = int64(time.Hour / time.Second)
 	maxOAuthAccessTokenTTLSeconds     = int64(999999 * 24 * 60 * 60)
@@ -156,8 +154,6 @@ func BuiltinProvided(id string) bool {
 		return true
 	case "acp":
 		return !ContainerBuild
-	case "computer":
-		return ComputerUseEnabled && !ContainerBuild
 	default:
 		return false
 	}

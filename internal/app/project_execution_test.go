@@ -100,7 +100,7 @@ func TestProjectNodeFullAccessIsIndependentFromConfiguredFolder(t *testing.T) {
 	if err := os.WriteFile(outsideFile, []byte("outside\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, FullAccess: true, Files: protocol.FileCapabilityNone}
+	permissions := protocol.DeploymentPermissions{FullAccess: true, Files: protocol.FileCapabilityNone}
 	ctx := projectContextForTest(t, runtime, projectFolder, permissions)
 
 	if _, err := runtime.Call(ctx, "read_file", map[string]any{"path": outsideFile}); err != nil {

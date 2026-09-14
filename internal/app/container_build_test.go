@@ -12,12 +12,12 @@ import (
 	"github.com/uvwt/agentdock/internal/config"
 )
 
-func TestDockerDoesNotPublishOrExecuteDesktopTools(t *testing.T) {
+func TestDockerDoesNotPublishOrExecuteACP(t *testing.T) {
 	// 故意不调用 Normalize：程序直接传入配置也不能启用容器没有的能力。
 	executable, _ := os.Executable()
 	cfg := config.Config{
 		AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(),
-		Builtins: builtin.Choices{ACP: true, Browser: true, Computer: true}, ACPCommand: "missing-adapter",
+		Builtins: builtin.Choices{ACP: true, Browser: true}, ACPCommand: "missing-adapter",
 		BrowserExecutablePath: executable,
 		ACPEnvFromEnv:         map[string]string{"TOKEN": "AGENTDOCK_TEST_MISSING_ACP_SECRET"},
 	}
@@ -30,10 +30,10 @@ func TestDockerDoesNotPublishOrExecuteDesktopTools(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if r.acp != nil || r.computer != nil || stateBuiltinTest(r, "acp").Provided {
+	if r.acp != nil || stateBuiltinTest(r, "acp").Provided {
 		t.Fatal("Docker initialized a desktop backend")
 	}
-	for _, name := range []string{"acp_session", "acp_prompt", "acp_interaction", "computer_status", "computer_session", "computer_observe", "computer_act", "computer_stop"} {
+	for _, name := range []string{"acp_session", "acp_prompt", "acp_interaction"} {
 		if _, ok := r.ToolDefinition(name); ok {
 			t.Fatalf("Docker exposed %s", name)
 		}

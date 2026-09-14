@@ -21,13 +21,10 @@ const (
 	projectCapabilityACP
 	projectCapabilityCommandSession
 	projectCapabilityRemoved
-	projectCapabilityComputer
 )
 
 func requiredProjectCapability(name string, args map[string]any) projectCapability {
 	switch name {
-	case protocol.ToolComputerStatus, protocol.ToolComputerStop, protocol.ToolComputerObserve, protocol.ToolComputerSession, protocol.ToolComputerAct:
-		return projectCapabilityComputer
 	case "read_file", "list_dir", "search_text":
 		return projectCapabilityFileRead
 	case "file_edit":
@@ -74,12 +71,6 @@ func (r *Runtime) authorizeProjectTool(ctx context.Context, name string, args ma
 		return nil
 	}
 	permissions := execution.Permissions
-	if capability == projectCapabilityComputer {
-		if permissions.AllowsComputerTool(name) {
-			return nil
-		}
-		return toolErrorDetails(protocol.ErrorCapabilityDenied, "Project Deployment denies native desktop access", "authorization", map[string]any{"tool": name, "target_id": execution.Target.TargetID})
-	}
 	if permissions.FullAccess {
 		switch capability {
 		case projectCapabilityRemoved:

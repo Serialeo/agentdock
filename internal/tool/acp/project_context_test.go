@@ -14,7 +14,7 @@ import (
 )
 
 func acpProjectExecutionForTest(targetID string, allowed bool) projectstate.Execution {
-	permissions := protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone, Files: protocol.FileCapabilityReadOnly, ACP: allowed}
+	permissions := protocol.DeploymentPermissions{Files: protocol.FileCapabilityReadOnly, ACP: allowed}
 	return projectstate.Execution{
 		Deployment: protocol.Deployment{
 			ID: "deployment-1", ProjectID: "project-1", NodeID: "node-1",

@@ -1,5 +1,5 @@
-github.com/Serialeo/agentdock-protocol v0.9.2-0.20260914071720-4050d2d634af h1:OwDqsk/QV35fb8a7joOAjPPIVOplZtJniR04mwBUETw=
-github.com/Serialeo/agentdock-protocol v0.9.2-0.20260914071720-4050d2d634af/go.mod h1:FNA2VLaXM+P4HK5YD/je2/MQPa6y122Qoxtr3TwYQZQ=
+github.com/Serialeo/agentdock-protocol v0.9.2-0.20260914075145-b0beb69cdadb h1:mygWareyir8BBJO7MDq4Sz7W93/ZSRYK/xgYBc1B1SY=
+github.com/Serialeo/agentdock-protocol v0.9.2-0.20260914075145-b0beb69cdadb/go.mod h1:FNA2VLaXM+P4HK5YD/je2/MQPa6y122Qoxtr3TwYQZQ=
 github.com/UserExistsError/conpty v0.1.4 h1:+3FhJhiqhyEJa+K5qaK3/w6w+sN3Nh9O9VbJyBS02to=
 github.com/UserExistsError/conpty v0.1.4/go.mod h1:PDglKIkX3O/2xVk0MV9a6bCWxRmPVfxqZoTG/5sSd9I=
 github.com/ajg/form v1.5.1 h1:t9c7v8JUKu/XxOGBU0yjNpaMloxGEJhUkqFRq0ibGeU=

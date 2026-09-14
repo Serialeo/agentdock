@@ -68,7 +68,7 @@ func TestBuiltinLocalChangePushesCompleteBridgeSnapshot(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("no hello")
 	}
-	if first.Hello == nil || len(first.Hello.Builtins) != 3 {
+	if first.Hello == nil || len(first.Hello.Builtins) != 2 {
 		t.Fatalf("missing capability states: %#v", first)
 	}
 	disabled := false

@@ -8,7 +8,7 @@ import (
 )
 
 func fullProjectPermissionsForTest() protocol.DeploymentPermissions {
-	return protocol.DeploymentPermissions{Computer: protocol.ComputerPermissionNone,
+	return protocol.DeploymentPermissions{
 		Files:      protocol.FileCapabilityReadWrite,
 		Shell:      true,
 		Browser:    true,

@@ -173,8 +173,7 @@ test_volume=""
 
 runtime_container="$(docker run -d --rm -p 127.0.0.1::8765 \
   -e AGENTDOCK_AUTH_TOKEN=runtime-health-value \
-  -e AGENTDOCK_ACP_ARGS_JSON=invalid-json \
-  -e AGENTDOCK_COMPUTER_HELPER_PATH=/missing/helper "$runtime_image")"
+  -e AGENTDOCK_ACP_ARGS_JSON=invalid-json "$runtime_image")"
 wait_for_healthy "$runtime_container" runtime
 runtime_port="$(docker port "$runtime_container" 8765/tcp | awk -F: 'NR == 1 {print $NF}')"
 AGENTDOCK_SMOKE_URL="http://127.0.0.1:$runtime_port" \
@@ -230,8 +229,8 @@ docker run --rm "$browser_image" sh -c '
 test_volume="agentdock-builtin-test-${RANDOM}-${RANDOM}"
 docker volume create "$test_volume" >/dev/null
 docker run --rm -v "$test_volume:/home/agentdock/.agentdock" "$browser_image" sh -c '
-  jq -e ".browser == true and .acp == false and .computer == false" "$HOME/.agentdock/builtin-capabilities.json"
-  printf "{\"browser\":false,\"acp\":false,\"computer\":false}\n" >"$HOME/.agentdock/builtin-capabilities.json"
+  jq -e ".browser == true and .acp == false" "$HOME/.agentdock/builtin-capabilities.json"
+  printf "{\"browser\":false,\"acp\":false}\n" >"$HOME/.agentdock/builtin-capabilities.json"
 '
 docker run --rm -v "$test_volume:/home/agentdock/.agentdock" "$browser_image" sh -c '
   jq -e ".browser == false" "$HOME/.agentdock/builtin-capabilities.json"

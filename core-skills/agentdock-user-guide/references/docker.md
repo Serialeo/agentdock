@@ -2,7 +2,7 @@
 
 适用于官方 AgentDock Docker 镜像或基于它的 Compose 部署。宿主机可能是 macOS、Windows 或 Linux，但配置事实源是**容器创建配置**，不是宿主操作系统的 Desktop 配置文件。
 
-官方 runtime、dev、browser 镜像均不提供 ACP 和原生 computer use。镜像中的 Core 以 `agentdock_docker` 构建，忽略 ACP 与 computer helper 配置，不启动相关进程，也不发布 `acp_*` / `computer_*` 工具。浏览器版的 CDP 工具继续按原有配置启用；NexusDock 容器仍可转发其他节点实际提供的 ACP 等工具。Computer use 在所有当前发行包中均已关闭。
+官方 runtime、dev、browser 镜像均不提供 ACP。镜像中的 Core 以 `agentdock_docker` 构建，忽略 ACP 后端配置，不启动适配器，也不发布 `acp_*` 工具。浏览器版的 CDP 工具继续由节点内置能力开关管理；NexusDock 容器仍可转发其他节点实际提供的 ACP 等工具。
 
 ## 配置事实源
 

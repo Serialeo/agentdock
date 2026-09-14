@@ -12,9 +12,8 @@ import (
 )
 
 type Choices struct {
-	Browser  bool `json:"browser"`
-	ACP      bool `json:"acp"`
-	Computer bool `json:"computer"`
+	Browser bool `json:"browser"`
+	ACP     bool `json:"acp"`
 }
 
 func Path(home string) string { return filepath.Join(home, "builtin-capabilities.json") }

@@ -121,8 +121,8 @@ func TestBuiltinDisableCancelsAdmittedCallsAndPersists(t *testing.T) {
 	}
 }
 
-func TestBuiltinMissingBackendAndReleasePolicyRemainIndependent(t *testing.T) {
-	cfg := config.Config{AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(), BrowserExecutablePath: filepath.Join(t.TempDir(), "missing"), ACPCommand: "/missing/adapter", Builtins: builtin.Choices{Browser: true, ACP: true, Computer: true}}
+func TestBuiltinMissingBackendDoesNotDisableCoreTools(t *testing.T) {
+	cfg := config.Config{AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(), BrowserExecutablePath: filepath.Join(t.TempDir(), "missing"), ACPCommand: "/missing/adapter", Builtins: builtin.Choices{Browser: true, ACP: true}}
 	r, err := NewRuntime(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -138,11 +138,8 @@ func TestBuiltinMissingBackendAndReleasePolicyRemainIndependent(t *testing.T) {
 		t.Fatal("missing optional backend broke core tools")
 	}
 	yes := true
-	if _, err := r.SetBuiltin(t.Context(), protocol.BuiltinUpdate{ID: "computer", Enabled: &yes}); err == nil {
-		t.Fatal("release exclusion overridden")
-	}
-	if stateBuiltinTest(r, "computer").Provided {
-		t.Fatal("computer was offered")
+	if _, err := r.SetBuiltin(t.Context(), protocol.BuiltinUpdate{ID: "external-service", Enabled: &yes}); err == nil {
+		t.Fatal("external service accepted as a builtin group")
 	}
 }
 

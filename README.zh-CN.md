@@ -292,4 +292,4 @@ Apache License 2.0. See [LICENSE](./LICENSE).
 
 ### 内置能力手动开关
 
-在原生面板切换 browser/ACP，或在 Nexus「运行环境 → Nodes → 内置能力」管理指定节点。选择持久化在 AgentDock，关闭会撤下工具并清理运行中会话；开启不恢复旧任务。computer use 所有发行包继续排除，Docker ACP 不可开启。详见 [内置能力管理](docs/builtin-capabilities.md)。
+在原生面板切换 browser/ACP，或在 Nexus「运行环境 → Nodes → 内置能力」管理指定节点。选择持久化在 AgentDock，关闭会撤下工具并清理运行中会话；开启不恢复旧任务。Docker ACP 不可开启。详见 [内置能力管理](docs/builtin-capabilities.md)。

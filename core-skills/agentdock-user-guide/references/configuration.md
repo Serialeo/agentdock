@@ -1,6 +1,6 @@
 # AgentDock 运行配置速查
 
-本文件描述 AgentDock Core 的能力选择与主要启动参数。browser、ACP、computer 的用户选择由 Core 原子保存到 `AGENTDOCK_HOME/builtin-capabilities.json`；通过原生面板或 Nexus 指定节点的「内置能力」修改，热切换无需重启。下表的后端参数仍在启动时读取。
+本文件描述 AgentDock Core 的能力选择与主要启动参数。browser、ACP 的用户选择由 Core 原子保存到 `AGENTDOCK_HOME/builtin-capabilities.json`；通过原生面板或 Nexus 指定节点的「内置能力」修改，热切换无需重启。下表的后端参数仍在启动时读取。
 
 ## 常用配置
 
@@ -31,7 +31,7 @@
 
 Coding Agent 的发现、Codex / Claude Adapter 安装、Grok stdio 模式、平台配置和验证流程见 `acp.md`。
 
-原有 browser/ACP 环境启用开关已移除。开启但后端未就绪时，内置能力界面显示原因；computer 在所有当前发行包中排除，官方 Docker 也排除 ACP，权限设置不能解除发行限制。外部 MCP 服务有独立配置入口，不属于这些内置组。
+原有 browser/ACP 环境启用开关已移除。开启但后端未就绪时，内置能力界面显示原因；官方 Docker 排除 ACP，权限设置不能解除发行限制。外部 MCP 服务有独立配置入口，不属于这些内置组。
 
 ## 重要边界
 

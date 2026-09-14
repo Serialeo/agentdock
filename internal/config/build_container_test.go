@@ -15,7 +15,7 @@ func TestDockerIgnoresUnavailableBackendConfiguration(t *testing.T) {
 	if cfg.ACPBackendError != "" {
 		t.Fatal("Docker parsed excluded ACP backend")
 	}
-	if BuiltinProvided("acp") || BuiltinProvided("computer") || !BuiltinProvided("browser") {
+	if BuiltinProvided("acp") || !BuiltinProvided("browser") {
 		t.Fatal("invalid Docker policy")
 	}
 }

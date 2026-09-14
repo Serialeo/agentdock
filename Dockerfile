@@ -11,7 +11,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 
-# 官方容器仅提供服务端工具，不启用 ACP 或原生桌面 computer use。
+# 官方容器不提供 ACP；浏览器版保留 CDP 工具。
 RUN CGO_ENABLED=0 go build -tags agentdock_docker -trimpath \
       -ldflags="-s -w -X github.com/uvwt/agentdock/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/uvwt/agentdock/internal/buildinfo.BuildDate=${BUILD_DATE}" \
       -o /out/agentdock ./cmd/agentdock
@@ -98,7 +98,7 @@ RUN apt-get update \
     && printf '%s\n' 'CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"' > /etc/chromium.d/agentdock \
     && rm -rf /var/lib/apt/lists/*
 
-RUN printf '%s\n' '{"browser":true,"acp":false,"computer":false}' > /usr/local/share/agentdock/builtin-defaults.json
+RUN printf '%s\n' '{"browser":true,"acp":false}' > /usr/local/share/agentdock/builtin-defaults.json
 ENV AGENTDOCK_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
 USER agentdock:agentdock

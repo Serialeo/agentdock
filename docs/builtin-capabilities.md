@@ -2,13 +2,12 @@
 
 AgentDock 是节点配置的唯一真源。Windows 控制面板、macOS 高级设置中的 browser/ACP 复选框立即通过本地控制端点调用运行中的 Core；Nexus 的「运行环境 → Nodes → 内置能力」通过已有 `runtime.request` Bridge 修改明确指定的节点。离线时显示不可操作，不在 Nexus 排队或回放配置。
 
-选择原子保存到 `AGENTDOCK_HOME/builtin-capabilities.json`。普通桌面设置保存只更新后端参数，不再保存开关，因此不会覆盖另一界面刚提交的选择。原有 `AGENTDOCK_BROWSER_ENABLED`、`AGENTDOCK_ACP_ENABLED` 和 `--browser-enabled` / `config update --acp-enabled` 已移除；computer helper 配置也已从发行版配置删除。首次启动默认关闭可选组；Docker browser 镜像首次启动时写入 browser 开启的初始选择，后续启动保留用户选择。
+选择原子保存到 `AGENTDOCK_HOME/builtin-capabilities.json`。普通桌面设置保存只更新后端参数，不再保存开关，因此不会覆盖另一界面刚提交的选择。原有 `AGENTDOCK_BROWSER_ENABLED`、`AGENTDOCK_ACP_ENABLED` 和 `--browser-enabled` / `config update --acp-enabled` 已移除。首次启动默认关闭可选组；Docker browser 镜像首次启动时写入 browser 开启的初始选择，后续启动保留用户选择。
 
 | 组 | 工具 | 当前发行策略 | 后端生命周期 |
 | --- | --- | --- | --- |
 | browser | browser_session、browser_act、browser_snapshot | 原生和 Docker 都提供 | 验证本地 Chromium 可执行文件或远程 CDP 只读握手；本地浏览器在建立会话时启动 |
 | acp | acp_session、acp_prompt、acp_interaction | 原生提供，官方 Docker 排除 | 验证配置并与 adapter 握手；关闭中断 detached prompt、清理 interaction 和进程 |
-| computer | computer_status、computer_session、computer_observe、computer_act、computer_stop | 所有当前发行包排除 | 不启动 helper、不打包；实验实现保留 |
 
 文件、命令、Skills、任务和内置管理入口不受这些开关影响。外部 MCP 服务仍由 `mcp_manage` 及独立 MCP 页面管理，不是这里的内置工具组。开启组不授予 Deployment 权限；Full Access 不绕过用户关闭、后端不可用或发行排除。
 

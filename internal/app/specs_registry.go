@@ -16,7 +16,6 @@ func buildToolSpecs() []ToolSpec {
 	specs = append(specs, imageToolSpecs()...)
 	specs = append(specs, recallToolSpecs()...)
 	specs = append(specs, browserToolSpecs()...)
-	specs = append(specs, computerToolSpecs()...)
 	return specs
 }
 
