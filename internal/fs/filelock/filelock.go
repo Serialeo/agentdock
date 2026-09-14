@@ -156,14 +156,9 @@ func removeSafeStale(lockPath string, now time.Time) bool {
 	if len(entries) != 1 || entries[0].IsDir() || !validOwnerName(entries[0].Name()) {
 		return false
 	}
-	info, err := entries[0].Info()
-	if err != nil {
-		return errors.Is(err, os.ErrNotExist)
-	}
-	if now.Sub(info.ModTime()) <= staleAfter {
-		return false
-	}
 	ownerPath := filepath.Join(lockPath, entries[0].Name())
+	// 强制退出不会执行 release。已确认 owner 进程结束时必须立即回收，
+	// 否则正常升级/重启也会被新鲜的遗留锁阻塞十分钟；活进程和未知 PID 仍受保护。
 	if ownerPIDAlive(ownerPath) {
 		return false
 	}

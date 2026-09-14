@@ -96,27 +96,33 @@ func TestAcquireDoesNotStealActiveLockWhenDirectoryTimestampIsOld(t *testing.T) 
 }
 
 func TestAcquireRecoversStaleLockOwnedByDeadProcess(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.lock")
-	if err := os.Mkdir(path, 0o700); err != nil {
-		t.Fatal(err)
+	for _, age := range []time.Duration{0, staleAfter + time.Minute} {
+		t.Run(age.String(), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.lock")
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const deadPID = 1 << 30
+			if processAlive(deadPID) {
+				t.Skipf("test PID %d unexpectedly exists", deadPID)
+			}
+			ownerPath := filepath.Join(path, ownerPrefix+strings.Repeat("a", 32))
+			if err := os.WriteFile(ownerPath, []byte("1073741824\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stale := time.Now().Add(-age)
+			if err := os.Chtimes(ownerPath, stale, stale); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			release, err := Acquire(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			release()
+		})
 	}
-	const deadPID = 1 << 30
-	if processAlive(deadPID) {
-		t.Skipf("test PID %d unexpectedly exists", deadPID)
-	}
-	ownerPath := filepath.Join(path, ownerPrefix+strings.Repeat("a", 32))
-	if err := os.WriteFile(ownerPath, []byte("1073741824\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stale := time.Now().Add(-staleAfter - time.Minute)
-	if err := os.Chtimes(ownerPath, stale, stale); err != nil {
-		t.Fatal(err)
-	}
-	release, err := Acquire(context.Background(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	release()
 }
 
 func TestAcquireDoesNotRemoveStaleLockWithInvalidOwnerPID(t *testing.T) {

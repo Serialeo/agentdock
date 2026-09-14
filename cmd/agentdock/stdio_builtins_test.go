@@ -44,6 +44,19 @@ func TestStdioFreshHomeCanManageBuiltinsAndRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// MCP 与本地控制是独立监听器；MCP 初始化完成不代表 control socket 已绑定。
+		for {
+			var status bytes.Buffer
+			if err := desktopruntime.RunBuiltinCommand(ctx, []string{"list", "--runtime-root", root}, &status, os.Stderr); err == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				_ = session.Close()
+				t.Fatal(ctx.Err())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
 		return session
 	}
 	checkBrowser := func(session *mcpsdk.ClientSession, want bool) {

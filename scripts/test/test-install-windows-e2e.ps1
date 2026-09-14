@@ -230,6 +230,15 @@ try {
     Assert-RedirectedManifestRecovery
     Write-Host 'AgentDock Windows full install, in-place upgrade, and redirected manifest recovery passed.'
 }
+catch {
+    # 必须在 finally 删除临时安装目录之前保留 Core 的实际失败原因。
+    $coreErrorLog = Join-Path $testRoot 'logs\agentdock.err.log'
+    if (Test-Path -LiteralPath $coreErrorLog -PathType Leaf) {
+        Write-Host 'AgentDock core stderr before E2E cleanup:'
+        Get-Content -LiteralPath $coreErrorLog -Tail 80 | Write-Host
+    }
+    throw
+}
 finally {
     Stop-TestAgentDock
     Remove-ItemProperty -LiteralPath $runKey -Name $runValueName -ErrorAction SilentlyContinue
