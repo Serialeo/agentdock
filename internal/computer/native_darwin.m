@@ -113,7 +113,7 @@ int ad_click(ADShot *shot,double x,double y,int button,void *cancelled) { @autor
  CGEventRef press=CGEventCreateMouseEvent(NULL,down,point,btn),release=CGEventCreateMouseEvent(NULL,up,point,btn);
  if(!move||!press||!release){if(move)CFRelease(move);if(press)CFRelease(press);if(release)CFRelease(release);return 5;}
  CGEventSetIntegerValueField(press,kCGMouseEventClickState,1);CGEventSetIntegerValueField(release,kCGMouseEventClickState,1);
- if(atomic_load((_Atomic int*)cancelled)){CFRelease(move);CFRelease(press);CFRelease(release);return 6;}
+ if(!desktopReady() || atomic_load((_Atomic int*)cancelled)){CFRelease(move);CFRelease(press);CFRelease(release);return 6;}
  CGEventPost(kCGHIDEventTap,move);CGEventPost(kCGHIDEventTap,press);CGEventPost(kCGHIDEventTap,release);
  CFRelease(move);CFRelease(press);CFRelease(release);return 0;
 }}

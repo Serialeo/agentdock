@@ -241,3 +241,44 @@ func TestNativeRefusalExplainsWhyAndIsRemembered(t *testing.T) {
 		t.Fatalf("%v %v", got, err)
 	}
 }
+
+type lockableBackend struct {
+	fakeBackend
+	locked atomic.Bool
+}
+
+func (b *lockableBackend) Status(ctx context.Context) (protocol.ComputerBackendStatus, error) {
+	s, e := b.fakeBackend.Status(ctx)
+	if b.locked.Load() {
+		s.DesktopState = "locked"
+	}
+	return s, e
+}
+func TestUnlockDoesNotRestoreOldLeaseOrObservation(t *testing.T) {
+	f := &lockableBackend{}
+	e, err := NewEngine(t.TempDir(), f, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	got, _, err := call(t, e, protocol.ToolComputerSession, map[string]any{"action": "acquire", "desktop_id": "desktop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := got["session"].(map[string]any)["session_id"].(string)
+	got, _, err = call(t, e, protocol.ToolComputerObserve, map[string]any{"desktop_id": "desktop", "display_id": "display"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := got["observation_id"].(string)
+	f.locked.Store(true)
+	e.Maintain()
+	f.locked.Store(false)
+	e.Maintain()
+	if _, _, err = call(t, e, protocol.ToolComputerAct, action(session, observation, "after-unlock")); err == nil {
+		t.Fatal("unlock restored old input authorization")
+	}
+	if f.clicks.Load() != 0 {
+		t.Fatal("input submitted after unlock")
+	}
+}

@@ -121,6 +121,9 @@ func (n *nativeBackend) Click(ctx context.Context, s Snapshot, p protocol.Comput
 	}
 	code := C.ad_click(&shot, C.double(s.Transform[0]*p.X+s.Transform[4]), C.double(s.Transform[3]*p.Y+s.Transform[5]), C.int(b), flag)
 	if code == 6 {
+		if ctx.Err() == nil {
+			return result, failure(protocol.ErrorComputerDesktopUnavailable, "desktop unavailable before input")
+		}
 		return result, ctx.Err()
 	}
 	if code != 0 {

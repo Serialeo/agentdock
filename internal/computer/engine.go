@@ -146,8 +146,15 @@ func (e *Engine) denied(owner Owner) bool {
 	return false
 }
 func (e *Engine) Maintain() {
+	// 失去交互桌面即撤销租约，解锁不会恢复原来的输入资格。
+	// 原生查询在状态锁外执行，stop 不等待捕获或系统查询。
+	status, statusErr := e.backend.Status(context.Background())
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if statusErr != nil || status.DesktopState != "interactive" {
+		e.cancelLocked()
+		clear(e.observations)
+	}
 	if e.session != nil && time.Now().After(e.session.Until) {
 		e.cancelLocked()
 	}
@@ -476,18 +483,33 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 		return nil, nil, failure(protocol.ErrorComputerSessionRevoked, "local stop is latched")
 	}
 	r := record{Owner: req.Owner, Digest: digest, Result: protocol.ComputerActionResult{OperationID: a.Operation, State: "executing", Effects: "none", Input: protocol.ComputerInputResult{Status: "not_submitted"}, ObservationStatus: "not_requested", Verification: "not_checked"}}
+	e.records[key] = r
+	until := e.session.Until
+	e.mu.Unlock()
+	// 持久化不占用状态锁；停止不应等待 fsync。写盘返回后再次确认租约。
 	if err = e.save(r); err != nil {
+		e.mu.Lock()
+		delete(e.records, key)
 		e.mu.Unlock()
 		return nil, nil, fmt.Errorf("persist input intent: %w", err)
 	}
-	e.records[key] = r
-	// 任何尝试过的 observation 都消费掉；OS 拒绝后也必须重新观察。
+	e.mu.Lock()
+	clickErr := e.validLease(req.Owner, a.Session)
+	if clickErr == nil {
+		clickErr = ctx.Err()
+	}
+	if clickErr == nil && e.stoppedLocally() {
+		e.cancelLocked()
+		clickErr = failure(protocol.ErrorComputerSessionRevoked, "local stop is latched")
+	}
 	e.sequence++
-	until := e.session.Until
 	e.mu.Unlock()
+	input := protocol.ComputerInputResult{Status: "not_submitted"}
 	inputCtx, inputCancel := context.WithDeadline(ctx, until)
 	defer inputCancel()
-	input, clickErr := e.backend.Click(inputCtx, ev.Snapshot, *p, a.Action.Button)
+	if clickErr == nil {
+		input, clickErr = e.backend.Click(inputCtx, ev.Snapshot, *p, a.Action.Button)
+	}
 	r.Result.Input = input
 	r.Result.State = "finished"
 	switch input.Status {
@@ -513,8 +535,8 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 	// 先落盘输入结果，后取新截图。截图失败不得导致原点击重试。
 	e.mu.Lock()
 	e.records[key] = r
-	err = e.save(r)
 	e.mu.Unlock()
+	err = e.save(r)
 	if err != nil {
 		return nil, nil, failure(protocol.ErrorComputerExecutionUnknown, "input returned but durable outcome could not be saved; do not repeat this operation")
 	}
@@ -529,8 +551,8 @@ func (e *Engine) act(ctx context.Context, req Request) (json.RawMessage, []byte,
 	}
 	e.mu.Lock()
 	e.records[key] = r
-	err = e.save(r)
 	e.mu.Unlock()
+	err = e.save(r)
 	if err != nil {
 		return nil, nil, failure(protocol.ErrorComputerExecutionUnknown, "could not persist final observation metadata; query operation status")
 	}
@@ -541,7 +563,7 @@ func (e *Engine) SetEnabled(enabled bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.enabled = enabled
-	if !enabled {
+	if !enabled || e.stoppedLocally() {
 		e.cancelLocked()
 	}
 }

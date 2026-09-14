@@ -279,6 +279,16 @@ func (n *nativeBackend) Click(ctx context.Context, s Snapshot, p protocol.Comput
 	if err = ctx.Err(); err != nil {
 		return none, err
 	}
+	if !interactive() {
+		return none, failure(protocol.ErrorComputerDesktopUnavailable, "desktop unavailable before input")
+	}
+	current, currentRect, checkErr := windowState()
+	if checkErr != nil || current != h || currentRect != r {
+		return none, failure(protocol.ErrorComputerObservationStale, "target changed before input")
+	}
+	if err = ctx.Err(); err != nil {
+		return none, err
+	}
 	accepted := int(ucall("SendInput", 3, uintptr(unsafe.Pointer(&inputs[0])), unsafe.Sizeof(inputs[0])))
 	requested := 3
 	result := protocol.ComputerInputResult{Status: "accepted", RequestedEvents: &requested, AcceptedEvents: &accepted}
