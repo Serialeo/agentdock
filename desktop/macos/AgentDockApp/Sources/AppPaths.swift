@@ -37,10 +37,8 @@ struct ServiceConfiguration: Equatable {
         "AGENTDOCK_PORT",
         "AGENTDOCK_LOG_LEVEL",
         "AGENTDOCK_MCP_APPS_ENABLED",
-        "AGENTDOCK_BROWSER_ENABLED",
         "AGENTDOCK_BROWSER_CDP_URL",
         "AGENTDOCK_BROWSER_REUSE_EXISTING_CDP",
-        "AGENTDOCK_ACP_ENABLED",
         "AGENTDOCK_ACP_AGENT",
         "AGENTDOCK_ACP_COMMAND",
         "AGENTDOCK_ACP_ARGS_JSON",
@@ -60,10 +58,8 @@ struct ServiceConfiguration: Equatable {
     let oauthPassword: String
     let logLevel: String
     let mcpAppsEnabled: Bool
-    let browserEnabled: Bool
     let browserCDPURL: String
     let browserReuseExistingCDP: Bool
-    let acpEnabled: Bool
     let acpAgent: ACPAgentPreset
     let acpCommand: String
     let acpArgs: [String]
@@ -110,10 +106,8 @@ struct ServiceConfiguration: Equatable {
             oauthPassword: values["AGENTDOCK_OAUTH_PASSWORD"] ?? "",
             logLevel: normalizedLogLevel(values["AGENTDOCK_LOG_LEVEL"] ?? "info"),
             mcpAppsEnabled: parseBool(values["AGENTDOCK_MCP_APPS_ENABLED"], defaultValue: true),
-            browserEnabled: parseBool(values["AGENTDOCK_BROWSER_ENABLED"]),
             browserCDPURL: values["AGENTDOCK_BROWSER_CDP_URL"] ?? "",
             browserReuseExistingCDP: parseBool(values["AGENTDOCK_BROWSER_REUSE_EXISTING_CDP"]),
-            acpEnabled: parseBool(values["AGENTDOCK_ACP_ENABLED"]),
             acpAgent: acpAgent,
             acpCommand: values["AGENTDOCK_ACP_COMMAND"] ?? "",
             acpArgs: decodeStringArray(values["AGENTDOCK_ACP_ARGS_JSON"])

@@ -3,13 +3,15 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"math"
+	"testing"
+
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/Serialeo/agentdock-protocol/mcpcontract"
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 	projectstate "github.com/uvwt/agentdock/internal/project"
 	toolcontract "github.com/uvwt/agentdock/internal/tool/contract"
-	"math"
-	"testing"
 )
 
 func TestComputerContractsCompileButRemainDisabled(t *testing.T) {
@@ -29,7 +31,7 @@ func TestComputerContractsCompileButRemainDisabled(t *testing.T) {
 			t.Fatalf("%s output: %v", name, err)
 		}
 		spec, exists := toolSpecByName(name)
-		if !exists || spec.available(config.Config{}) || spec.available(config.Config{ComputerAvailable: true}) {
+		if !exists || spec.Group != "computer" {
 			t.Fatalf("unfinished computer tool is not disabled: %s", name)
 		}
 		if mcpcontract.IsCanonicalTool(name) {
@@ -42,14 +44,14 @@ func TestComputerReleaseDoesNotStartOrExposeBackend(t *testing.T) {
 	// A stale helper path or programmatic availability flag cannot enable the MCP.
 	cfg := config.Config{
 		AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(),
-		ComputerAvailable: true, ComputerHelperPath: "unfinished-helper",
+		Builtins: builtin.Choices{Computer: true},
 	}
 	r, err := NewRuntime(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = r.Close() })
-	if r.computer != nil || r.Config().ComputerAvailable || r.Config().ComputerHelperPath != "" {
+	if r.computer != nil || stateBuiltinTest(r, "computer").Provided {
 		t.Fatal("release enabled a computer backend")
 	}
 	for _, name := range mcpcontract.ComputerToolNames() {
@@ -57,7 +59,7 @@ func TestComputerReleaseDoesNotStartOrExposeBackend(t *testing.T) {
 			t.Fatalf("release exposed %s", name)
 		}
 		_, err := r.Call(context.Background(), name, nil)
-		requireAppToolErrorCode(t, err, "UNKNOWN_TOOL")
+		requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
 	}
 }
 func TestComputerActContractRejectsUnsafeShapes(t *testing.T) {

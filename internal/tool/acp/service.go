@@ -20,3 +20,10 @@ func (s *Service) Close() error {
 	}
 	return s.manager.Close()
 }
+
+func (s *Service) CloseWithReason(reason string) error {
+	if s == nil || s.manager == nil {
+		return nil
+	}
+	return s.manager.CloseWithReason(reason)
+}

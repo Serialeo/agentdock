@@ -168,7 +168,7 @@ export AGENTDOCK_COMMAND_ENV_FROM_ENV_JSON='{"NIX_LD":"NIX_LD","NIX_LD_LIBRARY_P
 
 AgentDock 可以选择作为 ACP Client 原生托管本地 Coding Agent adapter。
 
-- 桌面控制面板提供 Codex、Claude 和 Grok 预设；是否启用 ACP 以及选择哪个 adapter 由宿主配置决定。
+- 桌面控制面板提供 Codex、Claude 和 Grok 预设；开关立即由本机 Core 保存，adapter 参数仍由高级设置管理。
 - 使用 `acp_session` 创建和管理会话，使用 `acp_prompt` 发起并观察 prompt，使用 `acp_interaction` 响应 Agent 的权限请求。
 - 可选 ACP 操作只会在已连接 adapter 声明相应能力时开放。
 - ACP 工作目录遵循宿主进程或容器的安全边界，而不是 AgentDock 文件系统 allowlist。
@@ -289,3 +289,7 @@ Apache License 2.0. See [LICENSE](./LICENSE).
 ## 交流反馈
 
 [加入 QQ 群（1081337019）](https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info)
+
+### 内置能力手动开关
+
+在原生面板切换 browser/ACP，或在 Nexus「运行环境 → Nodes → 内置能力」管理指定节点。选择持久化在 AgentDock，关闭会撤下工具并清理运行中会话；开启不恢复旧任务。computer use 所有发行包继续排除，Docker ACP 不可开启。详见 [内置能力管理](docs/builtin-capabilities.md)。

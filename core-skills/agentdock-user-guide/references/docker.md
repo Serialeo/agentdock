@@ -79,7 +79,7 @@ ports:
 
 官方 Dockerfile 的 browser 变体会启用浏览器并把 Chromium 路径配置为 `/usr/bin/chromium`。普通 runtime 镜像没有同样的浏览器依赖保证。
 
-用户询问“为什么 Docker 里启用 browser 仍不可用”时，先确认实际镜像变体和容器内浏览器可执行文件，不要只把 `AGENTDOCK_BROWSER_ENABLED=true` 作为充分条件。
+用户询问“为什么 Docker 里启用 browser 仍不可用”时，先查看目标节点的内置能力状态及原因，再确认镜像变体和容器内浏览器可执行文件或 CDP 后端。browser 镜像仅在首次启动时写入开启默认值，后续保留节点的持久化选择。
 
 ## 验证
 

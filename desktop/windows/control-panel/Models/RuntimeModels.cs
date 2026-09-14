@@ -67,8 +67,6 @@ public sealed class ControlPanelSettings
     [JsonPropertyName("mcp_apps_enabled")]
     public bool McpAppsEnabled { get; set; } = true;
 
-    [JsonPropertyName("browser_enabled")]
-    public bool BrowserEnabled { get; set; }
 
     [JsonPropertyName("browser_cdp_url")]
     public string BrowserCdpUrl { get; set; } = "";
@@ -76,8 +74,6 @@ public sealed class ControlPanelSettings
     [JsonPropertyName("browser_reuse_existing_cdp")]
     public bool BrowserReuseExistingCdp { get; set; }
 
-    [JsonPropertyName("acp_enabled")]
-    public bool AcpEnabled { get; set; }
 
     [JsonPropertyName("acp_agent")]
     public string AcpAgent { get; set; } = "codex";

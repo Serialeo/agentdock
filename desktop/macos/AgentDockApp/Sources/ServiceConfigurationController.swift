@@ -5,10 +5,8 @@ struct EditableServiceSettings {
     let port: Int
     let logLevel: String
     let mcpAppsEnabled: Bool
-    let browserEnabled: Bool
     let browserCDPURL: String
     let browserReuseExistingCDP: Bool
-    let acpEnabled: Bool
     let acpAgent: ACPAgentPreset
     let acpCommand: String
     let acpArgs: [String]
@@ -21,34 +19,30 @@ struct EditableServiceSettings {
         }
 
         let browserCDPURL = try Self.normalizeBrowserCDPURL(browserCDPURL)
-        if browserEnabled, browserCDPURL.isEmpty, !browserReuseExistingCDP, BrowserSupportController.detectExecutable() == nil {
-            throw ValidationError("未检测到受支持的 Chrome、Chromium 或 Microsoft Edge，且未配置外部 CDP。")
-        }
+
 
         var command = acpAgent == .custom
             ? acpCommand.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
         var arguments = acpAgent == .custom ? acpArgs : []
-        if acpEnabled {
+        do {
             let resolution = acpAgent.resolveAdapter(
                 configuredCommand: acpCommand,
                 configuredArguments: acpArgs
             )
-            guard resolution.available else {
-                throw ValidationError("\(acpAgent.title) 不可用：\(acpAgent.missingAdapterMessage)。")
+            if resolution.available {
+                command = resolution.command
+                arguments = resolution.arguments
             }
-            command = resolution.command
-            arguments = resolution.arguments
+
         }
 
         return EditableServiceSettings(
             port: port,
             logLevel: normalizedLogLevel,
             mcpAppsEnabled: mcpAppsEnabled,
-            browserEnabled: browserEnabled,
             browserCDPURL: browserCDPURL,
             browserReuseExistingCDP: browserReuseExistingCDP,
-            acpEnabled: acpEnabled,
             acpAgent: acpAgent,
             acpCommand: command,
             acpArgs: arguments
@@ -90,15 +84,13 @@ final class ServiceConfigurationController {
             "AGENTDOCK_PORT": String(settings.port),
             "AGENTDOCK_LOG_LEVEL": settings.logLevel,
             "AGENTDOCK_MCP_APPS_ENABLED": settings.mcpAppsEnabled ? "true" : "false",
-            "AGENTDOCK_BROWSER_ENABLED": settings.browserEnabled ? "true" : "false",
             "AGENTDOCK_BROWSER_CDP_URL": settings.browserCDPURL,
             "AGENTDOCK_BROWSER_REUSE_EXISTING_CDP": settings.browserReuseExistingCDP ? "true" : "false",
-            "AGENTDOCK_ACP_ENABLED": settings.acpEnabled ? "true" : "false",
             "AGENTDOCK_ACP_AGENT": settings.acpAgent.rawValue,
             "AGENTDOCK_ACP_COMMAND": settings.acpCommand,
             "AGENTDOCK_ACP_ARGS_JSON": try ACPDesktopConfiguration.encodeArguments(settings.acpArgs),
         ]
-        if settings.acpEnabled {
+        do {
             // 桌面预设依赖各 Agent 自己的登录状态，不继承上一个 Agent 的密钥映射。
             replacements["AGENTDOCK_ACP_ENV_FROM_ENV_JSON"] = "{}"
         }

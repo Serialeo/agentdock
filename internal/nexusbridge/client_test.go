@@ -22,24 +22,27 @@ import (
 	"github.com/uvwt/agentdock/internal/runtimeapi"
 )
 
-func TestBridgeToolDescriptorsPreservePresentationBinding(t *testing.T) {
-	descriptors, err := bridgeToolDescriptors([]map[string]any{
-		{
-			"name":        "file_edit",
-			"inputSchema": map[string]any{"type": "object"},
-			"_meta":       map[string]any{"ui": map[string]any{"resourceUri": protocol.FileChangeUIResourceURI}},
-		},
-	})
+func TestBridgeSnapshotPreservesPresentationBinding(t *testing.T) {
+	cfg := config.Config{AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(), MCPAppsEnabled: true}
+	runtime, err := app.NewRuntime(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(descriptors) != 1 || descriptors[0].Name != "file_edit" {
-		t.Fatalf("descriptors = %#v", descriptors)
+	defer runtime.Close()
+	hello, err := mcp.NewServer(runtime, cfg).NodeSnapshot()
+	if err != nil {
+		t.Fatal(err)
 	}
-	ui, ok := descriptors[0].Meta["ui"].(map[string]any)
-	if !ok || ui["resourceUri"] != protocol.FileChangeUIResourceURI {
-		t.Fatalf("presentation meta = %#v", descriptors[0].Meta)
+	for _, descriptor := range hello.Tools {
+		if descriptor.Name == "file_edit" {
+			ui, ok := descriptor.Meta["ui"].(map[string]any)
+			if !ok || ui["resourceUri"] != protocol.FileChangeUIResourceURI {
+				t.Fatalf("presentation meta = %#v", descriptor.Meta)
+			}
+			return
+		}
 	}
+	t.Fatal("snapshot omitted file_edit")
 }
 
 func TestBridgeHelloSeparatesToolsFromBridgeCapabilities(t *testing.T) {

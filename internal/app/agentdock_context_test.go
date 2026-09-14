@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 	skillstate "github.com/uvwt/agentdock/internal/skill/state"
 )
@@ -99,6 +100,7 @@ func TestAgentDockContextExposesShortACPOrientationWhenEnabled(t *testing.T) {
 		t.Fatalf("context should omit ACP while disabled: %#v", disabledContext.ACP)
 	}
 
+	t.Setenv("GO_WANT_OUTPUT_CONTRACT_ACP_HELPER", "1")
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -107,9 +109,9 @@ func TestAgentDockContextExposesShortACPOrientationWhenEnabled(t *testing.T) {
 	enabled := config.Config{
 		AgentDockDefaultDir: root,
 		AgentDockHome:       filepath.Join(t.TempDir(), ".agentdock"),
-		ACPEnabled:          true,
+		Builtins:            builtin.Choices{ACP: true},
 		ACPAgentName:        "helper",
-		ACPCommand:          executable,
+		ACPCommand:          executable, ACPArgs: []string{"-test.run=^TestOutputContractACPHelper$"}, ACPEnvFromEnv: map[string]string{"GO_WANT_OUTPUT_CONTRACT_ACP_HELPER": "GO_WANT_OUTPUT_CONTRACT_ACP_HELPER"},
 	}
 	if err := enabled.Normalize(); err != nil {
 		t.Fatal(err)

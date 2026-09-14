@@ -20,14 +20,14 @@ func TestValidateConfigUpdate(t *testing.T) {
 	}
 
 	validACP := valid
-	validACP.ACPEnabled = true
+
 	validACP.ACPAgent = "grok"
 	if err := validateConfigUpdate(validACP); err != nil {
 		t.Fatalf("valid ACP config rejected: %v", err)
 	}
 
 	validCustomACP := valid
-	validCustomACP.ACPEnabled = true
+
 	validCustomACP.ACPAgent = "custom"
 	validCustomACP.ACPCommand = `C:\\Tools\\custom-acp.exe`
 	if err := validateConfigUpdate(validCustomACP); err != nil {
@@ -52,8 +52,8 @@ func TestValidateConfigUpdate(t *testing.T) {
 		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", BrowserCDPURL: "file:///tmp/cdp"},
 		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", BrowserCDPURL: "http://user:pass@browser.internal:9222"},
 		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", BrowserCDPURL: "http://browser.internal:9222/#fragment"},
-		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", ACPEnabled: true, ACPAgent: "other"},
-		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", ACPEnabled: true, ACPAgent: "custom"},
+		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", ACPAgent: "other"},
+		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", ACPAgent: "custom"},
 		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", OAuthAccessTokenTTL: "59s"},
 		{RuntimeRoot: "runtime", Port: 8765, LogLevel: "info", OAuthAccessTokenTTL: "1000000d"},
 	}

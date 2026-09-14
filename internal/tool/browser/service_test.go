@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -239,5 +240,20 @@ func TestBrowserErrorClassification(t *testing.T) {
 	browserErr = nil
 	if err := wrapActionError(errors.New("boom"), 0, "click"); !errors.As(err, &browserErr) || browserErr.Code != ErrActionFailed || browserErr.Details == nil || browserErr.Details.ActionIndex == nil || *browserErr.Details.ActionIndex != 0 {
 		t.Fatalf("action failure = %#v", err)
+	}
+}
+
+func TestReadinessDoesNotAcceptUnreachableWebSocketEndpoint(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+	service := New(Config{CDPURL: "ws://" + address + "/devtools/browser/missing"}, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := service.CheckReady(ctx); err == nil {
+		t.Fatal("unreachable CDP backend was reported ready")
 	}
 }

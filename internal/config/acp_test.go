@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/uvwt/agentdock/internal/builtin"
 )
 
 func TestFromEnvParsesACPProfile(t *testing.T) {
@@ -21,7 +23,7 @@ func TestFromEnvParsesACPProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.ACPEnabled || cfg.ACPAgentName != "claude" || cfg.ACPMaxPrompts != 3 || cfg.ACPInteractionMS != 45000 {
+	if cfg.Builtins.ACP || cfg.ACPAgentName != "claude" || cfg.ACPMaxPrompts != 3 || cfg.ACPInteractionMS != 45000 {
 		t.Fatalf("ACP config = %#v", cfg)
 	}
 	if !reflect.DeepEqual(cfg.ACPArgs, []string{"adapter.js", "--flag"}) {
@@ -39,9 +41,9 @@ func TestNormalizeACPProfileDoesNotRequireAllowedRoots(t *testing.T) {
 	}
 	cfg := Config{
 		AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(),
-		ACPEnabled: true, ACPAgentName: "helper", ACPCommand: executable,
+		Builtins: builtin.Choices{ACP: true}, ACPAgentName: "helper", ACPCommand: executable,
 	}
-	if err := cfg.Normalize(); err != nil {
+	if err := cfg.ValidateACPBackend(); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.ACPMaxPrompts != 2 || cfg.ACPInteractionMS != 300000 {
@@ -50,7 +52,7 @@ func TestNormalizeACPProfileDoesNotRequireAllowedRoots(t *testing.T) {
 }
 
 func TestNormalizeACPRejectsUnsafeConfiguration(t *testing.T) {
-	base := Config{AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(), ACPEnabled: true}
+	base := Config{AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(), Builtins: builtin.Choices{ACP: true}}
 	tests := []struct {
 		name   string
 		want   string
@@ -78,7 +80,7 @@ func TestNormalizeACPRejectsUnsafeConfiguration(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := base
 			test.mutate(&cfg)
-			err := cfg.Normalize()
+			err := cfg.ValidateACPBackend()
 			if err == nil {
 				t.Fatal("unsafe ACP configuration was accepted")
 			}
@@ -104,7 +106,11 @@ func TestFromEnvPreservesACPArgumentBytes(t *testing.T) {
 func TestFromEnvRejectsInvalidACPEnvironmentMapping(t *testing.T) {
 	t.Setenv("AGENTDOCK_ACP_ENABLED", "true")
 	t.Setenv("AGENTDOCK_ACP_ENV_FROM_ENV_JSON", `{"BAD-NAME":"HOST_KEY"}`)
-	if _, err := FromEnv(); err == nil {
-		t.Fatal("invalid ACP environment mapping was accepted")
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ACPBackendError == "" {
+		t.Fatal("invalid ACP mapping must be reported by capability status")
 	}
 }

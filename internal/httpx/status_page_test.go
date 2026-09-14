@@ -11,8 +11,8 @@ func TestStatusPageRendersConnectionAndResourceLinks(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.OAuthServerURL = "https://agentdock.example.com"
 	cfg.OAuthEnabled = true
-	cfg.ACPEnabled = true
-	cfg.BrowserEnabled = true
+	cfg.Builtins.ACP = true
+	cfg.Builtins.Browser = true
 	cfg.NexusEndpoint = "http://127.0.0.1:18777"
 
 	response := httptest.NewRecorder()

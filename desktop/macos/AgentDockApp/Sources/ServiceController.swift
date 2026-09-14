@@ -159,6 +159,17 @@ final class ServiceController: @unchecked Sendable {
         NexusDeviceStatus.load(from: paths.nexusDeviceIdentity)
     }
 
+    func builtins(id: String? = nil, enabled: Bool = false) async throws -> [BuiltinCapability] {
+        var arguments = ["builtins", id == nil ? "list" : "set", "--runtime-root", paths.appSupport.path]
+        if let id { arguments += ["--id", id, "--enabled=\(enabled)"] }
+        let commandArguments = arguments
+        let result = try await runInBackground {
+            try runProcess(executable: self.paths.binary.path, arguments: commandArguments)
+        }
+        guard result.status == 0 else { throw ValidationError(commandError(result.output, action: "内置能力")) }
+        return try JSONDecoder().decode(BuiltinSnapshot.self, from: Data(result.output.utf8)).builtins
+    }
+
     func pairNexus(endpoint: String, pairingCode: String) async throws {
         let endpoint = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         let pairingCode = pairingCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -616,3 +627,14 @@ final class ServiceController: @unchecked Sendable {
         }
     }
 }
+
+struct BuiltinCapability: Decodable {
+    let id: String
+    let provided: Bool
+    let enabled: Bool
+    let ready: Bool
+    let available: Bool
+    let transitioning: Bool
+    let reason: String
+}
+private struct BuiltinSnapshot: Decodable { let builtins: [BuiltinCapability] }

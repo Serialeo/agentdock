@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/fs/securepath"
 )
 
@@ -42,13 +43,11 @@ type Config struct {
 	NexusEndpoint                string
 	NexusDeviceToken             string
 	MCPAppsEnabled               bool
-	ComputerHelperPath           string
-	ComputerAvailable            bool // Runtime sets this only after a successful helper handshake.
-	BrowserEnabled               bool
+	Builtins                     builtin.Choices // Constructor defaults; persisted node choices take precedence.
 	BrowserExecutablePath        string
 	BrowserCDPURL                string
 	BrowserReuseExistingCDP      bool
-	ACPEnabled                   bool
+	ACPBackendError              string
 	ACPAgentName                 string
 	ACPCommand                   string
 	ACPArgs                      []string
@@ -61,10 +60,6 @@ type Config struct {
 
 func FromEnv() (Config, error) {
 	port, err := getenvInt("AGENTDOCK_PORT", 8765)
-	if err != nil {
-		return Config{}, err
-	}
-	browserEnabled, err := getenvBool("AGENTDOCK_BROWSER_ENABLED", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -92,40 +87,41 @@ func FromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	acpEnabled := false
-	if !ContainerBuild {
-		acpEnabled, err = getenvBool("AGENTDOCK_ACP_ENABLED", false)
-		if err != nil {
-			return Config{}, err
-		}
-	}
 	var acpArgs []string
 	var acpEnvFromEnv map[string]string
 	acpAgentName := "claude"
 	acpCommand := ""
 	acpMaxPrompts := 2
 	acpInteractionMS := 300000
-	if acpEnabled {
-		acpAgentName = getenv("AGENTDOCK_ACP_AGENT", acpAgentName)
-		acpCommand = os.Getenv("AGENTDOCK_ACP_COMMAND")
-		acpArgs, err = getenvStringSliceJSON("AGENTDOCK_ACP_ARGS_JSON")
-		if err != nil {
-			return Config{}, err
-		}
-		acpEnvFromEnv, err = getenvStringMapJSON("AGENTDOCK_ACP_ENV_FROM_ENV_JSON")
-		if err != nil {
-			return Config{}, err
-		}
-		acpMaxPrompts, err = getenvInt("AGENTDOCK_ACP_MAX_CONCURRENT_PROMPTS", acpMaxPrompts)
-		if err != nil {
-			return Config{}, err
-		}
-		acpInteractionMS, err = getenvInt("AGENTDOCK_ACP_INTERACTION_TIMEOUT_MS", acpInteractionMS)
-		if err != nil {
-			return Config{}, err
+	acpBackendErr := ""
+	if !ContainerBuild {
+		parseErr := func() error {
+			acpAgentName = getenv("AGENTDOCK_ACP_AGENT", acpAgentName)
+			acpCommand = os.Getenv("AGENTDOCK_ACP_COMMAND")
+			acpArgs, err = getenvStringSliceJSON("AGENTDOCK_ACP_ARGS_JSON")
+			if err != nil {
+				return err
+			}
+			acpEnvFromEnv, err = getenvStringMapJSON("AGENTDOCK_ACP_ENV_FROM_ENV_JSON")
+			if err != nil {
+				return err
+			}
+			acpMaxPrompts, err = getenvInt("AGENTDOCK_ACP_MAX_CONCURRENT_PROMPTS", acpMaxPrompts)
+			if err != nil {
+				return err
+			}
+			acpInteractionMS, err = getenvInt("AGENTDOCK_ACP_INTERACTION_TIMEOUT_MS", acpInteractionMS)
+			if err != nil {
+				return err
+			}
+			return nil
+		}()
+		if parseErr != nil {
+			acpBackendErr = parseErr.Error()
 		}
 	}
 	cfg := Config{
+		ACPBackendError:              acpBackendErr,
 		AgentDockHome:                strings.TrimSpace(os.Getenv("AGENTDOCK_HOME")),
 		AgentDockDefaultDir:          strings.TrimSpace(os.Getenv("AGENTDOCK_DEFAULT_DIR")),
 		CommandEnvFromEnv:            commandEnvFromEnv,
@@ -138,12 +134,9 @@ func FromEnv() (Config, error) {
 		OAuthAccessTokenNeverExpires: oauthAccessTokenNeverExpires,
 		LogLevel:                     getenv("AGENTDOCK_LOG_LEVEL", "info"),
 		MCPAppsEnabled:               mcpAppsEnabled,
-		ComputerHelperPath:           strings.TrimSpace(os.Getenv("AGENTDOCK_COMPUTER_HELPER_PATH")),
-		BrowserEnabled:               browserEnabled,
 		BrowserExecutablePath:        os.Getenv("AGENTDOCK_BROWSER_EXECUTABLE_PATH"),
 		BrowserCDPURL:                strings.TrimSpace(os.Getenv("AGENTDOCK_BROWSER_CDP_URL")),
 		BrowserReuseExistingCDP:      browserReuseExistingCDP,
-		ACPEnabled:                   acpEnabled,
 		ACPAgentName:                 acpAgentName,
 		ACPCommand:                   acpCommand,
 		ACPArgs:                      acpArgs,
@@ -153,23 +146,24 @@ func FromEnv() (Config, error) {
 		Stdio:                        stdio,
 		TrustedProxyCIDRs:            splitCommaSeparated(os.Getenv("AGENTDOCK_TRUSTED_PROXY_CIDRS")),
 	}
-	cfg.ApplyBuildCapabilities()
 	return cfg, nil
 }
 
-// ApplyBuildCapabilities also applies when callers construct a Runtime directly.
-func (c *Config) ApplyBuildCapabilities() {
-	if ContainerBuild {
-		c.ACPEnabled = false
-	}
-	if !ComputerUseEnabled || ContainerBuild {
-		c.ComputerAvailable = false
-		c.ComputerHelperPath = ""
+// BuiltinProvided is the release/platform policy, independent of stored user choices.
+func BuiltinProvided(id string) bool {
+	switch id {
+	case "browser":
+		return true
+	case "acp":
+		return !ContainerBuild
+	case "computer":
+		return ComputerUseEnabled && !ContainerBuild
+	default:
+		return false
 	}
 }
 
 func (c *Config) Normalize() error {
-	c.ApplyBuildCapabilities()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve user home for AgentDock directories: %w", err)
@@ -232,9 +226,7 @@ func (c *Config) Normalize() error {
 	if err := validateEnvironmentMapping(c.CommandEnvFromEnv); err != nil {
 		return fmt.Errorf("AGENTDOCK_COMMAND_ENV_FROM_ENV_JSON: %w", err)
 	}
-	if err := c.normalizeACP(); err != nil {
-		return err
-	}
+	// Optional ACP backend validation belongs to the capability manager; missing adapters must not prevent other tools from starting.
 	c.Host = strings.TrimSpace(c.Host)
 	if c.Host == "" {
 		c.Host = "127.0.0.1"
@@ -370,16 +362,11 @@ func splitCommaSeparated(value string) []string {
 	return result
 }
 
-func (c *Config) normalizeACP() error {
-	if !c.ACPEnabled {
-		c.ACPAgentName = "claude"
-		c.ACPCommand = ""
-		c.ACPArgs = nil
-		c.ACPEnvFromEnv = nil
-		c.ACPMaxPrompts = 2
-		c.ACPInteractionMS = 300000
-		return nil
+func (c *Config) ValidateACPBackend() error {
+	if c.ACPBackendError != "" {
+		return errors.New(c.ACPBackendError)
 	}
+
 	c.ACPAgentName = strings.TrimSpace(c.ACPAgentName)
 	if c.ACPAgentName == "" {
 		c.ACPAgentName = "claude"

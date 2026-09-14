@@ -353,8 +353,6 @@ function Get-ControlPanelSettings {
     return [pscustomobject][ordered]@{
         port = $storedPort
         log_level = $storedLogLevel
-        browser_enabled = Convert-ToBoolean -Value (Get-ObjectProperty -Object $stored -Name 'browser_enabled' -Default $false)
-        acp_enabled = Convert-ToBoolean -Value (Get-ObjectProperty -Object $stored -Name 'acp_enabled' -Default $false)
         acp_agent = $storedACPAgent
         acp_command = [string] (Get-ObjectProperty -Object $stored -Name 'acp_command' -Default '')
         acp_args = @((Get-ObjectProperty -Object $stored -Name 'acp_args' -Default @()))

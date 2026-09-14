@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/taskstate"
 	toolfile "github.com/uvwt/agentdock/internal/tool/file"
@@ -231,4 +232,9 @@ func TestDecodeRuntimeSkillManageRejectsUnsupportedOrAmbiguousActions(t *testing
 			}
 		})
 	}
+}
+
+func (r *runtimeStub) RuntimeBuiltins() app.Result { return app.Result{} }
+func (r *runtimeStub) SetBuiltin(context.Context, protocol.BuiltinUpdate) (app.Result, error) {
+	return app.Result{}, nil
 }

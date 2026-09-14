@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 
 	"github.com/uvwt/agentdock/internal/fs/atomicfile"
-	toolbrowser "github.com/uvwt/agentdock/internal/tool/browser"
 )
 
 type fileSnapshot struct {
@@ -58,17 +57,12 @@ func restoreSnapshots(snapshots []fileSnapshot) error {
 }
 
 func platformUpdateConfig(ctx context.Context, request ConfigUpdateRequest) error {
-	if request.BrowserEnabled && request.BrowserCDPURL == "" && !request.BrowserReuseExistingCDP {
-		if _, err := toolbrowser.FindExecutable("", toolbrowser.BrowserAuto); err != nil {
-			return fmt.Errorf("未检测到受支持的 Chrome、Chromium 或 Microsoft Edge，且未配置外部 CDP: %w", err)
-		}
-	}
 	runtime, err := loadTunnelRuntime(request.RuntimeRoot)
 	if err != nil {
 		return err
 	}
 	var acpAdapter desktopACPAdapter
-	if request.ACPEnabled {
+	{
 		configuredCommand := request.ACPCommand
 		configuredArgs := request.ACPArgs
 		if request.ACPAgent != "custom" {
@@ -81,7 +75,7 @@ func platformUpdateConfig(ctx context.Context, request ConfigUpdateRequest) erro
 		}
 		acpAdapter, err = resolveDesktopACPAdapter(request.ACPAgent, runtime.root, configuredCommand, configuredArgs)
 		if err != nil {
-			return err
+			acpAdapter = desktopACPAdapter{Command: configuredCommand, Args: configuredArgs}
 		}
 	}
 	settingsPath := filepath.Join(runtime.root, "control-panel-settings.json")
@@ -120,7 +114,7 @@ func platformUpdateConfig(ctx context.Context, request ConfigUpdateRequest) erro
 
 	acpCommand := acpAdapter.Command
 	acpArgs := append([]string(nil), acpAdapter.Args...)
-	if !request.ACPEnabled && request.ACPAgent == "custom" {
+	if request.ACPAgent == "custom" {
 		acpCommand = request.ACPCommand
 		acpArgs = append([]string(nil), request.ACPArgs...)
 	}
@@ -129,10 +123,8 @@ func platformUpdateConfig(ctx context.Context, request ConfigUpdateRequest) erro
 		LogLevel:                request.LogLevel,
 		OAuthAccessTokenTTL:     request.OAuthAccessTokenTTL,
 		MCPAppsEnabled:          request.MCPAppsEnabled,
-		BrowserEnabled:          request.BrowserEnabled,
 		BrowserCDPURL:           request.BrowserCDPURL,
 		BrowserReuseExistingCDP: request.BrowserReuseExistingCDP,
-		ACPEnabled:              request.ACPEnabled,
 		ACPAgent:                request.ACPAgent,
 		ACPCommand:              acpCommand,
 		ACPArgs:                 acpArgs,

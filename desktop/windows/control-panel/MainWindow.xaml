@@ -200,7 +200,12 @@
               </Grid>
             </GroupBox>
 
-            <GroupBox Header="浏览器">
+            <GroupBox Header="内置能力（本机）"><StackPanel>
+ <TextBlock Text="开关立即生效并由本机保存。关闭会清理当前会话；开启不会恢复旧任务。" TextWrapping="Wrap" />
+ <TextBlock x:Name="BuiltinStatusText" Text="正在读取…" TextWrapping="Wrap" Margin="0,8" />
+ <Button Content="刷新内置能力状态" Click="BuiltinRefresh_Click" />
+ </StackPanel></GroupBox>
+ <GroupBox Header="浏览器">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="150" />
@@ -210,7 +215,7 @@
                   <RowDefinition Height="Auto" />
                   <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <CheckBox x:Name="BrowserEnabledCheckBox" Grid.ColumnSpan="2" Content="启用浏览器 CDP 控制" Margin="0,4,0,12" Checked="BrowserConnection_Changed" Unchecked="BrowserConnection_Changed" />
+                <CheckBox x:Name="BrowserEnabledCheckBox" Grid.ColumnSpan="2" Content="启用浏览器 CDP 控制" Margin="0,4,0,12" Click="BuiltinToggle_Click" Tag="browser" />
                 <TextBlock Text="连接方式" Grid.Row="1" VerticalAlignment="Top" Margin="0,5,0,10" />
                 <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,10">
                   <ComboBox x:Name="BrowserConnectionModeComboBox" Width="320" HorizontalAlignment="Left" SelectionChanged="BrowserConnection_Changed">
@@ -238,7 +243,7 @@
                   <RowDefinition Height="Auto" />
                   <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <CheckBox x:Name="AcpEnabledCheckBox" Grid.ColumnSpan="3" Content="启用 Coding Agent" Margin="0,4,0,12" Checked="AcpSetting_Changed" Unchecked="AcpSetting_Changed" />
+                <CheckBox x:Name="AcpEnabledCheckBox" Grid.ColumnSpan="3" Content="启用 Coding Agent" Margin="0,4,0,12" Click="BuiltinToggle_Click" Tag="acp" />
                 <TextBlock Grid.Row="1" Text="Agent" VerticalAlignment="Center" Margin="0,0,0,10" />
                 <ComboBox x:Name="AcpAgentComboBox" Grid.Row="1" Grid.Column="1" Width="180" HorizontalAlignment="Left" Margin="0,0,0,10" SelectionChanged="AcpSetting_Changed">
                   <ComboBoxItem Content="Codex" Tag="codex" />

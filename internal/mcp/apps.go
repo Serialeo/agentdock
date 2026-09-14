@@ -9,6 +9,7 @@ import (
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/Serialeo/agentdock-protocol/mcpapps"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/uvwt/agentdock/internal/config"
 )
 
 type appResourceDefinition struct {
@@ -71,7 +72,7 @@ func (s *Server) appResourceDefinitions() []appResourceDefinition {
 			},
 		)
 	}
-	if s.cfg.ACPEnabled {
+	if !config.ContainerBuild {
 		definitions = append(definitions, appResourceDefinition{
 			URI:         protocol.ACPStatusUIResourceURI,
 			Name:        "agentdock-acp-status",

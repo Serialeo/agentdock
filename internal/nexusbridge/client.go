@@ -31,10 +31,8 @@ const (
 
 // NodeAPI 由 Nexus Bridge 消费方定义，只包含握手和远程 operation 真正需要的节点能力。
 type NodeAPI interface {
-	ToolNames() []string
-	ToolDescriptors() []map[string]any
-	UIResources() []protocol.UIResourceCapability
-	ToolContractHash() string
+	NodeSnapshot() (protocol.Hello, error)
+	SubscribeToolsChanged(func()) func()
 	AgentDockLocalContext(context.Context) (map[string]any, error)
 	PrepareProjectExecution(context.Context, *protocol.ExecutionContext) (context.Context, error)
 	PrepareProjectSessionControlExecution(context.Context, *protocol.ExecutionContext) (context.Context, error)
@@ -134,23 +132,17 @@ func (c *Client) connect(ctx context.Context) error {
 	defer stopContextClose()
 	socket.SetReadLimit(maxMessageBytes)
 
-	tools := c.node.ToolNames()
-	descriptors, err := bridgeToolDescriptors(c.node.ToolDescriptors())
+	changed := make(chan struct{}, 1)
+	unsubscribe := c.node.SubscribeToolsChanged(func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})
+	defer unsubscribe()
+	hello, err := c.snapshot()
 	if err != nil {
 		return err
-	}
-	hello := bridgeHello(c.identity, tools, descriptors, c.node.UIResources(), c.node.ToolContractHash())
-	computerTools := 0
-	for _, name := range tools {
-		if protocol.IsComputerTool(name) {
-			computerTools++
-		}
-	}
-	if computerTools == 5 {
-		hello.BridgeCapabilities = append(hello.BridgeCapabilities, protocol.ComputerCapability)
-	}
-	if _, supported := c.node.(commandOutcomeAPI); supported {
-		hello.BridgeCapabilities = append(hello.BridgeCapabilities, protocol.CommandOutcomesCapability)
 	}
 	if err := c.write(socket, protocol.Message{
 		Type: protocol.MessageNodeHello, ProtocolVersion: protocol.ConnectionProtocolVersion,
@@ -175,6 +167,19 @@ func (c *Client) connect(ctx context.Context) error {
 	connectionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go c.heartbeat(connectionCtx, socket, heartbeat)
+	go func() {
+		for {
+			select {
+			case <-connectionCtx.Done():
+				return
+			case <-changed:
+				if err := c.writeSnapshot(socket); err != nil {
+					_ = socket.Close()
+					return
+				}
+			}
+		}
+	}()
 	for {
 		var incoming protocol.Message
 		if err := socket.ReadJSON(&incoming); err != nil {
@@ -243,6 +248,9 @@ func (c *Client) invoke(parent context.Context, socket *websocket.Conn, incoming
 			err = fmt.Errorf("解析 Runtime 请求: %w", decodeErr)
 		} else {
 			result, err = c.dispatchRuntimeRequest(ctx, request)
+			if err == nil && request.Path == "/internal/runtime/builtins" && request.Method == http.MethodPost {
+				err = c.writeSnapshot(socket)
+			}
 		}
 	case protocol.OperationContextLocal:
 		result, err = c.node.AgentDockLocalContext(ctx)
@@ -383,18 +391,6 @@ func decodeStrictBridgeArguments(raw json.RawMessage, dst any) error {
 	return nil
 }
 
-func bridgeToolDescriptors(descriptors []map[string]any) ([]protocol.ToolDescriptor, error) {
-	encoded, err := json.Marshal(descriptors)
-	if err != nil {
-		return nil, fmt.Errorf("编码 Nexus Bridge 工具契约: %w", err)
-	}
-	var tools []protocol.ToolDescriptor
-	if err := json.Unmarshal(encoded, &tools); err != nil {
-		return nil, fmt.Errorf("解析 Nexus Bridge 工具契约: %w", err)
-	}
-	return tools, nil
-}
-
 func (c *Client) heartbeat(ctx context.Context, socket *websocket.Conn, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -449,4 +445,29 @@ func bridgeError(err error) *protocol.RemoteError {
 		converted.Details = toolErr.Details
 	}
 	return converted
+}
+
+func (c *Client) snapshot() (*protocol.Hello, error) {
+	snapshot, err := c.node.NodeSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	hello := bridgeHello(c.identity, snapshot.Capabilities, snapshot.Tools, snapshot.UIResources, snapshot.ToolContractHash)
+	hello.Builtins = snapshot.Builtins
+	if _, ok := c.node.(commandOutcomeAPI); ok {
+		hello.BridgeCapabilities = append(hello.BridgeCapabilities, protocol.CommandOutcomesCapability)
+	}
+	return hello, nil
+}
+
+// Snapshot creation and wire order share the writer lock: an older snapshot cannot arrive after a newer one.
+func (c *Client) writeSnapshot(socket *websocket.Conn) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	snapshot, err := c.snapshot()
+	if err != nil {
+		return err
+	}
+	_ = socket.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	return socket.WriteJSON(protocol.Message{Type: protocol.MessageNodeUpdated, ProtocolVersion: protocol.ConnectionProtocolVersion, Hello: snapshot})
 }

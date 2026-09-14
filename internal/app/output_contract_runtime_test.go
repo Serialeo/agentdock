@@ -16,6 +16,7 @@ import (
 
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	acpruntime "github.com/uvwt/agentdock/internal/acp"
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
@@ -211,7 +212,7 @@ func TestRuntimeOutputContractACPInfoNormalizesOmittedInitializeFields(t *testin
 	cfg := config.Config{
 		AgentDockHome:       filepath.Join(root, ".agentdock"),
 		AgentDockDefaultDir: root,
-		ACPEnabled:          true,
+		Builtins:            builtin.Choices{ACP: true},
 		ACPAgentName:        "output-contract-helper",
 		ACPCommand:          executable,
 		ACPArgs:             []string{"-test.run=^TestOutputContractACPHelper$"},
@@ -256,7 +257,7 @@ func TestRuntimeOutputContractACPOptionalFields(t *testing.T) {
 	cfg := config.Config{
 		AgentDockHome:       filepath.Join(root, ".agentdock"),
 		AgentDockDefaultDir: root,
-		ACPEnabled:          true,
+		Builtins:            builtin.Choices{ACP: true},
 		ACPAgentName:        "output-contract-helper",
 		ACPCommand:          executable,
 		ACPArgs:             []string{"-test.run=^TestOutputContractACPHelper$"},

@@ -47,7 +47,7 @@ func (r *Runtime) agentDockContext(ctx context.Context, nexusLocalOnly bool) (Re
 		contextResult.Warnings = append(contextResult.Warnings, capabilityWarning{Source: "common_skills", Message: "通用 Skill 索引暂不可用。"})
 	}
 
-	if requiresACP(r.cfg) {
+	if r.builtinAvailable("acp") {
 		contextResult.ACP = &capabilityACPContext{
 			Enabled:     true,
 			Agent:       r.cfg.ACPAgentName,

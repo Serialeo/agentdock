@@ -77,7 +77,6 @@ struct InstallerConfigurationTests {
         precondition(nexusStatus.deviceTokenStored)
 
         let acpEnvironmentData = try environment.dataByUpdating([
-            "AGENTDOCK_ACP_ENABLED": "true",
             "AGENTDOCK_ACP_AGENT": "grok",
             "AGENTDOCK_ACP_COMMAND": "/Users/test/.local/bin/grok",
             "AGENTDOCK_ACP_ARGS_JSON": "[\"agent\",\"stdio\"]",

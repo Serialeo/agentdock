@@ -219,6 +219,18 @@ public sealed class RuntimeService : IDisposable
     public Task RegenerateQuickTunnelAsync(CancellationToken cancellationToken = default) =>
         RunTunnelActionAsync("regenerate", cancellationToken);
 
+    public async Task<JsonElement> BuiltinsAsync(string? id = null, bool enabled = false)
+    {
+        var binary = await ResolveCoreBinaryAsync(CancellationToken.None);
+        var startInfo = CreateRedirectedProcessStartInfo(binary);
+        var args = new List<string> { "builtins", id == null ? "list" : "set", "--runtime-root", RuntimeRoot };
+        if (id != null) args.AddRange(["--id", id, $"--enabled={enabled.ToString().ToLowerInvariant()}"]);
+        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+        var output = await RunProcessAsync(startInfo, CancellationToken.None);
+        using var result = JsonDocument.Parse(output);
+        return result.RootElement.Clone();
+    }
+
     public async Task SaveSettingsAsync(
         ControlPanelSettings settings,
         CancellationToken cancellationToken = default)
@@ -230,10 +242,8 @@ public sealed class RuntimeService : IDisposable
             "--log-level", settings.LogLevel,
             "--oauth-access-token-ttl", settings.OAuthAccessTokenTtl ?? "",
             $"--mcp-apps-enabled={settings.McpAppsEnabled.ToString().ToLowerInvariant()}",
-            $"--browser-enabled={settings.BrowserEnabled.ToString().ToLowerInvariant()}",
             "--browser-cdp-url", settings.BrowserCdpUrl ?? "",
             $"--browser-reuse-existing-cdp={settings.BrowserReuseExistingCdp.ToString().ToLowerInvariant()}",
-            $"--acp-enabled={settings.AcpEnabled.ToString().ToLowerInvariant()}",
             "--acp-agent", NormalizeAcpAgent(settings.AcpAgent),
             "--acp-command", settings.AcpCommand ?? "",
             "--acp-args-json", JsonSerializer.Serialize(settings.AcpArgs ?? [])

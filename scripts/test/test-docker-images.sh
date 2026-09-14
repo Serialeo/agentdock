@@ -98,7 +98,6 @@ fi
 
 AGENTDOCK_AUTH_TOKEN=compose-config-token \
 AGENTDOCK_IMAGE="$browser_image" \
-AGENTDOCK_BROWSER_ENABLED=true \
 AGENTDOCK_PUBLISH_PORT=18767 \
   docker compose config >"$work_dir/compose.yml"
 grep -q '/home/agentdock/.agentdock' "$work_dir/compose.yml"
@@ -107,7 +106,10 @@ grep -q 'agentdock-healthcheck' "$work_dir/compose.yml"
 grep -Eq 'shm_size|1073741824|1000000000' "$work_dir/compose.yml"
 grep -Eq 'published: "?18767"?' "$work_dir/compose.yml"
 grep -q 'target: 8765' "$work_dir/compose.yml"
-grep -q 'AGENTDOCK_BROWSER_ENABLED: "true"' "$work_dir/compose.yml" || grep -q 'AGENTDOCK_BROWSER_ENABLED: true' "$work_dir/compose.yml"
+if grep -Eq 'AGENTDOCK_(BROWSER|ACP)_ENABLED' "$work_dir/compose.yml"; then
+  printf 'compose still configures obsolete builtin switches\n' >&2
+  exit 1
+fi
 
 AGENTDOCK_AUTH_TOKEN=compose-config-token \
 AGENTDOCK_SERVER_URL=https://agent.example.test \
@@ -171,7 +173,7 @@ test_volume=""
 
 runtime_container="$(docker run -d --rm -p 127.0.0.1::8765 \
   -e AGENTDOCK_AUTH_TOKEN=runtime-health-value \
-  -e AGENTDOCK_ACP_ENABLED=true -e AGENTDOCK_ACP_ARGS_JSON=invalid-json \
+  -e AGENTDOCK_ACP_ARGS_JSON=invalid-json \
   -e AGENTDOCK_COMPUTER_HELPER_PATH=/missing/helper "$runtime_image")"
 wait_for_healthy "$runtime_container" runtime
 runtime_port="$(docker port "$runtime_container" 8765/tcp | awk -F: 'NR == 1 {print $NF}')"
@@ -223,6 +225,19 @@ docker run --rm "$browser_image" sh -c '
     >"$tmp/browser.html" 2>"$tmp/browser.stderr"
   grep -q "browser-image-ok" "$tmp/browser.html"
 '
+
+# First boot seeds browser availability; subsequent boots preserve the node's choice.
+test_volume="agentdock-builtin-test-${RANDOM}-${RANDOM}"
+docker volume create "$test_volume" >/dev/null
+docker run --rm -v "$test_volume:/home/agentdock/.agentdock" "$browser_image" sh -c '
+  jq -e ".browser == true and .acp == false and .computer == false" "$HOME/.agentdock/builtin-capabilities.json"
+  printf "{\"browser\":false,\"acp\":false,\"computer\":false}\n" >"$HOME/.agentdock/builtin-capabilities.json"
+'
+docker run --rm -v "$test_volume:/home/agentdock/.agentdock" "$browser_image" sh -c '
+  jq -e ".browser == false" "$HOME/.agentdock/builtin-capabilities.json"
+'
+docker volume rm -f "$test_volume" >/dev/null
+test_volume=""
 
 browser_token="browser-smoke-${RANDOM}-${RANDOM}"
 browser_container="$(docker run -d --rm --shm-size=1g -p 127.0.0.1::8765 -e AGENTDOCK_AUTH_TOKEN="$browser_token" "$browser_image")"

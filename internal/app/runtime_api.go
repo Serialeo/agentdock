@@ -25,7 +25,7 @@ func (r *Runtime) RuntimeStatus() Result {
 		"agentdock_default_dir": r.cfg.AgentDockDefaultDir,
 		"path_model":            config.PathModel,
 		"auth_enabled":          r.cfg.AuthRequired(),
-		"browser_enabled":       r.cfg.BrowserEnabled,
+		"builtins":              r.BuiltinCapabilities(),
 		"memory_enabled":        r.cfg.NexusEndpoint != "",
 		"nexus_enabled":         strings.TrimSpace(r.cfg.NexusEndpoint) != "",
 		"tool_count":            len(tools),

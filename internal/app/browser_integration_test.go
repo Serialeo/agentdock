@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
@@ -25,7 +26,7 @@ func appBrowserIntegrationRuntime(t *testing.T) (*Runtime, string) {
 	cfg := config.Config{
 		AgentDockHome:         home,
 		AgentDockDefaultDir:   t.TempDir(),
-		BrowserEnabled:        true,
+		Builtins:              builtin.Choices{Browser: true},
 		BrowserExecutablePath: executable,
 	}
 	if err := cfg.Normalize(); err != nil {

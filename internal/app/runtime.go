@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	protocol "github.com/Serialeo/agentdock-protocol"
-	acpruntime "github.com/uvwt/agentdock/internal/acp"
 	"github.com/uvwt/agentdock/internal/computer"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/envstore"
@@ -37,6 +34,7 @@ import (
 type Result = toolcore.Result
 
 type Runtime struct {
+	builtins            *builtinManager
 	cfg                 config.Config
 	toolNames           []string
 	toolValidators      map[string]*toolcontract.InputValidator
@@ -65,8 +63,6 @@ type Runtime struct {
 }
 
 func NewRuntime(cfg config.Config) (*Runtime, error) {
-	cfg.ApplyBuildCapabilities()
-	cfg.ComputerAvailable = false
 	toolNames, toolValidators, err := compileAvailableToolContracts(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("initialize tool contracts: %w", err)
@@ -113,64 +109,14 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 	runtime.files = toolfile.New(ws, skills.ResolveResource, runtime.command.CommandEnv)
 	runtime.dynamicMCP = toolmcp.New(mcpClients, envs)
 	runtime.media = toolmedia.New(cfg, ws, runtime.command.InternalCommandEnv)
-	runtime.browser = toolbrowser.New(
-		toolbrowser.Config{AgentDockHome: cfg.AgentDockHome, ExecutablePath: cfg.BrowserExecutablePath, CDPURL: cfg.BrowserCDPURL, ReuseExistingCDP: cfg.BrowserReuseExistingCDP},
-		runtime.media.PublishBrowserScreenshot,
-	)
 	runtime.recall = toolrecall.New(func() config.Config { return runtime.cfg })
 	runtime.evolution = evolution.New(func() config.Config { return runtime.cfg }, tasks)
 	runtime.taskTools = tooltask.New(func() config.Config { return runtime.cfg }, tasks, runtime.evolution)
-	if cfg.ACPEnabled {
-		acpEnvironment := make(map[string]string, len(cfg.ACPEnvFromEnv))
-		for childName, hostName := range cfg.ACPEnvFromEnv {
-			value, exists := os.LookupEnv(hostName)
-			if !exists {
-				_ = runtime.Close()
-				return nil, fmt.Errorf("required ACP environment variable %s is missing", hostName)
-			}
-			acpEnvironment[childName] = value
-		}
-		manager, err := acpruntime.NewManager(acpruntime.Options{
-			Home:       cfg.AgentDockHome,
-			DefaultCWD: cfg.AgentDockDefaultDir,
-			Agent: acpruntime.AgentSpec{
-				Name: cfg.ACPAgentName, Command: cfg.ACPCommand, Args: append([]string(nil), cfg.ACPArgs...), Environment: acpEnvironment,
-			},
-			MaxConcurrentRuns:  cfg.ACPMaxPrompts,
-			InteractionTimeout: time.Duration(cfg.ACPInteractionMS) * time.Millisecond,
-		})
-		if err != nil {
-			_ = runtime.Close()
-			return nil, fmt.Errorf("initialize ACP runtime: %w", err)
-		}
-		runtime.acp = toolacp.New(manager, ws)
+	if err := runtime.initBuiltins(); err != nil {
+		_ = runtime.Close()
+		return nil, err
 	}
-	if config.ComputerUseEnabled && !config.ContainerBuild && computer.Supported() {
-		path := cfg.ComputerHelperPath
-		if path == "" {
-			path = computer.BundledHelper()
-		}
-		if info, statErr := os.Stat(path); statErr == nil && !info.IsDir() {
-			if !filepath.IsAbs(path) {
-				_ = runtime.Close()
-				return nil, errors.New("computer helper path must be absolute")
-			}
-			startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			client, startErr := computer.Start(startup, path)
-			cancel()
-			if startErr != nil {
-				fmt.Fprintf(os.Stderr, "computer backend unavailable: %v\n", startErr)
-			} else {
-				runtime.computer = client
-				runtime.cfg.ComputerAvailable = true
-				runtime.toolNames, runtime.toolValidators, err = compileAvailableToolContracts(runtime.cfg)
-				if err != nil {
-					_ = runtime.Close()
-					return nil, err
-				}
-			}
-		}
-	}
+
 	return runtime, nil
 }
 
@@ -324,15 +270,8 @@ func (r *Runtime) Close() error {
 				closeErrors = append(closeErrors, err)
 			}
 		}
-		if r.acp != nil {
-			if err := r.acp.Close(); err != nil {
-				closeErrors = append(closeErrors, fmt.Errorf("close ACP runtime: %w", err))
-			}
-		}
-		if r.browser != nil {
-			if err := r.browser.Close(); err != nil {
-				closeErrors = append(closeErrors, fmt.Errorf("close browser runtime: %w", err))
-			}
+		if err := r.closeBuiltins(); err != nil {
+			closeErrors = append(closeErrors, err)
 		}
 		if r.command != nil {
 			if err := r.command.Close(); err != nil {
@@ -359,15 +298,16 @@ func (r *Runtime) commandExecutionContext() (context.Context, error) {
 }
 
 func (r *Runtime) ToolNames() []string {
-	return append([]string(nil), r.toolNames...)
+	definitions, _ := r.CatalogSnapshot()
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
+	return names
 }
 
 func (r *Runtime) ToolDefinitions() []ToolDefinition {
-	definitions := make([]ToolDefinition, 0, len(r.toolNames))
-	for _, name := range r.toolNames {
-		definition, _ := toolDefinitionForConfig(name, r.cfg)
-		definitions = append(definitions, definition)
-	}
+	definitions, _ := r.CatalogSnapshot()
 	return definitions
 }
 
@@ -375,10 +315,23 @@ func (r *Runtime) ToolDefinition(name string) (ToolDefinition, bool) {
 	if _, available := r.toolValidators[name]; !available {
 		return ToolDefinition{}, false
 	}
+	if spec, ok := toolSpecByName(name); !ok || !r.builtinAvailable(spec.Group) {
+		return ToolDefinition{}, false
+	}
 	return toolDefinitionForConfig(name, r.cfg)
 }
 
 func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (Result, error) {
+	spec, ok := toolSpecByName(name)
+	if !ok {
+		return nil, toolError("UNKNOWN_TOOL", "tool has no handler", "validation")
+	}
+	ctx, release, gateErr := r.enterBuiltin(ctx, spec.Group)
+	if gateErr != nil {
+		return nil, gateErr
+	}
+	defer release()
+
 	if args == nil {
 		args = map[string]any{}
 	}
@@ -390,8 +343,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 	if err != nil {
 		return nil, err
 	}
-	spec, ok := toolSpecByName(name)
-	if !ok || spec.Handler == nil {
+	if spec.Handler == nil {
 		return nil, toolErrorDetails("UNKNOWN_TOOL", "tool has no handler", "validation", map[string]any{"tool": name})
 	}
 	if err := r.authorizeProjectTool(ctx, name, args); err != nil {

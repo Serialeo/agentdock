@@ -38,6 +38,9 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private let portField = NSTextField(string: "8765")
     private let logLevel = NSPopUpButton(frame: .zero, pullsDown: false)
     private let mcpAppsEnabled = NSButton(checkboxWithTitle: "启用 MCP Apps UI", target: nil, action: nil)
+    private let builtinStatus = NSTextField(wrappingLabelWithString: "本机内置能力：读取中…")
+    private let builtinRefresh = NSButton(title: "刷新内置能力状态", target: nil, action: nil)
+    private var builtinBusy = false
     private let browserEnabled = NSButton(checkboxWithTitle: "启用浏览器 CDP 控制", target: nil, action: nil)
     private let browserConnectionMode = NSPopUpButton(frame: .zero, pullsDown: false)
     private let browserCDPURL = NSTextField(string: "")
@@ -62,10 +65,8 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
     private var initialPort = 8765
     private var initialLogLevel = "info"
     private var initialMCPAppsEnabled = true
-    private var initialBrowserEnabled = false
     private var initialBrowserCDPURL = ""
     private var initialBrowserConnectionMode = BrowserConnectionMode.managed
-    private var initialACPEnabled = false
     private var initialACPAgent = ACPAgentPreset.codex
     private var initialACPCommand = ""
     private var initialACPArgsJSON = "[]"
@@ -108,13 +109,11 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         initialPort = configuration.port
         initialLogLevel = configuration.logLevel
         initialMCPAppsEnabled = configuration.mcpAppsEnabled
-        initialBrowserEnabled = configuration.browserEnabled
         initialBrowserCDPURL = configuration.browserCDPURL
         initialBrowserConnectionMode = BrowserConnectionMode.resolve(
             cdpURL: configuration.browserCDPURL,
             reuseExisting: configuration.browserReuseExistingCDP
         )
-        initialACPEnabled = configuration.acpEnabled
         initialACPAgent = configuration.acpAgent
         initialACPCommand = configuration.acpAgent == .custom ? configuration.acpCommand : ""
         initialACPArgsJSON = (try? ACPDesktopConfiguration.encodeArguments(
@@ -126,10 +125,8 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         portField.integerValue = initialPort
         logLevel.selectItem(withTitle: initialLogLevel)
         mcpAppsEnabled.state = initialMCPAppsEnabled ? .on : .off
-        browserEnabled.state = initialBrowserEnabled ? .on : .off
         browserCDPURL.stringValue = initialBrowserCDPURL
         selectBrowserConnectionMode(initialBrowserConnectionMode)
-        acpEnabled.state = initialACPEnabled ? .on : .off
         acpAgent.selectItem(withTitle: initialACPAgent.title)
         acpCommand.stringValue = initialACPCommand
         acpArgsJSON.stringValue = initialACPArgsJSON
@@ -140,6 +137,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         showStatus("", isError: false)
         setBusy(false)
         refreshApplyState()
+        Task { await refreshBuiltins() }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -175,6 +173,8 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         mcpAppsEnabled.target = self
         mcpAppsEnabled.action = #selector(markChanged)
 
+        builtinRefresh.target = self
+        builtinRefresh.action = #selector(builtinRefreshPressed)
         browserEnabled.target = self
         browserEnabled.action = #selector(browserToggled)
         browserConnectionMode.addItems(withTitles: BrowserConnectionMode.allCases.map(\.title))
@@ -190,7 +190,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         browserStatus.font = .systemFont(ofSize: 12)
 
         acpEnabled.target = self
-        acpEnabled.action = #selector(acpChanged)
+        acpEnabled.action = #selector(acpToggled)
         acpAgent.addItems(withTitles: ACPAgentPreset.allCases.map(\.title))
         acpAgent.widthAnchor.constraint(equalToConstant: 180).isActive = true
         acpAgent.target = self
@@ -259,6 +259,8 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         let cdpRow = formRow(title: "CDP 地址", control: browserCDPURL)
         browserCDPRow = cdpRow
         let browserStack = NSStackView(views: [
+            builtinStatus,
+            builtinRefresh,
             browserEnabled,
             formRow(title: "连接方式", control: browserConnectionMode),
             cdpRow,
@@ -388,15 +390,40 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
         refreshApplyState()
     }
 
-    @objc private func browserToggled() {
-        if browserEnabled.state == .on,
-           selectedBrowserConnectionMode() == .managed,
-           BrowserSupportController.detectExecutable() == nil {
-            browserEnabled.state = .off
-            showStatus("未检测到受支持的 Chromium 系浏览器，且未配置外部 CDP。", isError: true)
+    @objc private func browserToggled() { toggleBuiltin("browser", enabled: browserEnabled.state == .on) }
+    @objc private func acpToggled() { toggleBuiltin("acp", enabled: acpEnabled.state == .on) }
+    @objc private func builtinRefreshPressed() { Task { await refreshBuiltins() } }
+
+    private func renderBuiltins(_ states: [BuiltinCapability]) {
+        for state in states {
+            let control = state.id == "browser" ? browserEnabled : state.id == "acp" ? acpEnabled : nil
+            control?.state = state.enabled ? .on : .off
+            control?.isEnabled = state.provided && !state.transitioning && !isBusy
         }
-        refreshBrowserStatus()
-        refreshApplyState()
+        builtinStatus.stringValue = states.map { "\($0.id)：\($0.available ? "可用" : $0.reason)" }.joined(separator: "\n")
+            + "\n开关立即生效并保存在本机；关闭清理当前会话，开启不恢复旧任务。"
+    }
+
+    private func refreshBuiltins() async {
+        guard !builtinBusy else { return }
+        do { renderBuiltins(try await service.builtins()) }
+        catch {
+            browserEnabled.isEnabled = false; acpEnabled.isEnabled = false
+            builtinStatus.stringValue = "无法读取本机能力：\(error.localizedDescription)。请启动后台服务后刷新。"
+        }
+    }
+
+    private func toggleBuiltin(_ id: String, enabled: Bool) {
+        guard !builtinBusy else { return }
+        builtinBusy = true
+        browserEnabled.isEnabled = false; acpEnabled.isEnabled = false
+        builtinStatus.stringValue = "正在切换内置能力…"
+        Task {
+            do { renderBuiltins(try await service.builtins(id: id, enabled: enabled)) }
+            catch { showStatus("\(error.localizedDescription)。请刷新核对实际状态。", isError: true) }
+            builtinBusy = false
+            await refreshBuiltins()
+        }
     }
 
     @objc private func applyPressed() {
@@ -423,10 +450,8 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             port: portField.integerValue,
             logLevel: logLevel.titleOfSelectedItem ?? "info",
             mcpAppsEnabled: mcpAppsEnabled.state == .on,
-            browserEnabled: browserEnabled.state == .on,
             browserCDPURL: browserMode == .specifiedCDP ? configuredCDP : "",
             browserReuseExistingCDP: browserMode == .reuseExisting,
-            acpEnabled: acpEnabled.state == .on,
             acpAgent: selectedAgent,
             acpCommand: selectedAgent == .custom ? customCommand : (sameAgent ? configuration.acpCommand : ""),
             acpArgs: selectedAgent == .custom ? customArguments : (sameAgent ? configuration.acpArgs : [])
@@ -450,13 +475,11 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
                 initialPort = validatedSettings.port
                 initialLogLevel = validatedSettings.logLevel
                 initialMCPAppsEnabled = validatedSettings.mcpAppsEnabled
-                initialBrowserEnabled = validatedSettings.browserEnabled
                 initialBrowserCDPURL = validatedSettings.browserCDPURL
                 initialBrowserConnectionMode = BrowserConnectionMode.resolve(
                     cdpURL: validatedSettings.browserCDPURL,
                     reuseExisting: validatedSettings.browserReuseExistingCDP
                 )
-                initialACPEnabled = validatedSettings.acpEnabled
                 initialACPAgent = validatedSettings.acpAgent
                 initialACPCommand = validatedSettings.acpAgent == .custom ? validatedSettings.acpCommand : ""
                 initialACPArgsJSON = (try? ACPDesktopConfiguration.encodeArguments(
@@ -547,7 +570,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             configuredCommand: configuredCommand,
             configuredArguments: configuredArguments
         )
-        let enabled = acpEnabled.state == .on
+        let enabled = true
         acpAgent.isEnabled = enabled && !isBusy
         acpCommand.isEnabled = enabled && isCustom && !isBusy
         acpArgsJSON.isEnabled = enabled && isCustom && !isBusy
@@ -613,15 +636,12 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             applyButton.isEnabled = false
             return
         }
-        let acpIsEnabled = acpEnabled.state == .on
         let selectedAgent = selectedACPAgent()
         let customSettingsChanged = selectedAgent == .custom && (
             acpCommand.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) != initialACPCommand
                 || acpArgsJSON.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) != initialACPArgsJSON
         )
-        let acpSettingsChanged = acpIsEnabled != initialACPEnabled
-            || ((acpIsEnabled || initialACPEnabled) && selectedAgent != initialACPAgent)
-            || ((acpIsEnabled || initialACPEnabled) && customSettingsChanged)
+        let acpSettingsChanged = selectedAgent != initialACPAgent || customSettingsChanged
         let browserMode = selectedBrowserConnectionMode()
         let browserCDP = browserMode == .specifiedCDP
             ? browserCDPURL.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -631,7 +651,6 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
             || portField.integerValue != initialPort
             || (logLevel.titleOfSelectedItem ?? "info") != initialLogLevel
             || (mcpAppsEnabled.state == .on) != initialMCPAppsEnabled
-            || (browserEnabled.state == .on) != initialBrowserEnabled
             || browserMode != initialBrowserConnectionMode
             || browserCDP != initialBrowserCDPURL
             || acpSettingsChanged
@@ -643,7 +662,7 @@ final class AdvancedSettingsWindowController: NSWindowController, NSTextFieldDel
 
     private func setBusy(_ busy: Bool) {
         isBusy = busy
-        for control in [serviceAutostart, menuAutostart, portField, logLevel, mcpAppsEnabled, browserEnabled, browserConnectionMode, browserCDPURL, acpEnabled, acpAgent, acpCommand, acpArgsJSON, nexusEndpoint, nexusPairingCode, nexusPairButton] {
+        for control in [serviceAutostart, menuAutostart, portField, logLevel, mcpAppsEnabled, browserConnectionMode, browserCDPURL, acpAgent, acpCommand, acpArgsJSON, nexusEndpoint, nexusPairingCode, nexusPairButton] {
             control.isEnabled = !busy
         }
         refreshBrowserStatus()

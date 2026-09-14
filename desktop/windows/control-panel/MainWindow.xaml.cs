@@ -15,6 +15,8 @@ namespace AgentDock.ControlPanel;
 
 public partial class MainWindow : Window
 {
+    private bool _builtinBusy;
+
     private const string BrowserConnectionManaged = "managed";
     private const string BrowserConnectionReuse = "reuse";
     private const string BrowserConnectionSpecified = "specified";
@@ -126,10 +128,8 @@ public partial class MainWindow : Window
                 PortTextBox.Text = snapshot.Settings.Port.ToString();
                 SelectLogLevel(snapshot.Settings.LogLevel);
                 McpAppsEnabledCheckBox.IsChecked = snapshot.Settings.McpAppsEnabled;
-                BrowserEnabledCheckBox.IsChecked = snapshot.Settings.BrowserEnabled;
                 BrowserCdpUrlTextBox.Text = snapshot.Settings.BrowserCdpUrl;
                 SelectBrowserConnectionMode(snapshot.Settings);
-                AcpEnabledCheckBox.IsChecked = snapshot.Settings.AcpEnabled;
                 SelectAcpAgent(snapshot.Settings.AcpAgent);
                 AcpCommandTextBox.Text = snapshot.Settings.AcpAgent == "custom" ? snapshot.Settings.AcpCommand : "";
                 AcpArgsTextBox.Text = snapshot.Settings.AcpAgent == "custom"
@@ -141,6 +141,7 @@ public partial class MainWindow : Window
             UpdateTunnelModeUi();
             RefreshBrowserConnectionUi();
             RefreshAcpUi();
+            await RefreshBuiltinsAsync();
         }
         finally
         {
@@ -362,7 +363,7 @@ public partial class MainWindow : Window
 
     private void RefreshAcpUi()
     {
-        var enabled = AcpEnabledCheckBox.IsChecked == true;
+        var enabled = true;
         AcpAgentComboBox.IsEnabled = enabled;
         var agent = SelectedAcpAgent();
         var isCustom = agent == "custom";
@@ -405,6 +406,44 @@ public partial class MainWindow : Window
         AcpStatusText.Foreground = enabled && !resolution.Available
             ? new SolidColorBrush(Color.FromRgb(217, 45, 32))
             : new SolidColorBrush(Color.FromRgb(102, 112, 133));
+    }
+
+    private async Task RefreshBuiltinsAsync()
+    {
+        if (_builtinBusy) return;
+        try { RenderBuiltins(await _runtime.BuiltinsAsync()); }
+        catch (Exception error) {
+            BrowserEnabledCheckBox.IsEnabled = AcpEnabledCheckBox.IsEnabled = false;
+            BuiltinStatusText.Text = $"无法读取本机能力：{error.Message}。请启动后台服务后刷新。";
+        }
+    }
+
+    private void RenderBuiltins(JsonElement snapshot)
+    {
+        var lines = new List<string>();
+        foreach (var state in snapshot.GetProperty("builtins").EnumerateArray()) {
+            var id = state.GetProperty("id").GetString();
+            CheckBox? control = id == "browser" ? BrowserEnabledCheckBox : id == "acp" ? AcpEnabledCheckBox : null;
+            if (control != null) {
+                control.IsChecked = state.GetProperty("enabled").GetBoolean();
+                control.IsEnabled = state.GetProperty("provided").GetBoolean() && !state.GetProperty("transitioning").GetBoolean();
+            }
+            lines.Add($"{id}: {(state.GetProperty("available").GetBoolean() ? "可用" : state.GetProperty("reason").GetString())}");
+        }
+        BuiltinStatusText.Text = string.Join(Environment.NewLine, lines);
+    }
+
+    private async void BuiltinRefresh_Click(object sender, RoutedEventArgs e) => await RefreshBuiltinsAsync();
+
+    private async void BuiltinToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_builtinBusy || sender is not CheckBox control || control.Tag is not string id) return;
+        _builtinBusy = true;
+        BrowserEnabledCheckBox.IsEnabled = AcpEnabledCheckBox.IsEnabled = false;
+        BuiltinStatusText.Text = "正在切换内置能力…";
+        try { RenderBuiltins(await _runtime.BuiltinsAsync(id, control.IsChecked == true)); }
+        catch (Exception error) { BuiltinStatusText.Text = $"{error.Message}。请刷新核对实际状态。"; }
+        finally { _builtinBusy = false; await RefreshBuiltinsAsync(); }
     }
 
     private async void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -459,10 +498,8 @@ public partial class MainWindow : Window
             LogLevel = SelectedLogLevel(),
             OAuthAccessTokenTtl = _snapshot?.Settings.OAuthAccessTokenTtl ?? "",
             McpAppsEnabled = McpAppsEnabledCheckBox.IsChecked == true,
-            BrowserEnabled = BrowserEnabledCheckBox.IsChecked == true,
             BrowserCdpUrl = browserConnectionMode == BrowserConnectionSpecified ? browserCdpUrl : "",
             BrowserReuseExistingCdp = browserConnectionMode == BrowserConnectionReuse,
-            AcpEnabled = acpEnabled,
             AcpAgent = acpAgent,
             AcpCommand = isCustomAcp ? configuredAcpCommand : "",
             AcpArgs = isCustomAcp ? configuredAcpArguments?.ToList() ?? [] : []

@@ -25,12 +25,18 @@ type Server struct {
 	cfg         config.Config
 	sdkMu       sync.Mutex
 	sdk         *mcpsdk.Server
+	registered  map[string]bool
 	httpHandler http.Handler
 }
 
 func NewServer(runtime *app.Runtime, cfg config.Config) *Server {
 	server := &Server{runtime: runtime, cfg: cfg}
 	_ = server.currentSDK()
+	if runtime != nil {
+		runtime.SubscribeToolsChanged(server.syncTools)
+		// 订阅后再对齐一次，覆盖初始化目录与订阅之间发生的后端退出。
+		server.syncTools()
+	}
 	server.httpHandler = mcpsdk.NewStreamableHTTPHandler(
 		func(*http.Request) *mcpsdk.Server { return server.currentSDK() },
 		&mcpsdk.StreamableHTTPOptions{
@@ -63,7 +69,9 @@ func (s *Server) currentSDK() *mcpsdk.Server {
 	)
 	if s.runtime != nil {
 		s.registerAppResources()
+		s.registered = map[string]bool{}
 		for _, definition := range s.runtime.ToolDefinitions() {
+			s.registered[definition.Name] = true
 			s.registerTool(definition)
 		}
 	}
@@ -457,4 +465,60 @@ func pretty(value any) string {
 		return fmt.Sprint(value)
 	}
 	return string(data)
+}
+
+func (s *Server) syncTools() {
+	s.sdkMu.Lock()
+	defer s.sdkMu.Unlock()
+	if s.sdk == nil {
+		return
+	}
+	next := map[string]bool{}
+	for _, def := range s.runtime.ToolDefinitions() {
+		next[def.Name] = true
+		if !s.registered[def.Name] {
+			s.registerTool(def)
+		}
+	}
+	for name := range s.registered {
+		if !next[name] {
+			s.sdk.RemoveTools(name)
+		}
+	}
+	s.registered = next
+}
+
+func (s *Server) SubscribeToolsChanged(f func()) func() {
+	if s.runtime == nil {
+		return func() {}
+	}
+	return s.runtime.SubscribeToolsChanged(f)
+}
+
+func (s *Server) NodeSnapshot() (protocol.Hello, error) {
+	if s.runtime == nil {
+		return protocol.Hello{}, nil
+	}
+	definitions, builtins := s.runtime.CatalogSnapshot()
+	raw := toolDescriptors(definitions, s.cfg.MCPAppsEnabled)
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return protocol.Hello{}, fmt.Errorf("encode node tool snapshot: %w", err)
+	}
+	var descriptors []protocol.ToolDescriptor
+	if err := json.Unmarshal(data, &descriptors); err != nil {
+		return protocol.Hello{}, fmt.Errorf("decode node tool snapshot: %w", err)
+	}
+	names := make([]string, 0, len(descriptors))
+	for _, d := range descriptors {
+		names = append(names, d.Name)
+	}
+	return protocol.Hello{Builtins: builtins, Capabilities: names, Tools: descriptors, ToolContractHash: fmt.Sprintf("sha256:%x", sha256.Sum256(data)), UIResources: s.UIResources()}, nil
+}
+
+func (s *Server) BuiltinCapabilities() []protocol.BuiltinCapability {
+	if s == nil || s.runtime == nil {
+		return nil
+	}
+	return s.runtime.BuiltinCapabilities()
 }

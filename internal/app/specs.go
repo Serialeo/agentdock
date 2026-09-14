@@ -21,6 +21,7 @@ type ToolContractProvider func(string, config.Config) (ToolContract, bool)
 // ToolSpec 是工具公开注册的单一入口：描述、契约所有者、配置开关和 handler 在这里显式绑定。
 // Schema 字段细节由对应 capability package 或共享 mcpcontract 拥有，app 不再按名字二次寻找 owner。
 type ToolSpec struct {
+	Group                  string
 	Name                   string
 	Title                  string
 	Description            string
@@ -149,9 +150,7 @@ func compileAvailableToolContracts(cfg config.Config) ([]string, map[string]*too
 	return names, validators, nil
 }
 
-func requiresNexus(cfg config.Config) bool   { return cfg.NexusEndpoint != "" }
-func requiresBrowser(cfg config.Config) bool { return cfg.BrowserEnabled }
-func requiresACP(cfg config.Config) bool     { return !config.ContainerBuild && cfg.ACPEnabled }
+func requiresNexus(cfg config.Config) bool { return cfg.NexusEndpoint != "" }
 
 func readOnlyToolAnnotations(openWorld bool) *ToolAnnotations {
 	return &ToolAnnotations{ReadOnlyHint: true, DestructiveHint: boolPointer(false), OpenWorldHint: boolPointer(openWorld)}

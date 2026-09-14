@@ -90,10 +90,10 @@ grok agent stdio
 优先使用 AgentDock.app 的高级设置：
 
 1. 打开 **Coding Agent（ACP）**；
-2. 勾选“启用 Coding Agent”；
-3. 选择 Codex、Claude 或 Grok Build；
-4. 确认界面显示“已检测到”对应 Adapter；
-5. 保存设置。
+2. 选择 Codex、Claude 或 Grok Build；
+3. 确认界面显示“已检测到”对应 Adapter；
+4. 应用参数并重启 Core；
+5. 勾选实时能力开关并检查就绪状态。
 
 macOS Desktop 会根据预设自动解析实际 Adapter 路径和参数，原子更新 AgentDock 的运行环境并重启 Core。模型如果有真实桌面操作能力，应直接完成这些操作，而不是让用户代做。
 
@@ -103,12 +103,11 @@ macOS Desktop 会根据预设自动解析实际 Adapter 路径和参数，原子
 
 如果必须使用 `agentdock config update`，先读取当前完整控制面板配置，再把端口、日志、浏览器、MCP Apps 等现有设置连同 ACP 设置一起提交；不要只传 ACP 参数导致其他桌面设置被默认值覆盖。
 
-### Linux、Docker 和直接运行二进制
+### Linux 和直接运行二进制
 
-无桌面控制器时，ACP 属于 Core 启动环境。至少需要：
+ACP 后端参数属于 Core 启动环境。至少需要：
 
 ```text
-AGENTDOCK_ACP_ENABLED=true
 AGENTDOCK_ACP_AGENT=<codex|claude|grok|custom>
 AGENTDOCK_ACP_COMMAND=<Adapter 的绝对可执行路径>
 ```
@@ -123,6 +122,8 @@ AGENTDOCK_ACP_ARGS_JSON=["agent","stdio"]
 
 保存后重启或重建真正承载 AgentDock Core 的运行单元，让新环境重新加载。
 
+随后在 Nexus 的目标节点「内置能力」中开启 ACP，或通过本地 `agentdock builtins set --runtime-root <运行目录> --id acp --enabled=true` 修改同一份持久化选择。关闭会中断当前 prompt；重新开启不会恢复旧任务。官方 Docker 发行包排除 ACP，不能通过开关或自定义命令启用。
+
 ## 验证 ACP 真的可用
 
 至少完成下面几层验证：
@@ -133,7 +134,7 @@ AGENTDOCK_ACP_ARGS_JSON=["agent","stdio"]
 4. **工具层**：当前 MCP 连接的 `tools/list` 应包含 `acp_session`、`acp_prompt` 和 `acp_interaction`。
 5. **Adapter 启动层**：工具已可见时优先调用 `acp_session info`，确认 Adapter 能启动并返回实际能力 / 认证状态；需要登录时再按 Adapter 暴露的认证方式处理。
 
-如果当前客户端是 ChatGPT，启用 ACP 会改变工具 Schema。Core 已正确启用后，还要到 GPT 的 AgentDock 插件页面点击**刷新**，再**新开会话**，否则旧会话可能继续使用不包含 ACP 工具的缓存 Schema。
+启停会发送 `tools/list_changed` 给订阅客户端。未订阅的客户端需要重新获取工具目录；旧目录中的调用仍受 Core 的能力门禁约束。
 
 不要把“配置文件已写入”“Core 已重启”当成 ACP 已完成。只有 Adapter 能启动，并且 MCP 客户端实际拿到 ACP 工具，才算配置闭环。
 

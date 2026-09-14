@@ -19,6 +19,7 @@ import (
 func registerRuntimeAPI(mux *http.ServeMux, runtime runtimeapi.Runtime, cfg config.Config, oauthStore *auth.OAuthStore) {
 	h := runtimeAPIHandler(runtime, cfg, oauthStore)
 	mux.HandleFunc("/internal/runtime/status", h)
+	mux.HandleFunc("/internal/runtime/builtins", h)
 	mux.HandleFunc("/internal/runtime/capabilities", h)
 	mux.HandleFunc("/internal/runtime/files", h)
 	mux.HandleFunc("/internal/runtime/skills", h)
@@ -52,7 +53,11 @@ func runtimeAPIHandler(runtime runtimeapi.Runtime, cfg config.Config, oauthStore
 			writeRuntimeAPIError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "failed to read runtime request body")
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		timeout := 8 * time.Second
+		if r.URL.Path == "/internal/runtime/builtins" {
+			timeout = 30 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		result, err := runtimeapi.Dispatch(ctx, runtime, runtimeapi.Request{
 			Method: r.Method,
@@ -75,7 +80,7 @@ func runtimeRequestBody(r *http.Request) ([]byte, error) {
 	}
 	limit := int64(64 * 1024)
 	switch cleanPath {
-	case "/internal/runtime/mcp", "/internal/runtime/evolve", "/internal/runtime/skills/manage":
+	case "/internal/runtime/builtins", "/internal/runtime/mcp", "/internal/runtime/evolve", "/internal/runtime/skills/manage":
 	default:
 		return nil, nil
 	}

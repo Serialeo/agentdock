@@ -93,7 +93,9 @@ func (m *Manager) AgentInfo(ctx context.Context) (InitializeResult, error) {
 	return process.initialize, nil
 }
 
-func (m *Manager) Close() error {
+func (m *Manager) Close() error { return m.CloseWithReason("agentdock_shutdown") }
+
+func (m *Manager) CloseWithReason(reason string) error {
 	if m == nil {
 		return nil
 	}
@@ -126,7 +128,7 @@ func (m *Manager) Close() error {
 			// Settle the run before cancelling its request context. Otherwise the
 			// request goroutine can win the race and persist a normal cancellation,
 			// hiding the fact that AgentDock itself interrupted the turn.
-			m.finishRun(run, RunInterrupted, "agentdock_shutdown", nil)
+			m.finishRun(run, RunInterrupted, reason, nil)
 			if run.cancel != nil {
 				run.cancel()
 			}
@@ -238,4 +240,14 @@ func newID(prefix string) (string, error) {
 		return "", newError("ACP_ID_FAILED", "generate ACP identifier", false, nil, err)
 	}
 	return prefix + "_" + hex.EncodeToString(random[:]), nil
+}
+
+// BackendDone observes the adapter selected by the successful readiness handshake.
+func (m *Manager) BackendDone() <-chan struct{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.process == nil {
+		return m.closedCh
+	}
+	return m.process.connection.Closed()
 }

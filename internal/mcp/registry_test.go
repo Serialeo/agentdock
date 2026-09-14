@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/uvwt/agentdock/internal/app"
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
@@ -26,8 +27,8 @@ func TestToolRegistryHasNoDuplicates(t *testing.T) {
 func TestRuntimeToolsHaveRegistryDefinitionsAndSchemas(t *testing.T) {
 	cfg := config.Config{
 		AgentDockDefaultDir: t.TempDir(), AgentDockHome: filepath.Join(t.TempDir(), ".agentdock"),
-		NexusEndpoint:  "http://127.0.0.1:18777",
-		BrowserEnabled: true,
+		NexusEndpoint: "http://127.0.0.1:18777",
+		Builtins:      builtin.Choices{Browser: true},
 	}
 	if err := cfg.Normalize(); err != nil {
 		t.Fatalf("Normalize() error = %v", err)
@@ -73,8 +74,8 @@ func TestToolOutputSchemasDoNotExposeGenericOK(t *testing.T) {
 func TestRuntimeExposesSingleToolSet(t *testing.T) {
 	cfg := config.Config{
 		AgentDockDefaultDir: t.TempDir(), AgentDockHome: filepath.Join(t.TempDir(), ".agentdock"),
-		NexusEndpoint:  "http://127.0.0.1:18777",
-		BrowserEnabled: true,
+		NexusEndpoint: "http://127.0.0.1:18777",
+		Builtins:      builtin.Choices{Browser: true},
 	}
 	if err := cfg.Normalize(); err != nil {
 		t.Fatalf("Normalize() error = %v", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/url"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/taskstate"
 	toolfile "github.com/uvwt/agentdock/internal/tool/file"
@@ -14,6 +15,8 @@ import (
 // Runtime 定义 Runtime API 路由真正需要的应用能力。
 // HTTP、Nexus Bridge 等传输层都只依赖这份传输无关契约。
 type Runtime interface {
+	RuntimeBuiltins() app.Result
+	SetBuiltin(context.Context, protocol.BuiltinUpdate) (app.Result, error)
 	RuntimeStatus() app.Result
 	RuntimeSkills() (app.Result, error)
 	RuntimeSkill(skill string) (app.Result, error)

@@ -169,18 +169,27 @@ func statusPageHandler(server *mcp.Server, cfg config.Config) http.HandlerFunc {
 		build := buildinfo.Current()
 		recallEnabled := strings.TrimSpace(cfg.NexusEndpoint) != ""
 		authEnabled := cfg.AuthRequired()
+		browserAvailable, acpAvailable := false, false
+		for _, state := range server.BuiltinCapabilities() {
+			if state.ID == "browser" {
+				browserAvailable = state.Available
+			}
+			if state.ID == "acp" {
+				acpAvailable = state.Available
+			}
+		}
 		data := statusPageData{
 			Text:             text,
 			Version:          build.Version,
 			Platform:         build.Platform,
 			ToolCount:        len(server.ToolNames()),
 			MCPEndpoint:      issuerFor(cfg, r) + "/mcp",
-			ACPEnabled:       cfg.ACPEnabled,
-			ACPStatus:        enabledLabel(text, cfg.ACPEnabled),
+			ACPEnabled:       acpAvailable,
+			ACPStatus:        enabledLabel(text, acpAvailable),
 			RecallEnabled:    recallEnabled,
 			RecallStatus:     enabledLabel(text, recallEnabled),
-			BrowserEnabled:   cfg.BrowserEnabled,
-			BrowserStatus:    enabledLabel(text, cfg.BrowserEnabled),
+			BrowserEnabled:   browserAvailable,
+			BrowserStatus:    enabledLabel(text, browserAvailable),
 			AuthEnabled:      authEnabled,
 			AuthStatus:       authLabel(text, cfg),
 			RepositoryURL:    agentDockRepositoryURL,

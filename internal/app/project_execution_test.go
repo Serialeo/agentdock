@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	protocol "github.com/Serialeo/agentdock-protocol"
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 	projectstate "github.com/uvwt/agentdock/internal/project"
 )
@@ -143,8 +144,9 @@ func TestProjectBooleanCapabilitiesRejectAtRuntimeBoundary(t *testing.T) {
 	})
 
 	t.Run("browser", func(t *testing.T) {
+		executable, _ := os.Executable()
 		root := t.TempDir()
-		cfg := config.Config{AgentDockDefaultDir: root, AgentDockHome: filepath.Join(root, ".agentdock"), BrowserEnabled: true}
+		cfg := config.Config{AgentDockDefaultDir: root, AgentDockHome: filepath.Join(root, ".agentdock"), Builtins: builtin.Choices{Browser: true}, BrowserExecutablePath: executable}
 		if err := cfg.Normalize(); err != nil {
 			t.Fatal(err)
 		}
@@ -161,6 +163,7 @@ func TestProjectBooleanCapabilitiesRejectAtRuntimeBoundary(t *testing.T) {
 	})
 
 	t.Run("acp", func(t *testing.T) {
+		t.Setenv("GO_WANT_OUTPUT_CONTRACT_ACP_HELPER", "1")
 		executable, err := os.Executable()
 		if err != nil {
 			t.Fatal(err)
@@ -168,7 +171,7 @@ func TestProjectBooleanCapabilitiesRejectAtRuntimeBoundary(t *testing.T) {
 		root := t.TempDir()
 		cfg := config.Config{
 			AgentDockDefaultDir: root, AgentDockHome: filepath.Join(root, ".agentdock"),
-			ACPEnabled: true, ACPAgentName: "helper", ACPCommand: executable,
+			Builtins: builtin.Choices{ACP: true}, ACPAgentName: "helper", ACPCommand: executable, ACPArgs: []string{"-test.run=^TestOutputContractACPHelper$"}, ACPEnvFromEnv: map[string]string{"GO_WANT_OUTPUT_CONTRACT_ACP_HELPER": "GO_WANT_OUTPUT_CONTRACT_ACP_HELPER"},
 		}
 		if err := cfg.Normalize(); err != nil {
 			t.Fatal(err)

@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	protocol "github.com/Serialeo/agentdock-protocol"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/uvwt/agentdock/internal/app"
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
@@ -109,7 +112,7 @@ func newMCPAppTestHarnessWithApps(t *testing.T, cfg config.Config, enabled bool)
 }
 
 func TestUIResourcesMatchServedResourceRegistry(t *testing.T) {
-	server := &Server{cfg: config.Config{NexusEndpoint: "https://nexus.example.test", ACPEnabled: true, MCPAppsEnabled: true}}
+	server := &Server{cfg: config.Config{NexusEndpoint: "https://nexus.example.test", Builtins: builtin.Choices{ACP: true}, MCPAppsEnabled: true}}
 	definitions := server.appResourceDefinitions()
 	resources := server.UIResources()
 	if len(definitions) != 7 || len(resources) != len(definitions) {
@@ -253,8 +256,8 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		}
 		resources[resource.URI] = resource
 	}
-	if len(resources) != 4 {
-		t.Fatalf("resources/list count = %d, want 4", len(resources))
+	if len(resources) != 5 {
+		t.Fatalf("resources/list count = %d, want 5", len(resources))
 	}
 	for _, uri := range []string{
 		protocol.ContextUIResourceURI,
@@ -386,8 +389,8 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 	if resources[protocol.RecallUIResourceURI] != nil || resources[protocol.WorkflowUIResourceURI] != nil {
 		t.Fatal("Nexus-only UI resources should not be listed when Nexus is disabled")
 	}
-	if resources[protocol.ACPStatusUIResourceURI] != nil {
-		t.Fatal("ACP UI resource should not be listed when ACP is disabled")
+	if resources[protocol.ACPStatusUIResourceURI] == nil {
+		t.Fatal("read-only historical ACP result resource should remain available")
 	}
 
 	contextResult, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "agentdock_context", Arguments: map[string]any{}})
@@ -523,8 +526,8 @@ func TestMCPAppsExposeNexusViewsWhenNexusEnabled(t *testing.T) {
 		}
 		resources[resource.URI] = resource
 	}
-	if len(resources) != 6 {
-		t.Fatalf("resources/list count = %d, want 6", len(resources))
+	if len(resources) != 7 {
+		t.Fatalf("resources/list count = %d, want 7", len(resources))
 	}
 	for _, tc := range []struct {
 		uri      string
@@ -600,9 +603,9 @@ func TestMCPAppsExposeACPViewOnlyWhenACPEnabled(t *testing.T) {
 	harness := newMCPAppTestHarness(t, config.Config{
 		AgentDockDefaultDir: root,
 		AgentDockHome:       filepath.Join(root, ".agentdock"),
-		ACPEnabled:          true,
+		Builtins:            builtin.Choices{ACP: true},
 		ACPAgentName:        "helper",
-		ACPCommand:          executable,
+		ACPCommand:          executable, ACPArgs: []string{"-test.run=^TestBuiltinACPHelper$"},
 	})
 
 	tools := map[string]*mcpsdk.Tool{}
@@ -669,4 +672,19 @@ func TestAppWidgetDomainRequiresHTTPSOrigin(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuiltinACPHelper(t *testing.T) {
+	if len(os.Args) < 2 || os.Args[1] != "-test.run=^TestBuiltinACPHelper$" {
+		return
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		var request map[string]any
+		if json.Unmarshal(scanner.Bytes(), &request) != nil {
+			os.Exit(2)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"jsonrpc": "2.0", "id": request["id"], "result": map[string]any{"protocolVersion": 1}})
+	}
+	os.Exit(0)
 }

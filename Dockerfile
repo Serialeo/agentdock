@@ -98,8 +98,8 @@ RUN apt-get update \
     && printf '%s\n' 'CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox"' > /etc/chromium.d/agentdock \
     && rm -rf /var/lib/apt/lists/*
 
-ENV AGENTDOCK_BROWSER_ENABLED=true \
-    AGENTDOCK_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+RUN printf '%s\n' '{"browser":true,"acp":false,"computer":false}' > /usr/local/share/agentdock/builtin-defaults.json
+ENV AGENTDOCK_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 
 USER agentdock:agentdock
 

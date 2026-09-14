@@ -4,28 +4,22 @@ package app
 
 import (
 	"context"
-	"strings"
+	"os"
 	"testing"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
 func TestDockerDoesNotPublishOrExecuteDesktopTools(t *testing.T) {
 	// 故意不调用 Normalize：程序直接传入配置也不能启用容器没有的能力。
+	executable, _ := os.Executable()
 	cfg := config.Config{
 		AgentDockHome: t.TempDir(), AgentDockDefaultDir: t.TempDir(),
-		ACPEnabled: true, ACPCommand: "missing-adapter",
-		ACPEnvFromEnv:     map[string]string{"TOKEN": "AGENTDOCK_TEST_MISSING_ACP_SECRET"},
-		ComputerAvailable: true, ComputerHelperPath: "/missing/helper", BrowserEnabled: true,
-	}
-	names, _, err := compileAvailableToolContracts(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range names {
-		if strings.HasPrefix(name, "acp_") || strings.HasPrefix(name, "computer_") {
-			t.Fatalf("Docker advertised unavailable tool %s", name)
-		}
+		Builtins: builtin.Choices{ACP: true, Browser: true, Computer: true}, ACPCommand: "missing-adapter",
+		BrowserExecutablePath: executable,
+		ACPEnvFromEnv:         map[string]string{"TOKEN": "AGENTDOCK_TEST_MISSING_ACP_SECRET"},
 	}
 	r, err := NewRuntime(cfg)
 	if err != nil {
@@ -36,7 +30,7 @@ func TestDockerDoesNotPublishOrExecuteDesktopTools(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if r.acp != nil || r.computer != nil || r.Config().ACPEnabled || r.Config().ComputerAvailable {
+	if r.acp != nil || r.computer != nil || stateBuiltinTest(r, "acp").Provided {
 		t.Fatal("Docker initialized a desktop backend")
 	}
 	for _, name := range []string{"acp_session", "acp_prompt", "acp_interaction", "computer_status", "computer_session", "computer_observe", "computer_act", "computer_stop"} {
@@ -44,12 +38,16 @@ func TestDockerDoesNotPublishOrExecuteDesktopTools(t *testing.T) {
 			t.Fatalf("Docker exposed %s", name)
 		}
 		_, err := r.Call(context.Background(), name, nil)
-		requireAppToolErrorCode(t, err, "UNKNOWN_TOOL")
+		requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
 	}
 	for _, name := range []string{"exec_command", "read_file", "browser_session", "browser_act", "mcp_tool_search"} {
 		if _, ok := r.ToolDefinition(name); !ok {
 			t.Fatalf("Docker lost supported tool %s", name)
 		}
+	}
+	yes := true
+	if _, err := r.SetBuiltin(t.Context(), protocol.BuiltinUpdate{ID: "acp", Enabled: &yes}); err == nil {
+		t.Fatal("Docker ACP enabled through GUI operation")
 	}
 	result, err := r.AgentDockLocalContext(context.Background())
 	if err != nil {

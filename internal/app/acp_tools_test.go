@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 )
 
@@ -28,6 +29,7 @@ func TestACPToolsAreFeatureGatedAndUseStrictSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	t.Setenv("GO_WANT_OUTPUT_CONTRACT_ACP_HELPER", "1")
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +37,7 @@ func TestACPToolsAreFeatureGatedAndUseStrictSchemas(t *testing.T) {
 	root := t.TempDir()
 	enabled := config.Config{
 		AgentDockHome: t.TempDir(), AgentDockDefaultDir: root,
-		ACPEnabled: true, ACPAgentName: "helper", ACPCommand: executable,
+		Builtins: builtin.Choices{ACP: true}, ACPAgentName: "helper", ACPCommand: executable, ACPArgs: []string{"-test.run=^TestOutputContractACPHelper$"}, ACPEnvFromEnv: map[string]string{"GO_WANT_OUTPUT_CONTRACT_ACP_HELPER": "GO_WANT_OUTPUT_CONTRACT_ACP_HELPER"},
 	}
 	if err := enabled.Normalize(); err != nil {
 		t.Fatal(err)

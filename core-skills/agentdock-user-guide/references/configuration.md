@@ -1,6 +1,6 @@
 # AgentDock 运行配置速查
 
-本文件描述 AgentDock Core 当前版本从启动环境读取的主要运行配置。它不是新的配置文件格式，也不要求所有发行方式直接暴露这些变量给用户。
+本文件描述 AgentDock Core 的能力选择与主要启动参数。browser、ACP、computer 的用户选择由 Core 原子保存到 `AGENTDOCK_HOME/builtin-capabilities.json`；通过原生面板或 Nexus 指定节点的「内置能力」修改，热切换无需重启。下表的后端参数仍在启动时读取。
 
 ## 常用配置
 
@@ -11,12 +11,10 @@
 | `AGENTDOCK_AUTH_TOKEN` | Bearer Token | 安装器、平台受保护凭据或容器 secret/env |
 | `AGENTDOCK_LOG_LEVEL` | `debug` / `info` / `warn` / `error` | Desktop 设置、Linux env、Docker environment |
 | `AGENTDOCK_MCP_APPS_ENABLED` | 是否启用 MCP Apps UI，默认启用 | Desktop 设置或启动环境 |
-| `AGENTDOCK_BROWSER_ENABLED` | 是否启用浏览器能力 | Desktop 设置或启动环境 |
 | `AGENTDOCK_BROWSER_EXECUTABLE_PATH` | 显式浏览器可执行文件 | Docker/服务器/高级运行环境 |
 | `AGENTDOCK_BROWSER_CDP_URL` | 复用已有 Chromium 的 CDP 地址 | Desktop 设置或启动环境 |
 | `AGENTDOCK_BROWSER_REUSE_EXISTING_CDP` | 自动复用唯一已发现 CDP | Desktop 设置或启动环境 |
 | `AGENTDOCK_COMMAND_ENV_FROM_ENV_JSON` | 显式允许 `exec_command` 从 Core 宿主环境复制的变量映射 | Linux/Docker/直接启动的高级配置 |
-| `AGENTDOCK_ACP_ENABLED` | 是否启用 ACP Client | Desktop 设置或启动环境 |
 | `AGENTDOCK_ACP_AGENT` | ACP Agent 预设/名称 | Desktop 设置或启动环境 |
 | `AGENTDOCK_ACP_COMMAND` | ACP Adapter 命令 | 自定义/高级 ACP 配置 |
 | `AGENTDOCK_ACP_ARGS_JSON` | ACP Adapter 参数 JSON 数组 | 自定义/高级 ACP 配置 |
@@ -32,6 +30,8 @@
 | `AGENTDOCK_TRUSTED_PROXY_CIDRS` | 受信任反向代理网段 | 服务器/反代场景 |
 
 Coding Agent 的发现、Codex / Claude Adapter 安装、Grok stdio 模式、平台配置和验证流程见 `acp.md`。
+
+原有 browser/ACP 环境启用开关已移除。开启但后端未就绪时，内置能力界面显示原因；computer 在所有当前发行包中排除，官方 Docker 也排除 ACP，权限设置不能解除发行限制。外部 MCP 服务有独立配置入口，不属于这些内置组。
 
 ## 重要边界
 

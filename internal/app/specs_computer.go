@@ -7,12 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"time"
+
 	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/Serialeo/agentdock-protocol/mcpcontract"
 	"github.com/uvwt/agentdock/internal/computer"
 	"github.com/uvwt/agentdock/internal/config"
 	projectstate "github.com/uvwt/agentdock/internal/project"
-	"time"
 )
 
 func computerToolSpecs() []ToolSpec {
@@ -31,9 +32,7 @@ func computerToolSpecs() []ToolSpec {
 			annotations = readOnlyToolAnnotations(true)
 		}
 		specs = append(specs, ToolSpec{Name: name, Title: name, Description: descriptions[name], Annotations: annotations,
-			Availability: func(cfg config.Config) bool {
-				return config.ComputerUseEnabled && !config.ContainerBuild && cfg.ComputerAvailable
-			},
+			Group: "computer",
 			Contract: func(name string, cfg config.Config) (ToolContract, bool) {
 				return staticToolContract(name, mcpcontract.ComputerInputSchema, mcpcontract.ComputerOutputSchema)
 			},

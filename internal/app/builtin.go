@@ -1,0 +1,391 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"sync"
+	"time"
+
+	protocol "github.com/Serialeo/agentdock-protocol"
+	acpruntime "github.com/uvwt/agentdock/internal/acp"
+	"github.com/uvwt/agentdock/internal/builtin"
+	"github.com/uvwt/agentdock/internal/config"
+	toolacp "github.com/uvwt/agentdock/internal/tool/acp"
+	toolbrowser "github.com/uvwt/agentdock/internal/tool/browser"
+)
+
+type builtinGroup struct {
+	state  protocol.BuiltinCapability
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   <-chan struct{}
+	calls  sync.WaitGroup
+}
+
+// builtinManager 串行化配置写入和后端替换；mu 只保护快照与调用准入，不跨后端等待。
+// 每次启用创建新的取消域，关闭后旧请求与旧任务不能进入下一代后端。
+type builtinManager struct {
+	updateMu     sync.Mutex
+	mu           sync.Mutex
+	groups       map[string]*builtinGroup
+	choices      builtin.Choices
+	listeners    map[int]func()
+	nextListener int
+	closed       bool
+}
+
+func (r *Runtime) initBuiltins() error {
+	choices, err := builtin.Load(r.cfg.AgentDockHome, r.cfg.Builtins)
+	if err != nil {
+		return err
+	}
+	r.builtins = &builtinManager{choices: choices, groups: map[string]*builtinGroup{}, listeners: map[int]func(){}}
+	for _, id := range []string{"browser", "acp", "computer"} {
+		provided := config.BuiltinProvided(id)
+		enabled := choices.Browser
+		if id == "acp" {
+			enabled = choices.ACP
+		}
+		if id == "computer" {
+			enabled = choices.Computer
+		}
+		state := protocol.BuiltinCapability{ID: id, Provided: provided, Enabled: enabled, Tools: []string{}}
+		for _, spec := range toolSpecs {
+			if spec.Group == id {
+				state.Tools = append(state.Tools, spec.Name)
+			}
+		}
+		g := &builtinGroup{state: state}
+		r.builtins.groups[id] = g
+		if provided && enabled {
+			r.startBuiltin(g)
+		}
+	}
+	for _, g := range r.builtins.groups {
+		r.watchBuiltin(g)
+	}
+	return nil
+}
+
+func (r *Runtime) startBuiltin(g *builtinGroup) {
+	g.ctx, g.cancel = context.WithCancel(context.Background())
+	var err error
+	switch g.state.ID {
+	case "browser":
+		service := toolbrowser.New(toolbrowser.Config{AgentDockHome: r.cfg.AgentDockHome, ExecutablePath: r.cfg.BrowserExecutablePath, CDPURL: r.cfg.BrowserCDPURL, ReuseExistingCDP: r.cfg.BrowserReuseExistingCDP}, r.media.PublishBrowserScreenshot)
+		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+		err = service.CheckReady(ctx)
+		cancel()
+		if err == nil {
+			r.browser = service
+		} else {
+			_ = service.Close()
+		}
+	case "acp":
+		cfg := r.cfg
+		err = cfg.ValidateACPBackend()
+		if err != nil {
+			break
+		}
+		environment := make(map[string]string, len(cfg.ACPEnvFromEnv))
+		for child, host := range cfg.ACPEnvFromEnv {
+			value, exists := os.LookupEnv(host)
+			if !exists {
+				err = fmt.Errorf("required ACP environment variable %s is missing", host)
+				break
+			}
+			environment[child] = value
+		}
+		if err != nil {
+			break
+		}
+		var manager *acpruntime.Manager
+		manager, err = acpruntime.NewManager(acpruntime.Options{Home: cfg.AgentDockHome, DefaultCWD: cfg.AgentDockDefaultDir, Agent: acpruntime.AgentSpec{Name: cfg.ACPAgentName, Command: cfg.ACPCommand, Args: append([]string(nil), cfg.ACPArgs...), Environment: environment}, MaxConcurrentRuns: cfg.ACPMaxPrompts, InteractionTimeout: time.Duration(cfg.ACPInteractionMS) * time.Millisecond})
+		if err == nil {
+			// 握手只启动适配器，不恢复 session 或 prompt；失败只影响这一组。
+			ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
+			_, err = manager.AgentInfo(ctx)
+			cancel()
+			if err != nil {
+				err = errors.Join(err, manager.Close())
+			} else {
+				r.acp = toolacp.New(manager, r.ws)
+				g.done = manager.BackendDone()
+			}
+		}
+	}
+	g.state.Ready = err == nil
+	g.state.Reason = ""
+	if err != nil {
+		g.state.Reason = err.Error()
+		g.cancel()
+	}
+}
+
+func builtinState(g *builtinGroup) protocol.BuiltinCapability {
+	state := g.state
+	state.Tools = append([]string{}, state.Tools...)
+	state.Available = state.Provided && state.Enabled && state.Ready && !state.Transitioning
+	switch {
+	case !state.Provided:
+		state.Reason = "当前发行包不提供此能力"
+	case state.Transitioning:
+		state.Reason = "正在切换，已停止接受新调用"
+	case !state.Enabled:
+		if state.Reason == "" {
+			state.Reason = "用户已关闭"
+		}
+	}
+	return state
+}
+
+func (r *Runtime) BuiltinCapabilities() []protocol.BuiltinCapability {
+	if r.builtins == nil {
+		return nil
+	}
+	r.builtins.mu.Lock()
+	defer r.builtins.mu.Unlock()
+	states := make([]protocol.BuiltinCapability, 0, 3)
+	for _, id := range []string{"browser", "acp", "computer"} {
+		states = append(states, builtinState(r.builtins.groups[id]))
+	}
+	return states
+}
+
+func (r *Runtime) builtinAvailable(id string) bool {
+	if id == "" {
+		return true
+	}
+	if r.builtins == nil {
+		return false
+	}
+	r.builtins.mu.Lock()
+	defer r.builtins.mu.Unlock()
+	g := r.builtins.groups[id]
+	return g != nil && builtinState(g).Available && !r.builtins.closed
+}
+
+func (r *Runtime) enterBuiltin(ctx context.Context, id string) (context.Context, func(), error) {
+	if id == "" {
+		return ctx, func() {}, nil
+	}
+	m := r.builtins
+	if m == nil {
+		return nil, nil, toolError("CAPABILITY_UNAVAILABLE", "built-in capability is unavailable", "capability")
+	}
+	m.mu.Lock()
+	g := m.groups[id]
+	if g == nil || !builtinState(g).Available || m.closed {
+		reason := "built-in capability is unavailable"
+		if g != nil {
+			reason = builtinState(g).Reason
+		}
+		m.mu.Unlock()
+		return nil, nil, toolErrorDetails("CAPABILITY_UNAVAILABLE", reason, "capability", map[string]any{"group": id})
+	}
+	g.calls.Add(1)
+	callCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(g.ctx, cancel)
+	m.mu.Unlock()
+	return callCtx, func() { stop(); cancel(); g.calls.Done() }, nil
+}
+
+// SubscribeToolsChanged applies to built-ins only; external MCP service configuration has its own owner.
+func (r *Runtime) SubscribeToolsChanged(listener func()) func() {
+	m := r.builtins
+	m.mu.Lock()
+	id := m.nextListener
+	m.nextListener++
+	m.listeners[id] = listener
+	m.mu.Unlock()
+	return func() { m.mu.Lock(); delete(m.listeners, id); m.mu.Unlock() }
+}
+
+func (r *Runtime) notifyBuiltinChange() {
+	m := r.builtins
+	m.mu.Lock()
+	listeners := make([]func(), 0, len(m.listeners))
+	for _, f := range m.listeners {
+		listeners = append(listeners, f)
+	}
+	m.mu.Unlock()
+	for _, f := range listeners {
+		f()
+	}
+}
+
+func (r *Runtime) SetBuiltin(ctx context.Context, update protocol.BuiltinUpdate) (Result, error) {
+	m := r.builtins
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	g := m.groups[update.ID]
+	if g == nil || update.Enabled == nil {
+		m.mu.Unlock()
+		return nil, toolError("INVALID_ARGUMENT", "id and enabled are required for a known built-in group", "validation")
+	}
+	if m.closed {
+		m.mu.Unlock()
+		return nil, toolError("RUNTIME_CLOSING", "AgentDock runtime is shutting down", "runtime")
+	}
+	if *update.Enabled && !g.state.Provided {
+		m.mu.Unlock()
+		return nil, toolError("CAPABILITY_NOT_PROVIDED", "当前发行包不提供此能力", "capability")
+	}
+	if g.state.Enabled == *update.Enabled && (!*update.Enabled || g.state.Ready) && !g.state.Transitioning && g.state.Reason == "" {
+		m.mu.Unlock()
+		return r.RuntimeBuiltins(), nil
+	}
+	choices := m.choices
+	switch update.ID {
+	case "browser":
+		choices.Browser = *update.Enabled
+	case "acp":
+		choices.ACP = *update.Enabled
+	case "computer":
+		choices.Computer = *update.Enabled
+	}
+	m.mu.Unlock()
+	// 先完成持久化再改变准入；写入失败不能给 GUI 返回已生效的假象。
+	if err := builtin.Save(r.cfg.AgentDockHome, choices); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	m.choices = choices
+	g.state.Enabled = *update.Enabled
+	g.state.Transitioning = true
+	g.state.Ready = false
+	if g.cancel != nil {
+		g.cancel()
+	}
+	m.mu.Unlock()
+	r.notifyBuiltinChange()
+	// Close 负责取消 detached ACP prompt 及 browser session；等待在途 handler 后才替换指针。
+	closeErr := r.stopBuiltin(g, "capability_disabled")
+	g.calls.Wait()
+	m.mu.Lock()
+	g.state.Reason = ""
+	m.mu.Unlock()
+	if *update.Enabled && closeErr == nil {
+		// startBuiltin 只写本组工作副本，快照读取在整个启动期间仍显示 transitioning。
+		next := &builtinGroup{state: g.state}
+		r.startBuiltin(next)
+		m.mu.Lock()
+		g.done = next.done
+		g.ctx = next.ctx
+		g.cancel = next.cancel
+		g.state = next.state
+		m.mu.Unlock()
+	}
+	m.mu.Lock()
+	g.state.Transitioning = false
+	if closeErr != nil {
+		g.state.Reason = fmt.Sprintf("后端清理失败: %v", closeErr)
+	}
+	m.mu.Unlock()
+	r.notifyBuiltinChange()
+	r.watchBuiltin(g)
+	return r.RuntimeBuiltins(), nil
+}
+
+func (r *Runtime) stopBuiltin(g *builtinGroup, reason string) error {
+	switch g.state.ID {
+	case "browser":
+		if r.browser != nil {
+			return r.browser.Close()
+		}
+	case "acp":
+		if r.acp != nil {
+			return r.acp.CloseWithReason(reason)
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) closeBuiltins() error {
+	if r.builtins == nil {
+		return nil
+	}
+	m := r.builtins
+	m.updateMu.Lock()
+	defer m.updateMu.Unlock()
+	m.mu.Lock()
+	m.closed = true
+	for _, g := range m.groups {
+		g.state.Ready = false
+		if g.cancel != nil {
+			g.cancel()
+		}
+	}
+	m.mu.Unlock()
+	var errs []error
+	for _, g := range m.groups {
+		errs = append(errs, r.stopBuiltin(g, "agentdock_shutdown"))
+		g.calls.Wait()
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Runtime) RuntimeBuiltins() Result {
+	return Result{"ok": true, "builtins": r.BuiltinCapabilities(), "source": "agentdock"}
+}
+
+// CatalogSnapshot prevents a switch from splitting tool names, descriptors and capability states across generations.
+func (r *Runtime) CatalogSnapshot() ([]ToolDefinition, []protocol.BuiltinCapability) {
+	m := r.builtins
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	definitions := make([]ToolDefinition, 0, len(r.toolNames))
+	for _, name := range r.toolNames {
+		spec, _ := toolSpecByName(name)
+		if spec.Group != "" && (!builtinState(m.groups[spec.Group]).Available || m.closed) {
+			continue
+		}
+		definitions = append(definitions, spec.definition(r.cfg))
+	}
+	states := make([]protocol.BuiltinCapability, 0, 3)
+	for _, id := range []string{"browser", "acp", "computer"} {
+		states = append(states, builtinState(m.groups[id]))
+	}
+	return definitions, states
+}
+
+func (r *Runtime) watchBuiltin(g *builtinGroup) {
+	if g.done == nil || !g.state.Ready {
+		return
+	}
+	generation, done := g.ctx, g.done
+	go func() {
+		select {
+		case <-generation.Done():
+			return
+		case <-done:
+		}
+		m := r.builtins
+		m.updateMu.Lock()
+		defer m.updateMu.Unlock()
+		m.mu.Lock()
+		if m.closed || g.ctx != generation || generation.Err() != nil {
+			m.mu.Unlock()
+			return
+		}
+		g.state.Ready = false
+		g.state.Reason = "ACP 适配器已断开，请检查后端后重新启用"
+		g.cancel()
+		m.mu.Unlock()
+		r.notifyBuiltinChange()
+		err := r.stopBuiltin(g, "backend_disconnected")
+		g.calls.Wait()
+		if err != nil {
+			m.mu.Lock()
+			g.state.Reason += ": " + err.Error()
+			m.mu.Unlock()
+			r.notifyBuiltinChange()
+		}
+	}()
+}

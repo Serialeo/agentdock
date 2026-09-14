@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
 	"github.com/uvwt/agentdock/internal/evolution"
 	toolacp "github.com/uvwt/agentdock/internal/tool/acp"
@@ -21,9 +22,8 @@ import (
 
 func TestAllToolDefinitionsHaveStrictCompilableInputContracts(t *testing.T) {
 	cfg := config.Config{
-		NexusEndpoint:  "http://127.0.0.1:18777",
-		BrowserEnabled: true,
-		ACPEnabled:     true,
+		NexusEndpoint: "http://127.0.0.1:18777",
+		Builtins:      builtin.Choices{Browser: true, ACP: true},
 	}
 	for _, definition := range toolDefinitionsForConfig(cfg) {
 		if got := definition.InputSchema["additionalProperties"]; got != false {

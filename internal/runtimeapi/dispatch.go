@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/uvwt/agentdock/internal/app"
 	toolfile "github.com/uvwt/agentdock/internal/tool/file"
 	toolskill "github.com/uvwt/agentdock/internal/tool/skill"
@@ -26,7 +27,7 @@ func MethodAllowed(method, path string) bool {
 		_, ok := runtimeTaskID(cleanPath)
 		return ok
 	}
-	return method == http.MethodPost && (cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" || cleanPath == "/internal/runtime/evolve" || cleanPath == "/internal/runtime/skills/manage")
+	return method == http.MethodPost && (cleanPath == "/internal/runtime/builtins" || cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" || cleanPath == "/internal/runtime/evolve" || cleanPath == "/internal/runtime/skills/manage")
 }
 
 func AllowHeader(path string) string {
@@ -34,7 +35,7 @@ func AllowHeader(path string) string {
 	if _, ok := runtimeTaskID(cleanPath); ok {
 		return "GET, DELETE"
 	}
-	if cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" {
+	if cleanPath == "/internal/runtime/builtins" || cleanPath == "/internal/runtime/capabilities" || cleanPath == "/internal/runtime/mcp" {
 		return "GET, POST"
 	}
 	if cleanPath == "/internal/runtime/skills/manage" {
@@ -56,6 +57,16 @@ func Dispatch(ctx context.Context, runtime Runtime, request Request) (map[string
 
 	taskID, isTaskPath := runtimeTaskID(path)
 	switch {
+	case path == "/internal/runtime/builtins":
+		if method == http.MethodGet {
+			return map[string]any(runtime.RuntimeBuiltins()), nil
+		}
+		var update protocol.BuiltinUpdate
+		if err := json.Unmarshal(request.Body, &update); err != nil {
+			return nil, &app.ToolError{Code: "INVALID_ARGUMENT", Message: "invalid built-in capability update", Category: "validation"}
+		}
+		result, err := runtime.SetBuiltin(ctx, update)
+		return map[string]any(result), err
 	case path == "/internal/runtime/status":
 		return map[string]any(runtime.RuntimeStatus()), nil
 	case path == "/internal/runtime/capabilities":

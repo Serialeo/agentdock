@@ -21,7 +21,6 @@ services:
       AGENTDOCK_PORT: "8765"
       AGENTDOCK_SERVER_URL: "${AGENTDOCK_SERVER_URL:-}"
       # Go 原生 CDP 浏览器版镜像需设为 true，并切换 AGENTDOCK_IMAGE 到 browser 标签；镜像内 Chromium 路径已预配置。
-      AGENTDOCK_BROWSER_ENABLED: "${AGENTDOCK_BROWSER_ENABLED:-false}"
       # 可显式连接已有 CDP。容器无法枚举宿主机进程/profile；自动发现只作用于容器自身环境。
       AGENTDOCK_BROWSER_CDP_URL: "${AGENTDOCK_BROWSER_CDP_URL:-}"
       AGENTDOCK_BROWSER_REUSE_EXISTING_CDP: "${AGENTDOCK_BROWSER_REUSE_EXISTING_CDP:-false}"

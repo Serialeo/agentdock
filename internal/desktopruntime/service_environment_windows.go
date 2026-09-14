@@ -49,10 +49,8 @@ type controlPanelSettings struct {
 	LogLevel                string   `json:"log_level"`
 	OAuthAccessTokenTTL     string   `json:"oauth_access_token_ttl,omitempty"`
 	MCPAppsEnabled          bool     `json:"mcp_apps_enabled"`
-	BrowserEnabled          bool     `json:"browser_enabled"`
 	BrowserCDPURL           string   `json:"browser_cdp_url"`
 	BrowserReuseExistingCDP bool     `json:"browser_reuse_existing_cdp"`
-	ACPEnabled              bool     `json:"acp_enabled"`
 	ACPAgent                string   `json:"acp_agent"`
 	ACPCommand              string   `json:"acp_command"`
 	ACPArgs                 []string `json:"acp_args"`
@@ -94,21 +92,12 @@ func platformPrepareCoreEnvironment(runtimeRoot string) error {
 		"AGENTDOCK_PORT":                       strconv.Itoa(settings.Port),
 		"AGENTDOCK_LOG_LEVEL":                  settings.LogLevel,
 		"AGENTDOCK_MCP_APPS_ENABLED":           strconv.FormatBool(settings.MCPAppsEnabled),
-		"AGENTDOCK_BROWSER_ENABLED":            strconv.FormatBool(settings.BrowserEnabled),
 		"AGENTDOCK_BROWSER_REUSE_EXISTING_CDP": strconv.FormatBool(settings.BrowserReuseExistingCDP),
-		"AGENTDOCK_ACP_ENABLED":                strconv.FormatBool(settings.ACPEnabled),
 	}
 	if settings.BrowserCDPURL != "" {
 		managed["AGENTDOCK_BROWSER_CDP_URL"] = settings.BrowserCDPURL
 	}
-	if settings.ACPEnabled {
-		info, statErr := os.Stat(settings.ACPCommand)
-		if statErr != nil {
-			return fmt.Errorf("读取 Coding Agent 命令失败 %s: %w", settings.ACPCommand, statErr)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Coding Agent 命令不是普通文件: %s", settings.ACPCommand)
-		}
+	{
 		argsJSON, marshalErr := json.Marshal(settings.ACPArgs)
 		if marshalErr != nil {
 			return fmt.Errorf("编码 Coding Agent 参数失败: %w", marshalErr)
@@ -197,7 +186,7 @@ func loadControlPanelSettings(runtimeRoot string, fallbackPort int) (controlPane
 	default:
 		return controlPanelSettings{}, fmt.Errorf("不支持的 Coding Agent: %s", settings.ACPAgent)
 	}
-	if settings.ACPEnabled && !filepath.IsAbs(settings.ACPCommand) {
+	if settings.ACPCommand != "" && !filepath.IsAbs(settings.ACPCommand) {
 		return controlPanelSettings{}, fmt.Errorf("Coding Agent 命令必须是绝对路径: %s", settings.ACPCommand)
 	}
 	return settings, nil

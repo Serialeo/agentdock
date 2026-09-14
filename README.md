@@ -165,7 +165,7 @@ Host installations of AgentDock can optionally act as a native ACP client and ho
 
 Native computer use is unfinished and disabled in all current distributions. Computer MCP tools are not published or started, and desktop packages do not include the computer helper.
 
-- Desktop control panels provide presets for Codex, Claude, and Grok; host configuration controls whether ACP is enabled and which adapter is selected.
+- Desktop control panels provide presets for Codex, Claude, and Grok; the running Core persists capability switches; advanced settings configure the adapter.
 - Use `acp_session` to create and manage sessions, `acp_prompt` to run and observe prompts, and `acp_interaction` to answer agent permission requests.
 - Optional ACP operations are available only when the connected adapter advertises the corresponding capability.
 - ACP working directories follow the host process permissions rather than an AgentDock filesystem allowlist.
@@ -287,3 +287,7 @@ Apache License 2.0. See [LICENSE](./LICENSE).
 ## Community
 
 [Join the QQ group (1081337019)](https://qun.qq.com/universal-share/share?ac=1&authKey=Rp86bSzI7vqm87KoYlKawgsPZ440Ubhyezw6Qkgcn3JISwX3zXxsXkbS5598RrY5&busi_data=eyJncm91cENvZGUiOiIxMDgxMzM3MDE5IiwidG9rZW4iOiJ0Mlg1bUU1ZWtuZzF3SHJDT3pSaGsrOURIMlNYaXBlYllOUjNLZ1BUb1hzM2lJSTZjeVNldzU0ajl0SjRVZkx2IiwidWluIjoiMzIwMjA4ODAzMiJ9&data=W28mWvuqaLf_Fwnf0CgAJXuDs6l3A78V7AoWZnizPboCpKoQMzHzZ-UlluYo47U3tmIBHK2xIgWEVEJbTiGsPQ&svctype=4&tempid=h5_group_info)
+
+### Built-in capability switches
+
+Use the native panel or Nexus Nodes → Built-in capabilities to toggle browser/ACP on a specific node. AgentDock owns the persisted choice. Disabling removes tools and cancels active sessions; enabling does not resume previous work. Computer use remains excluded everywhere, and official Docker images cannot enable ACP. See [capability management](docs/builtin-capabilities.md).
