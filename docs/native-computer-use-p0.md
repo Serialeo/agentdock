@@ -2,7 +2,7 @@
 
 这份工具包包含两个独立的本地验证 App。它们只向自己的绿色校准区域发送一次鼠标点击，并保存点击前后的显示器截图和 JSON 报告。不会安装服务、连接 MCP 或上传报告。
 
-当前状态：Linux 上的 C++ 几何测试与 Python 报告检查测试已通过。用户在安装 VS 2026 的 Windows 真机上反馈基本验证、缩放与角落测试正常，旋转屏确认暂不支持；macOS 原生构建和真机结果仍待反馈。Windows 结果来自用户反馈，尚未收到或检查原始 JSON／截图。源码包不是预编译安装包。如果第一步编译失败，保留完整错误输出即可，不需要继续点权限或做桌面测试。
+当前状态：Linux 上的 C++ 几何测试与 Python 报告检查测试已通过。用户在安装 VS 2026 的 Windows 真机上反馈基本验证、缩放与角落测试正常，旋转屏确认暂不支持；macOS 首次构建反馈缺少 CoreGraphics 导入，已补齐，等待重新构建及真机验证。Windows 结果来自用户反馈，尚未收到或检查原始 JSON／截图。源码包不是预编译安装包。如果第一步编译失败，保留完整错误输出即可，不需要继续点权限或做桌面测试。
 
 ## 1. 把源码放到两台机器
 
@@ -17,11 +17,10 @@
 在源码根目录执行：
 
 ```bash
-bash desktop/macos/AgentDockComputer/build.sh
-open dist/computer-spike-macos/AgentDockComputer.app
+bash desktop/macos/AgentDockComputer/build.sh && open dist/computer-spike-macos/AgentDockComputer.app
 ```
 
-脚本先运行几何测试，再编译并本地签名 App。默认 ad-hoc 签名仅供本机测试；若已有有效签名身份，可通过 `AGENTDOCK_COMPUTER_SIGN_IDENTITY` 指定。此次不验证 Developer ID、公证或正式升级签名链。
+脚本先在临时目录构建并运行几何测试，再编译 App；编译成功后才创建或更新 `.app` 并本地签名。上面的 `&&` 保证构建失败时不会继续打开 App。默认 ad-hoc 签名仅供本机测试；若已有有效签名身份，可通过 `AGENTDOCK_COMPUTER_SIGN_IDENTITY` 指定。此次不验证 Developer ID、公证或正式升级签名链。
 
 打开后：
 
@@ -109,7 +108,7 @@ Stop 取消后续工作，不能撤回已经提交的那次点击；native API �
 | Windows 缩放 | 用户真机反馈通过 | 具体缩放比例、显示器及系统版本未提供，不外推到所有 DPI 配置。 |
 | Windows 角落 | 用户真机反馈通过 | 保留用户对“角落测试”的描述，具体摆放位置未提供，不等同于全屏每点精度验证。 |
 | Windows 旋转屏 | 用户已测试，确认暂不支持 | 已覆盖当前“不支持”的行为；旋转屏输入功能仍未实现。 |
-| macOS | 待反馈 | 尚无原生构建、权限或点击闭环的真机结果。 |
+| macOS | 首次构建失败，已修复对应导入，待重试 | 用户日志显示 `Geometry.swift` 中 `CGRect.width/minX` 等成员不可见；补齐 CoreGraphics 导入后尚未收到重新构建、权限或点击闭环结果。 |
 
 Windows 的取消、锁屏/会话恢复、独立停止及崩溃恢复没有逐项反馈，仍保持待验证。上面的记录不代表完整 P0 门槛已通过。
 

@@ -11,15 +11,19 @@ app="$output_dir/AgentDockComputer.app"
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 arch="$(uname -m)"
 case "$arch" in arm64|x86_64) ;; *) echo "Unsupported architecture: $arch" >&2; exit 1;; esac
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$output_dir"
+build_dir="$(mktemp -d "$output_dir/.build.XXXXXX")"
+trap 'rm -rf "$build_dir"' EXIT
 xcrun swiftc -swift-version 5 -sdk "$sdk" -target "$arch-apple-macosx13.0" \
   "$source_dir/Sources/Geometry.swift" "$source_dir/Tests/GeometryTests.swift" \
-  -o "$output_dir/geometry-tests"
-"$output_dir/geometry-tests"
+  -o "$build_dir/geometry-tests"
+"$build_dir/geometry-tests"
 xcrun swiftc -swift-version 5 -sdk "$sdk" -target "$arch-apple-macosx13.0" \
   "$source_dir/Sources/Geometry.swift" "$source_dir/Sources/Capture.swift" "$source_dir/Sources/main.swift" \
   -framework AppKit -framework ApplicationServices -framework ScreenCaptureKit -framework CoreImage \
-  -o "$app/Contents/MacOS/AgentDockComputer"
+  -o "$build_dir/AgentDockComputer"
+mkdir -p "$app/Contents/MacOS"
+mv "$build_dir/AgentDockComputer" "$app/Contents/MacOS/AgentDockComputer"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
