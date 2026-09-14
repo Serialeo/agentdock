@@ -8,6 +8,8 @@ import (
 	"syscall"
 )
 
+func openOwnerFile(path string) (*os.File, error) { return os.Open(path) }
+
 func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	if err == nil || errors.Is(err, syscall.EPERM) {

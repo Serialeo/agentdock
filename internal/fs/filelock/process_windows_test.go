@@ -5,10 +5,27 @@ package filelock
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
+
+func TestOwnerInspectionAllowsConcurrentRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "owner")
+	if err := os.WriteFile(path, []byte("1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := openOwnerFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	// 故意保持读取句柄打开，确保释放者仍能删除锁文件。
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("owner inspection prevented release: %v", err)
+	}
+}
 
 func TestRetryableLockCreationErrorOnWindows(t *testing.T) {
 	tests := []struct {

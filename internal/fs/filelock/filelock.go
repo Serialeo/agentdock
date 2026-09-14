@@ -169,12 +169,12 @@ func removeSafeStale(lockPath string, now time.Time) bool {
 }
 
 func ownerPIDAlive(ownerPath string) bool {
-	file, err := os.Open(ownerPath)
+	file, err := openOwnerFile(ownerPath)
 	if err != nil {
 		return !errors.Is(err, os.ErrNotExist)
 	}
-	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, 65))
+	_ = file.Close()
 	if err != nil || len(data) > 64 {
 		return true
 	}

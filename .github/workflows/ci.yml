@@ -47,6 +47,10 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Stress Windows shared store locking
+        if: runner.os == 'Windows'
+        run: go test ./internal/fs/filelock ./internal/taskstate -count=20
+
       - name: Check Windows test tree cleanliness
         if: runner.os == 'Windows'
         shell: bash
