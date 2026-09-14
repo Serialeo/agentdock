@@ -9,11 +9,13 @@ import (
 	"github.com/uvwt/agentdock/internal/taskstate"
 )
 
-var taskActions = []string{"create", "list", "get", "checkpoint", "block", "resume", "final_review", "complete"}
+var taskActions = []string{"create", "list", "get", "checkpoint", "reopen", "block", "resume", "final_review", "complete"}
 
 var workflowTemplateActions = []string{"publish", "retire", "list", "get", "get_many", "match", "vector_index"}
 
 type taskManageInput struct {
+	ReopenReason         string
+	Evidence             []taskstate.ConditionEvidence
 	Action               string
 	Title                string
 	Goal                 string
@@ -76,6 +78,8 @@ func normalizeTaskManageRequest(request ManageRequest) (taskManageInput, error) 
 	}
 
 	input := taskManageInput{
+		ReopenReason:         request.ReopenReason,
+		Evidence:             append([]taskstate.ConditionEvidence(nil), request.Evidence...),
 		Action:               strings.ToLower(strings.TrimSpace(request.Action)),
 		Title:                request.Title,
 		Goal:                 request.Goal,
@@ -247,6 +251,8 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		} else {
 			task, err = s.tasks.Checkpoint(input.TaskID, input.StepID, input.Status, input.Summary)
 		}
+	case "reopen":
+		task, err = s.tasks.Reopen(input.TaskID, input.StepID, input.ReopenReason)
 	case "block":
 		task, err = s.tasks.Block(input.TaskID, input.Summary)
 	case "resume":
@@ -255,7 +261,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 			task, evolutionWarning = s.refreshGuidanceBestEffort(ctx, task)
 		}
 	case "final_review":
-		review := taskstate.FinalReviewInput{Status: input.Status, Summary: input.Summary, VerifiedFacts: input.Verified, OpenRisks: input.Risks}
+		review := taskstate.FinalReviewInput{Evidence: input.Evidence, Status: input.Status, Summary: input.Summary, VerifiedFacts: input.Verified, OpenRisks: input.Risks}
 		task, err = s.tasks.FinalReview(input.TaskID, review)
 		if err == nil {
 			warnings := make([]string, 0, 2)

@@ -11,19 +11,24 @@ func ManageInputSchema(cfg config.Config) map[string]any {
 	stringProp := toolcontract.String
 	boundedIntProp := toolcontract.BoundedInteger
 	props := map[string]any{
-		"action":                map[string]any{"type": "string", "description": "Task lifecycle action.", "enum": []string{"create", "list", "get", "checkpoint", "block", "resume", "final_review", "complete"}},
-		"task_id":               stringProp("Persistent task id for get, checkpoint, block, resume, final_review, or complete."),
+		"action":                map[string]any{"type": "string", "description": "Task lifecycle action.", "enum": []string{"create", "list", "get", "checkpoint", "reopen", "block", "resume", "final_review", "complete"}},
+		"task_id":               stringProp("Persistent task id for get, checkpoint, reopen, block, resume, final_review, or complete."),
 		"title":                 stringProp("Short task title. Required for action=create."),
 		"goal":                  stringProp("Fixed task goal. Required for action=create."),
 		"completion_conditions": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}, "description": "Conditions that must be true before final_review can pass. Required for action=create."},
-		"step_id":               stringProp("Task step id for a single-step checkpoint."),
+		"step_id":               stringProp("Task step id for a single-step checkpoint or reopen."),
 		"completed_step_ids":    map[string]any{"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": map[string]any{"type": "string"}, "description": "Task step ids to mark completed in one atomic batch checkpoint."},
 		"current_step_id":       stringProp("Single task step id to mark in_progress in a batch checkpoint."),
 		"status":                map[string]any{"type": "string", "description": "Action-specific status: task list filter, single-step checkpoint status, or final review status.", "enum": []string{"active", "blocked", "completed", "pending", "in_progress", "pass", "failed"}},
 		"limit":                 boundedIntProp("Maximum tasks returned by list. Defaults to 50 and is capped at 200.", 1, 200),
 		"summary":               stringProp("Current progress, blocker, resume, or final review summary."),
-		"verified":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Facts verified during final_review. Required when status=pass."},
-		"risks":                 map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Remaining risks. Required when final_review status=failed."},
+		"verified":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Caller-reported facts during final_review; not machine verification. Supply verified or condition-linked evidence when status=pass."},
+		"reopen_reason":         stringProp("Reason for reopening a completed step; required for action=reopen."),
+		"evidence": map[string]any{"type": "array", "maxItems": 64, "description": "Final review evidence linked to completion condition IDs. Caller supplied references remain self_reported.", "items": map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{"condition_id", "summary"},
+			"properties": map[string]any{"condition_id": stringProp("ID from condition_refs."), "summary": stringProp("Reported finding."), "evidence_ref": stringProp("Saved command result, artifact or observation reference."), "source": map[string]any{"type": "string", "enum": []string{"self_reported"}}},
+		}},
+		"risks": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Remaining risks. Required when final_review status=failed."},
 	}
 
 	if cfg.NexusEndpoint == "" {

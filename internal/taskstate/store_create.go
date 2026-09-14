@@ -34,10 +34,6 @@ func (s *Store) CreateWithContext(title, goal, project, device string, condition
 	if len(project) > 256 || len(device) > 256 {
 		return Task{}, errors.New("task project/device context is too long")
 	}
-	conditionTexts = normalizeTexts(conditionTexts)
-	if len(conditionTexts) == 0 {
-		return Task{}, errors.New("at least one completion condition is required")
-	}
 	if len(conditionTexts) > maxTaskConditions {
 		return Task{}, fmt.Errorf("task completion conditions cannot exceed %d", maxTaskConditions)
 	}
@@ -45,6 +41,11 @@ func (s *Store) CreateWithContext(title, goal, project, device string, condition
 		if err := validateTextLimit("task completion condition", condition, maxTaskConditionBytes); err != nil {
 			return Task{}, err
 		}
+	}
+
+	conditionTexts = normalizeTexts(conditionTexts)
+	if len(conditionTexts) == 0 {
+		return Task{}, errors.New("at least one completion condition is required")
 	}
 
 	now := time.Now().UTC()

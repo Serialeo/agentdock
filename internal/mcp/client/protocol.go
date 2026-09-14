@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,13 +31,14 @@ type protocolClient interface {
 }
 
 type sdkProtocolClient struct {
-	cfg        ServerConfig
-	session    *mcpsdk.ClientSession
-	command    *exec.Cmd
-	controller *processcontrol.Controller
-	stderr     *tailBuffer
-	closeOnce  sync.Once
-	closeErr   error
+	cfg          ServerConfig
+	session      *mcpsdk.ClientSession
+	command      *exec.Cmd
+	controller   *processcontrol.Controller
+	stderr       *tailBuffer
+	closeOnce    sync.Once
+	closeErr     error
+	disconnected atomic.Bool
 }
 
 func newStreamableHTTPClient(cfg ServerConfig) *sdkProtocolClient {
@@ -68,6 +70,7 @@ func (c *sdkProtocolClient) initialize(ctx context.Context) error {
 		return newError("MCP_INVALID_RESPONSE", "MCP initialize response omitted protocolVersion", false, map[string]any{"server": c.cfg.Name}, nil)
 	}
 	c.session = session
+	go func() { _ = session.Wait(); c.disconnected.Store(true) }()
 	return nil
 }
 
@@ -152,6 +155,8 @@ func (c *sdkProtocolClient) callTool(ctx context.Context, name string, arguments
 	return jsonObject(result)
 }
 
+func (c *sdkProtocolClient) isClosed() bool { return c.disconnected.Load() }
+
 func (c *sdkProtocolClient) close() error {
 	c.closeOnce.Do(func() {
 		if c.session != nil {
@@ -191,6 +196,11 @@ func (c *sdkProtocolClient) wrapSDKError(operation string, err error) error {
 	details := map[string]any{"server": c.cfg.Name}
 	if c.stderr != nil && c.stderr.String() != "" {
 		details["stderr"] = c.stderr.String()
+	}
+	// SDK 将 HTTP 传输失败包装为 rejection；响应途中断线不能据此判定未执行。
+	var transportErr *httpRequestError
+	if errors.As(err, &transportErr) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return newError("MCP_CONNECTION_FAILED", operation, false, details, err)
 	}
 	var rpcErr *sdkjsonrpc.Error
 	if errors.As(err, &rpcErr) {
@@ -303,6 +313,10 @@ func resolveHTTPHeaders(cfg ServerConfig) (http.Header, error) {
 	return headers, nil
 }
 
+type httpRequestError struct{ error }
+
+func (e *httpRequestError) Unwrap() error { return e.error }
+
 type headerRoundTripper struct {
 	headers http.Header
 }
@@ -316,7 +330,11 @@ func (t headerRoundTripper) RoundTrip(request *http.Request) (*http.Response, er
 			clone.Header.Add(name, value)
 		}
 	}
-	return http.DefaultTransport.RoundTrip(clone)
+	response, err := http.DefaultTransport.RoundTrip(clone)
+	if err != nil {
+		return response, &httpRequestError{err}
+	}
+	return response, nil
 }
 
 type tailBuffer struct {

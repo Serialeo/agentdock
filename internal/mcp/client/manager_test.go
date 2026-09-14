@@ -300,6 +300,9 @@ func TestMCPStdioHelperProcess(t *testing.T) {
 			})
 		case "tools/call":
 			arguments, _ := request.Params["arguments"].(map[string]any)
+			if arguments["text"] == "__crash" {
+				os.Exit(17)
+			}
 			_ = encoder.Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      request.ID,

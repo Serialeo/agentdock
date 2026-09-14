@@ -245,8 +245,8 @@ func assertObjectSchema(t *testing.T, name, kind string, schema map[string]any) 
 
 func TestTaskManageSchemaExposesLifecycleActions(t *testing.T) {
 	props := schemaProperties(t, "task_manage")
-	assertSameStrings(t, enumStrings(t, props["action"]), []string{"create", "list", "get", "checkpoint", "block", "resume", "final_review", "complete"})
-	for _, name := range []string{"completion_conditions", "steps", "step_id", "completed_step_ids", "current_step_id", "status", "summary", "verified", "risks"} {
+	assertSameStrings(t, enumStrings(t, props["action"]), []string{"create", "list", "get", "checkpoint", "reopen", "block", "resume", "final_review", "complete"})
+	for _, name := range []string{"completion_conditions", "steps", "step_id", "completed_step_ids", "current_step_id", "status", "summary", "verified", "risks", "evidence", "reopen_reason"} {
 		if _, ok := props[name]; !ok {
 			t.Fatalf("task_manage input schema missing %q", name)
 		}
@@ -255,7 +255,7 @@ func TestTaskManageSchemaExposesLifecycleActions(t *testing.T) {
 	if completedStepIDs["minItems"] != 1 || completedStepIDs["maxItems"] != 12 || completedStepIDs["uniqueItems"] != true {
 		t.Fatalf("completed_step_ids schema bounds are incorrect: %#v", completedStepIDs)
 	}
-	for _, removed := range []string{"template_version", "selected_reason", "template_candidates", "blocker", "evidence", "review_status", "verified_facts", "open_risks", "missing_checks"} {
+	for _, removed := range []string{"template_version", "selected_reason", "template_candidates", "blocker", "review_status", "verified_facts", "open_risks", "missing_checks"} {
 		if _, ok := props[removed]; ok {
 			t.Fatalf("task_manage input schema still exposes removed field %q", removed)
 		}

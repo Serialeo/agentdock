@@ -16,25 +16,27 @@ type LearningCheckRequest struct {
 // ManageRequest 只表达 task_manage 对模型公开的输入字段。
 // 持久化状态中的 phase、bound_at 等内部字段在规范化阶段由 Task 域模型补齐，不能从边界注入。
 type ManageRequest struct {
-	Action               string                 `json:"action"`
-	Title                string                 `json:"title,omitempty"`
-	Goal                 string                 `json:"goal,omitempty"`
-	Project              string                 `json:"project,omitempty"`
-	Device               string                 `json:"device,omitempty"`
-	CompletionConditions []string               `json:"completion_conditions,omitempty"`
-	Steps                []StepRequest          `json:"steps,omitempty"`
-	TemplateID           string                 `json:"template_id,omitempty"`
-	SourceTemplateIDs    []string               `json:"source_template_ids,omitempty"`
-	LearningChecks       []LearningCheckRequest `json:"learning_checks,omitempty"`
-	Status               string                 `json:"status,omitempty"`
-	Limit                *int                   `json:"limit,omitempty"`
-	TaskID               string                 `json:"task_id,omitempty"`
-	StepID               string                 `json:"step_id,omitempty"`
-	CompletedStepIDs     *[]string              `json:"completed_step_ids,omitempty"`
-	CurrentStepID        string                 `json:"current_step_id,omitempty"`
-	Summary              string                 `json:"summary,omitempty"`
-	Verified             []string               `json:"verified,omitempty"`
-	Risks                []string               `json:"risks,omitempty"`
+	ReopenReason         string                        `json:"reopen_reason,omitempty"`
+	Evidence             []taskstate.ConditionEvidence `json:"evidence,omitempty"`
+	Action               string                        `json:"action"`
+	Title                string                        `json:"title,omitempty"`
+	Goal                 string                        `json:"goal,omitempty"`
+	Project              string                        `json:"project,omitempty"`
+	Device               string                        `json:"device,omitempty"`
+	CompletionConditions []string                      `json:"completion_conditions,omitempty"`
+	Steps                []StepRequest                 `json:"steps,omitempty"`
+	TemplateID           string                        `json:"template_id,omitempty"`
+	SourceTemplateIDs    []string                      `json:"source_template_ids,omitempty"`
+	LearningChecks       []LearningCheckRequest        `json:"learning_checks,omitempty"`
+	Status               string                        `json:"status,omitempty"`
+	Limit                *int                          `json:"limit,omitempty"`
+	TaskID               string                        `json:"task_id,omitempty"`
+	StepID               string                        `json:"step_id,omitempty"`
+	CompletedStepIDs     *[]string                     `json:"completed_step_ids,omitempty"`
+	CurrentStepID        string                        `json:"current_step_id,omitempty"`
+	Summary              string                        `json:"summary,omitempty"`
+	Verified             []string                      `json:"verified,omitempty"`
+	Risks                []string                      `json:"risks,omitempty"`
 }
 
 // WorkflowRequest 是 workflow_template_manage 的强类型输入。

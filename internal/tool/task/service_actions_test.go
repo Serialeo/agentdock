@@ -367,3 +367,29 @@ func TestWorkflowTemplateRetireRequiresExactVersion(t *testing.T) {
 		t.Fatalf("unexpected validation message: %q", toolErr.Message)
 	}
 }
+
+func TestTaskManageReopenAndConditionEvidence(t *testing.T) {
+	rt, _ := newTaskTestService(t)
+	created, err := rt.manageTest(t.Context(), map[string]any{"action": "create", "title": "review", "goal": "fix", "completion_conditions": []string{"tests pass"}, "steps": []map[string]any{{"id": "test", "title": "Test"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created["task_id"].(string)
+	for _, request := range []map[string]any{
+		{"action": "checkpoint", "task_id": id, "step_id": "test", "status": "completed", "summary": "tested"},
+		{"action": "final_review", "task_id": id, "status": "pass", "summary": "done", "evidence": []map[string]any{{"condition_id": "cond_01", "summary": "passed", "evidence_ref": "result:123"}}},
+		{"action": "reopen", "task_id": id, "step_id": "test", "reopen_reason": "regression found"},
+	} {
+		if _, err := rt.manageTest(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := rt.manageTest(t.Context(), map[string]any{"action": "get", "task_id": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := loaded["task"].(taskstate.Task)
+	if task.FinalReview != nil || task.Steps[0].Revision != 1 || task.ReviewHistory[0].Review.Evidence[0].Source != "self_reported" {
+		t.Fatalf("bad reopen/evidence: %#v", task)
+	}
+}

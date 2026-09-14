@@ -37,7 +37,7 @@ func compactTaskSummary(task taskstate.Task) map[string]any {
 		if step.Status == taskstate.StepCompleted {
 			completedSteps++
 		}
-		item := map[string]any{"id": step.ID, "title": truncateString(step.Title, 120), "status": step.Status}
+		item := map[string]any{"id": step.ID, "title": truncateString(step.Title, 120), "status": step.Status, "revision": step.Revision}
 		steps = append(steps, item)
 		if currentStep == nil && step.Status == taskstate.StepInProgress {
 			currentStep = item
@@ -74,7 +74,18 @@ func compactTaskSummary(task taskstate.Task) map[string]any {
 		summary["blocker"] = truncateString(task.Blocker, 240)
 	}
 	if task.FinalReview != nil {
+		covered := make(map[string]bool)
+		for _, evidence := range task.FinalReview.Evidence {
+			covered[evidence.ConditionID] = true
+		}
+		uncovered := make([]string, 0)
+		for _, condition := range task.Conditions {
+			if !covered[condition.ID] {
+				uncovered = append(uncovered, condition.ID)
+			}
+		}
 		summary["final_review"] = map[string]any{
+			"verification_source": "self_reported", "evidence_count": len(task.FinalReview.Evidence), "uncovered_condition_ids": uncovered,
 			"status": task.FinalReview.Status, "summary": truncateString(task.FinalReview.Summary, 200),
 			"verified_count": len(task.FinalReview.VerifiedFacts), "risk_count": len(task.FinalReview.OpenRisks), "reviewed_at": task.FinalReview.ReviewedAt,
 		}

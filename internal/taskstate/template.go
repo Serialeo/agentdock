@@ -73,6 +73,7 @@ const (
 )
 
 type TaskStep struct {
+	Revision  int       `json:"revision"`
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
 	Phase     Phase     `json:"phase"`

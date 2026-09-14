@@ -118,90 +118,20 @@ func normalizeStepIDs(values []string) []string {
 	return out
 }
 
+// 条件文本只去除首尾空白后精确去重；大小写、数字和否定词都可能改变要求。
 func normalizeTexts(values []string) []string {
-	seen := map[string]struct{}{}
+	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[value]; ok {
 			continue
 		}
-		duplicate := false
-		for _, existing := range out {
-			if similarConditionText(existing, value) {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
-			continue
-		}
-		seen[key] = struct{}{}
+		seen[value] = struct{}{}
 		out = append(out, value)
-	}
-	return out
-}
-
-func similarConditionText(a, b string) bool {
-	a = conditionCompareText(a)
-	b = conditionCompareText(b)
-	if a == "" || b == "" {
-		return false
-	}
-	if a == b {
-		return true
-	}
-	aRuneLen := len([]rune(a))
-	bRuneLen := len([]rune(b))
-	if aRuneLen >= 8 && bRuneLen >= 8 && (strings.Contains(a, b) || strings.Contains(b, a)) {
-		return true
-	}
-	if aRuneLen < 8 || bRuneLen < 8 {
-		return false
-	}
-	aPairs := conditionBigramSet(a)
-	bPairs := conditionBigramSet(b)
-	if len(aPairs) == 0 || len(bPairs) == 0 {
-		return false
-	}
-	shared := 0
-	for pair := range aPairs {
-		if _, ok := bPairs[pair]; ok {
-			shared++
-		}
-	}
-	return float64(shared*2)/float64(len(aPairs)+len(bPairs)) >= 0.62
-}
-
-func conditionCompareText(value string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(value) {
-		switch r {
-		case '，', '。', '！', '？', '、', '；', '：', '（', '）', '(', ')', '[', ']', '【', '】', '{', '}', '《', '》', '“', '”', '‘', '’', '"', '\'', '`':
-			continue
-		}
-		if r > ' ' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func conditionBigramSet(value string) map[string]struct{} {
-	runes := []rune(value)
-	out := map[string]struct{}{}
-	if len(runes) < 2 {
-		if value != "" {
-			out[value] = struct{}{}
-		}
-		return out
-	}
-	for i := 0; i < len(runes)-1; i++ {
-		out[string(runes[i:i+2])] = struct{}{}
 	}
 	return out
 }

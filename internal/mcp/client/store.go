@@ -38,8 +38,10 @@ func newStore(agentDockHome string) *store {
 	return &store{path: filepath.Join(root, "servers.json"), lockPath: filepath.Join(root, ".store.lock")}
 }
 
-func (s *store) load() (map[string]ServerConfig, error) {
-	release, err := s.acquire()
+func (s *store) load() (map[string]ServerConfig, error) { return s.loadContext(context.Background()) }
+
+func (s *store) loadContext(ctx context.Context) (map[string]ServerConfig, error) {
+	release, err := s.acquireContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +138,10 @@ func (s *store) update(mutator func(map[string]ServerConfig) error) (map[string]
 	return servers, nil
 }
 
-func (s *store) acquire() (func(), error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *store) acquire() (func(), error) { return s.acquireContext(context.Background()) }
+
+func (s *store) acquireContext(ctx context.Context) (func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	release, err := filelock.Acquire(ctx, s.lockPath)
 	if err != nil {

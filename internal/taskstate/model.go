@@ -48,22 +48,47 @@ type Condition struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// EvidenceRef 是调用方提供的证据定位信息，不会仅凭引用将自报升级为机器验真。
+type ConditionEvidence struct {
+	ConditionID string `json:"condition_id"`
+	Summary     string `json:"summary"`
+	EvidenceRef string `json:"evidence_ref,omitempty"`
+	Source      string `json:"source"`
+}
+
+type StepRevision struct {
+	StepID    string    `json:"step_id"`
+	Revision  int       `json:"revision"`
+	Reason    string    `json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ReviewInvalidation struct {
+	Review        FinalReview `json:"review"`
+	StepID        string      `json:"step_id"`
+	Reason        string      `json:"reason"`
+	InvalidatedAt time.Time   `json:"invalidated_at"`
+}
+
 type FinalReviewInput struct {
-	Status        string   `json:"status"`
-	Summary       string   `json:"summary"`
-	VerifiedFacts []string `json:"verified_facts,omitempty"`
-	OpenRisks     []string `json:"open_risks,omitempty"`
-	MissingChecks []string `json:"missing_checks,omitempty"`
+	Evidence      []ConditionEvidence `json:"evidence,omitempty"`
+	Status        string              `json:"status"`
+	Summary       string              `json:"summary"`
+	VerifiedFacts []string            `json:"verified_facts,omitempty"`
+	OpenRisks     []string            `json:"open_risks,omitempty"`
+	MissingChecks []string            `json:"missing_checks,omitempty"`
 }
 
 type FinalReview struct {
-	Status         string    `json:"status"`
-	Summary        string    `json:"summary"`
-	VerifiedFacts  []string  `json:"verified_facts,omitempty"`
-	OpenRisks      []string  `json:"open_risks,omitempty"`
-	MissingChecks  []string  `json:"missing_checks,omitempty"`
-	ReviewRevision string    `json:"review_revision"`
-	ReviewedAt     time.Time `json:"reviewed_at"`
+	Evidence           []ConditionEvidence `json:"evidence,omitempty"`
+	VerificationSource string              `json:"verification_source"`
+	Status             string              `json:"status"`
+	Summary            string              `json:"summary"`
+	VerifiedFacts      []string            `json:"verified_facts,omitempty"`
+	OpenRisks          []string            `json:"open_risks,omitempty"`
+	MissingChecks      []string            `json:"missing_checks,omitempty"`
+	ReviewRevision     string              `json:"review_revision"`
+	ReviewedAt         time.Time           `json:"reviewed_at"`
 }
 
 type Event struct {
@@ -73,6 +98,8 @@ type Event struct {
 }
 
 type Task struct {
+	StepRevisions         []StepRevision         `json:"step_revisions,omitempty"`
+	ReviewHistory         []ReviewInvalidation   `json:"review_history,omitempty"`
 	SchemaVersion         int                    `json:"schema_version"`
 	ID                    string                 `json:"id"`
 	Title                 string                 `json:"title"`

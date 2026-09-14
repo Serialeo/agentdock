@@ -55,7 +55,9 @@ func (s *Store) Checkpoint(id, stepID, status, summary string) (Task, error) {
 		step.Status = status
 		step.UpdatedAt = now
 		if task.FinalReview != nil && task.FinalReview.Status == FinalReviewFailed {
-			task.FinalReview = nil
+			if err := invalidateReview(task, "", "checkpoint after failed review", now); err != nil {
+				return err
+			}
 		}
 		task.Phase = step.Phase
 		task.Summary = summary
@@ -141,7 +143,9 @@ func (s *Store) BatchCheckpoint(id string, completedStepIDs []string, currentSte
 			task.Phase = task.Steps[stepIndexes[completedStepIDs[len(completedStepIDs)-1]]].Phase
 		}
 		if task.FinalReview != nil && task.FinalReview.Status == FinalReviewFailed {
-			task.FinalReview = nil
+			if err := invalidateReview(task, "", "checkpoint after failed review", now); err != nil {
+				return err
+			}
 		}
 		task.Summary = summary
 		eventSummary := "completed=[" + strings.Join(completedStepIDs, ",") + "]"
@@ -242,8 +246,12 @@ func applyFinalReview(task *Task, input FinalReviewInput, now time.Time) error {
 			}
 		}
 	}
+	evidence, err := normalizeConditionEvidence(task, input.Evidence)
+	if err != nil {
+		return err
+	}
 	if status == FinalReviewPass {
-		if len(verifiedFacts) == 0 {
+		if len(verifiedFacts) == 0 && len(input.Evidence) == 0 {
 			return errors.New("passing final review requires at least one verified fact")
 		}
 		if pending := incompleteStepIDs(task.Steps); len(pending) > 0 {
@@ -257,7 +265,7 @@ func applyFinalReview(task *Task, input FinalReviewInput, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	task.FinalReview = &FinalReview{Status: status, Summary: summary, VerifiedFacts: verifiedFacts, OpenRisks: openRisks, MissingChecks: missingChecks, ReviewRevision: reviewRevision, ReviewedAt: now}
+	task.FinalReview = &FinalReview{Evidence: evidence, VerificationSource: "self_reported", Status: status, Summary: summary, VerifiedFacts: verifiedFacts, OpenRisks: openRisks, MissingChecks: missingChecks, ReviewRevision: reviewRevision, ReviewedAt: now}
 	task.EvolutionCandidates = nil
 	if status == FinalReviewPass {
 		task.Phase = PhaseCloseout
