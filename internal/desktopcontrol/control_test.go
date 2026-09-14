@@ -3,6 +3,7 @@ package desktopcontrol
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 )
@@ -65,7 +66,12 @@ func TestUnixRoundTrip(t *testing.T) {
 }
 
 func TestSecondServerCannotTakeOverEndpoint(t *testing.T) {
-	root := t.TempDir()
+	// macOS 的系统临时目录前缀较长，避免测试名耗尽 Unix socket 路径上限。
+	root, err := os.MkdirTemp("", "ctl-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {

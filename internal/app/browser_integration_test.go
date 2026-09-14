@@ -105,10 +105,7 @@ func TestBrowserIntegrationCloseAfterWaitsForArtifactPublication(t *testing.T) {
 	if !ok || screenshot["artifact_id"] == "" {
 		t.Fatalf("browser_act screenshot artifact = %#v", result["screenshot"])
 	}
-	_, err := runtime.Call(context.Background(), "browser_snapshot", map[string]any{"session_id": sessionID, "timeout_ms": 1000})
-	requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
-	// Verify backend cleanup as well as the public admission fence.
-	afterClose, err := runtime.browser.HandleSnapshot(context.Background(), map[string]any{"session_id": sessionID, "timeout_ms": 1000})
+	afterClose, err := runtime.Call(context.Background(), "browser_snapshot", map[string]any{"session_id": sessionID, "timeout_ms": 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +149,10 @@ func TestBrowserIntegrationRuntimeCloseClosesBrowserService(t *testing.T) {
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}
-	afterClose, err := runtime.Call(context.Background(), "browser_snapshot", map[string]any{"session_id": sessionID, "timeout_ms": 1000})
+	_, err := runtime.Call(context.Background(), "browser_snapshot", map[string]any{"session_id": sessionID, "timeout_ms": 1000})
+	requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
+	// 同时验证公共准入拒绝和后端会话清理，不能只验证其中一项。
+	afterClose, err := runtime.browser.HandleSnapshot(context.Background(), map[string]any{"session_id": sessionID, "timeout_ms": 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
