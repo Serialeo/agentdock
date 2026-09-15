@@ -33,6 +33,9 @@ func TestTaskManageSchemaHidesNexusExtensionsWithoutNexus(t *testing.T) {
 	if _, ok := outputProps["next_required_action"]; ok {
 		t.Fatal("task_manage output schema should not expose hidden next_required_action prose")
 	}
+	if _, ok := outputProps["checkpoint_policy"]; !ok {
+		t.Fatal("task_manage must expose checkpoint policy without Nexus")
+	}
 }
 
 func TestTaskManageSchemaKeepsNexusExtensionsWithNexus(t *testing.T) {
@@ -44,7 +47,7 @@ func TestTaskManageSchemaKeepsNexusExtensionsWithNexus(t *testing.T) {
 		}
 	}
 	outputProps := testOutputSchemaForConfig("task_manage", cfg)["properties"].(map[string]any)
-	for _, field := range []string{"guidance_context", "review_revision", "evolution_candidates", "evolution_warning"} {
+	for _, field := range []string{"guidance_context", "review_revision", "evolution_candidates", "evolution_warning", "checkpoint_policy"} {
 		if _, ok := outputProps[field]; !ok {
 			t.Fatalf("task_manage output schema should expose %s with Nexus", field)
 		}

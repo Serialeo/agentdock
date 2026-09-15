@@ -274,7 +274,7 @@ func TestTaskManageSchemaExposesLifecycleActions(t *testing.T) {
 	if !ok {
 		t.Fatal("task_manage output schema properties missing")
 	}
-	for _, name := range []string{"task_id", "task", "task_summary", "tasks", "count", "state_dir"} {
+	for _, name := range []string{"task_id", "task", "task_summary", "tasks", "count", "state_dir", "checkpoint_policy"} {
 		if _, ok := outputProps[name]; !ok {
 			t.Fatalf("task_manage output schema missing %q", name)
 		}

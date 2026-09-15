@@ -209,6 +209,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		task, evolutionWarning = s.refreshGuidanceBestEffort(ctx, task)
 		result := Result{
 			"action": input.Action, "task_id": task.ID, "task_summary": compactTaskSummary(task), "state_dir": s.tasks.Root(),
+			"checkpoint_policy": defaultCheckpointPolicy(),
 		}
 		if len(task.GuidanceContext) > 0 {
 			result["guidance_context"] = task.GuidanceContext
@@ -236,7 +237,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		if err != nil {
 			return nil, taskToolError(err)
 		}
-		return Result{"action": input.Action, "task": task, "state_dir": s.tasks.Root()}, nil
+		return Result{"action": input.Action, "task": task, "state_dir": s.tasks.Root(), "checkpoint_policy": defaultCheckpointPolicy()}, nil
 	case "checkpoint":
 		singleStepMode := strings.TrimSpace(input.StepID) != "" || input.Status != ""
 		batchMode := input.CompletedStepIDsSet || strings.TrimSpace(input.CurrentStepID) != ""
@@ -248,8 +249,10 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		}
 		if batchMode {
 			task, err = s.tasks.BatchCheckpoint(input.TaskID, input.CompletedStepIDs, input.CurrentStepID, input.Summary)
-		} else {
+		} else if singleStepMode {
 			task, err = s.tasks.Checkpoint(input.TaskID, input.StepID, input.Status, input.Summary)
+		} else {
+			task, err = s.tasks.SummaryCheckpoint(input.TaskID, input.Summary)
 		}
 	case "reopen":
 		task, err = s.tasks.Reopen(input.TaskID, input.StepID, input.ReopenReason)
@@ -284,6 +287,9 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		return nil, taskToolError(err)
 	}
 	result := Result{"action": input.Action, "task_id": task.ID, "task_summary": compactTaskSummary(task), "state_dir": s.tasks.Root()}
+	if input.Action == "resume" {
+		result["checkpoint_policy"] = defaultCheckpointPolicy()
+	}
 	if input.Action == "resume" && len(task.GuidanceContext) > 0 {
 		result["guidance_context"] = task.GuidanceContext
 	}

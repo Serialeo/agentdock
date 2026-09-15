@@ -1,5 +1,17 @@
 # 任务复核、返工与证据关联
 
+`task_manage` 在 `create`、`get`、`resume` 成功返回中交付当前 `checkpoint_policy`，包含来源 `agentdock/task_manage`、版本、规则和 `enforcement=caller_driven`。这些规则独立于 Project Prompt：形成可恢复断点、长步骤中有实质进展、暂停或交接前应主动 checkpoint；摘要应包含已完成工作、证据或产物引用、风险和下一步。工具描述也提供保存时机提醒。规则不读取旧 Global/Node Instructions，不依赖旧节点兼容路径。
+
+未预先拆步骤或无需改变步骤状态时，可以记录任务级 checkpoint：
+
+```json
+{"action":"checkpoint","task_id":"tsk_...","summary":"已定位失败原因，日志见 command-result:123；下一步修复并复测"}
+```
+
+此模式只更新摘要和 checkpoint 事件，保留步骤、阶段和任务状态。指定 `step_id` 时仍必须提供合法 `status`；批量字段仍要求有效步骤，不能与单步字段混用。空摘要和超长摘要会被拒绝。blocked 任务必须先 resume；终审已通过或任务已完成时不能 checkpoint。失败终审后的新 checkpoint 会将旧终审及证据移入历史，后续仍须重新终审。紧邻的相同摘要 checkpoint 不重复追加事件。
+
+checkpoint 仍由调用方主动提交。服务端验证输入、状态约束并持久化，不自动生成摘要或定时保存，也不把最终一次批量更新认定为已满足某种中间保存频率。
+
 完成条件只在去除首尾空白后做大小写敏感的精确去重。平台、否定词、数字、大小写和补充要求均保留；原始数组及文本先检查资源上限。条件 ID 在创建时生成，返工不改变 ID。旧版本已经删除并持久化的条件无法从现有任务文件自动还原，需要按原始需求核对。
 
 `task_manage` 新增显式 `reopen`：

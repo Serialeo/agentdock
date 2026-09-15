@@ -7,7 +7,7 @@ import (
 )
 
 func taskManageToolSpecs() []ToolSpec {
-	return []ToolSpec{{Name: "task_manage", Contract: taskToolContract, Title: "Manage recoverable tasks", Description: "Persist substantial AgentDock tasks and update live step progress with checkpoint.", Annotations: mutatingToolAnnotations(false, false), Handler: typedToolHandler("task_manage", func(ctx context.Context, r *Runtime, request tooltask.ManageRequest) (Result, error) {
+	return []ToolSpec{{Name: "task_manage", Contract: taskToolContract, Title: "Manage recoverable tasks", Description: "Persist substantial AgentDock tasks. Record checkpoint at recoverable milestones, during long steps, and before pausing or handing off; include progress, evidence, risks and next action. Checkpoint accepts summary-only progress without changing steps. Follow checkpoint_policy returned by create/get/resume; final_review must pass before complete.", Annotations: mutatingToolAnnotations(false, false), Handler: typedToolHandler("task_manage", func(ctx context.Context, r *Runtime, request tooltask.ManageRequest) (Result, error) {
 		return r.taskTools.Manage(ctx, request)
 	})}}
 }

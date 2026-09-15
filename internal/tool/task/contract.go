@@ -16,12 +16,12 @@ func ManageInputSchema(cfg config.Config) map[string]any {
 		"title":                 stringProp("Short task title. Required for action=create."),
 		"goal":                  stringProp("Fixed task goal. Required for action=create."),
 		"completion_conditions": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}, "description": "Conditions that must be true before final_review can pass. Required for action=create."},
-		"step_id":               stringProp("Task step id for a single-step checkpoint or reopen."),
+		"step_id":               stringProp("Existing task step id for a single-step checkpoint (requires status) or reopen. Omit all step fields and status for a summary-only checkpoint."),
 		"completed_step_ids":    map[string]any{"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": map[string]any{"type": "string"}, "description": "Task step ids to mark completed in one atomic batch checkpoint."},
 		"current_step_id":       stringProp("Single task step id to mark in_progress in a batch checkpoint."),
 		"status":                map[string]any{"type": "string", "description": "Action-specific status: task list filter, single-step checkpoint status, or final review status.", "enum": []string{"active", "blocked", "completed", "pending", "in_progress", "pass", "failed"}},
 		"limit":                 boundedIntProp("Maximum tasks returned by list. Defaults to 50 and is capped at 200.", 1, 200),
-		"summary":               stringProp("Current progress, blocker, resume, or final review summary."),
+		"summary":               stringProp("Current progress, blocker, resume, or final review summary. Required for checkpoint: include recoverable progress, evidence, risks and next action. Supply only task_id and summary to checkpoint without changing steps, including tasks with no steps."),
 		"verified":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Caller-reported facts during final_review; not machine verification. Supply verified or condition-linked evidence when status=pass."},
 		"reopen_reason":         stringProp("Reason for reopening a completed step; required for action=reopen."),
 		"evidence": map[string]any{"type": "array", "maxItems": 64, "description": "Final review evidence linked to completion condition IDs. Caller supplied references remain self_reported.", "items": map[string]any{
@@ -90,6 +90,17 @@ func ManageOutputSchema(cfg config.Config) map[string]any {
 		"tasks":         arrayProp("Compact task summaries ordered by most recent update."),
 		"count":         intProp("Returned item count."),
 		"state_dir":     stringProp("Local AgentDock task state directory."),
+		"checkpoint_policy": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"description": "Current built-in checkpoint rules returned by create, get and resume; independent of project instructions. Caller-driven, not a server timer or frequency guarantee.",
+			"required":    []string{"source", "version", "enforcement", "rules"},
+			"properties": map[string]any{
+				"source":      stringProp("Source of the checkpoint rules."),
+				"version":     stringProp("Version of the delivered checkpoint rules."),
+				"enforcement": map[string]any{"type": "string", "enum": []string{"caller_driven"}},
+				"rules":       map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+			},
+		},
 	}
 	if cfg.NexusEndpoint != "" {
 		props["guidance_context"] = arrayProp("Mature evolution records automatically recalled before task execution.")

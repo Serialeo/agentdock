@@ -24,7 +24,7 @@ var outputContractCoverageInventory = map[string]outputContractCoverageEntry{
 	"exec_command":             {Variants: []string{"success"}},
 	"session_observe":          {Variants: []string{"list"}},
 	"session_act":              {Variants: []string{"kill_all"}},
-	"task_manage":              {Variants: []string{"list"}},
+	"task_manage":              {Variants: []string{"list", "create", "get", "checkpoint", "block", "resume", "final_review", "complete"}},
 	"evolve":                   {Variants: []string{"propose"}},
 	"acp_session":              {Variants: []string{"info", "list", "new", "load", "resume", "fork", "set_config"}},
 	"acp_prompt":               {Variants: []string{"start", "events"}},

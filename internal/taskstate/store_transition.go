@@ -7,6 +7,37 @@ import (
 	"time"
 )
 
+// SummaryCheckpoint 保存任务级恢复点，不要求预先拆步骤，也不隐式推进步骤或阶段。
+func (s *Store) SummaryCheckpoint(id, summary string) (Task, error) {
+	return s.mutate(id, func(task *Task, now time.Time) error {
+		if err := requireActive(task); err != nil {
+			return err
+		}
+		if err := requireFinalReviewOpen(task); err != nil {
+			return err
+		}
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			return errors.New("checkpoint summary is required")
+		}
+		if err := validateTextLimit("checkpoint summary", summary, maxTaskSummaryBytes); err != nil {
+			return err
+		}
+		if task.FinalReview != nil && task.FinalReview.Status == FinalReviewFailed {
+			if err := invalidateReview(task, "", "checkpoint after failed review", now); err != nil {
+				return err
+			}
+		}
+		// 只去重紧邻的相同 checkpoint；block/resume 或终审后的同文摘要仍是新的恢复点。
+		if n := len(task.Events); n > 0 && task.Events[n-1].Type == "checkpoint" && task.Summary == summary {
+			return nil
+		}
+		task.Summary = summary
+		appendTaskEvent(task, Event{Type: "checkpoint", Summary: summary, CreatedAt: now})
+		return nil
+	})
+}
+
 func (s *Store) Checkpoint(id, stepID, status, summary string) (Task, error) {
 	return s.mutate(id, func(task *Task, now time.Time) error {
 		if err := requireActive(task); err != nil {
