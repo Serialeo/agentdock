@@ -159,6 +159,14 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 	}
 	var task taskstate.Task
 	var evolutionWarning string
+	var policy checkpointPolicy
+	if input.Action == "create" || input.Action == "get" || input.Action == "resume" {
+		// 在创建/恢复发生写入前读取策略；取消请求不会留下调用方以为失败的新任务。
+		policy, err = s.currentCheckpointPolicy(ctx)
+		if err != nil {
+			return nil, taskToolError(err)
+		}
+	}
 	switch input.Action {
 	case "create":
 		steps := append([]taskstate.TaskStepInput(nil), input.Steps...)
@@ -209,7 +217,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		task, evolutionWarning = s.refreshGuidanceBestEffort(ctx, task)
 		result := Result{
 			"action": input.Action, "task_id": task.ID, "task_summary": compactTaskSummary(task), "state_dir": s.tasks.Root(),
-			"checkpoint_policy": defaultCheckpointPolicy(),
+			"checkpoint_policy": policy,
 		}
 		if len(task.GuidanceContext) > 0 {
 			result["guidance_context"] = task.GuidanceContext
@@ -237,7 +245,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		if err != nil {
 			return nil, taskToolError(err)
 		}
-		return Result{"action": input.Action, "task": publicTask(task), "state_dir": s.tasks.Root(), "checkpoint_policy": defaultCheckpointPolicy()}, nil
+		return Result{"action": input.Action, "task": publicTask(task), "state_dir": s.tasks.Root(), "checkpoint_policy": policy}, nil
 	case "checkpoint":
 		singleStepMode := strings.TrimSpace(input.StepID) != "" || input.Status != ""
 		batchMode := input.CompletedStepIDsSet || strings.TrimSpace(input.CurrentStepID) != ""
@@ -288,7 +296,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 	}
 	result := Result{"action": input.Action, "task_id": task.ID, "task_summary": compactTaskSummary(task), "state_dir": s.tasks.Root()}
 	if input.Action == "resume" {
-		result["checkpoint_policy"] = defaultCheckpointPolicy()
+		result["checkpoint_policy"] = policy
 	}
 	if input.Action == "resume" && len(task.GuidanceContext) > 0 {
 		result["guidance_context"] = task.GuidanceContext

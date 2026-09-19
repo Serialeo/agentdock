@@ -4,7 +4,7 @@
 
 内置工具的 `structuredContent` 是完整、可机器读取的业务结果；`content[].text` 是最多 256 个 Unicode 字符加省略号的摘要，不再复制完整 JSON。图片、音频、资源链接保持 MCP 原生 content 类型。此契约面向读取 `structuredContent` 的 Host；只读取文本块的旧客户端需要接入结构化结果，不能把摘要当作完整文件或命令输出。
 
-两个独立发行仓库的 `internal/mcpresult` 采用相同策略与回归测试，并依赖已发布的 protocol v0.10.0，不使用本地 `replace`。策略限定在 MCP 边界：REST、内部 Runtime 对象、权限校验、Journal、Bridge command-outcome ACK 与恢复记录不因此删减。
+两个独立发行仓库的 `internal/mcpresult` 采用相同策略与回归测试，并依赖已发布的 protocol v0.11.0，不使用本地 `replace`。策略限定在 MCP 边界：REST、内部 Runtime 对象、权限校验、Journal、Bridge command-outcome ACK 与恢复记录不因此删减。
 
 ## 已知工具的精简规则
 
@@ -14,7 +14,7 @@
 
 `file_edit` 默认不回传已提交写入的完整 diff；dry_run 或显式 max_diff_bytes 仍提供预览。结构化结果在文件提交前检查可编码性，不能把日志计量失败变成已提交后的工具失败。此措施不声称文件系统提交与网络确认具有原子性。
 
-Task、Skill、动态 MCP 管理和 ACP 不重复固定 action、状态目录及成功确认。Task checkpoint 规则只在工具描述中说明一次。`count` 只有等于已返回集合长度时才删除；索引统计、分页总数和不相等的计数保留。业务对象中的 false、0、null 不递归删除，取消请求的 accepted 状态不冒充已完成。
+Task、Skill、动态 MCP 管理和 ACP 不重复固定 action、状态目录及成功确认。Task 的 `checkpoint_policy` 属于调用前需要读取的业务指导，在 create/get/resume 返回中保留完整提示词、固定规则、来源与版本，不能作为展示元数据裁剪。工具描述仅指向该策略，不复制可配置的时机和内容要求。`count` 只有等于已返回集合长度时才删除；索引统计、分页总数和不相等的计数保留。业务对象中的 false、0、null 不递归删除，取消请求的 accepted 状态不冒充已完成。
 
 ACP 事件保留 events、status、next_seq，发生环形缓冲丢失时保留截断与恢复位置；正文和嵌套 update 不按字段名裁剪。浏览器错误正确标记 MCP isError，错误 code 不重复，空错误列表不返回；页面位置、截图和视口信息保留。
 

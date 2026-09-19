@@ -40,7 +40,7 @@ func TestTaskCheckpointLifecycleThroughRuntimeContract(t *testing.T) {
 	call(map[string]any{"action": "complete", "task_id": id})
 
 	description := taskManageToolSpecs()[0].Description
-	for _, trigger := range []string{"recoverable milestones", "long steps", "pausing or handing off", "checkpoint_policy"} {
+	for _, trigger := range []string{"checkpoint timing and content", "task_id and summary", "summary-only", "checkpoint_policy"} {
 		if !strings.Contains(description, trigger) {
 			t.Fatalf("tool discovery lost checkpoint trigger %q: %s", trigger, description)
 		}

@@ -71,6 +71,40 @@ func taskManageInputObject(props map[string]any) map[string]any {
 			"required":   []string{"action"},
 		},
 		"then": map[string]any{"required": []string{"title", "goal", "completion_conditions"}},
+	}, map[string]any{
+		"if": map[string]any{
+			"properties": map[string]any{"action": map[string]any{"const": "checkpoint"}},
+			"required":   []string{"action"},
+		},
+		"then": map[string]any{
+			"required": []string{"task_id", "summary"},
+			"properties": map[string]any{
+				"summary": map[string]any{"type": "string", "minLength": 1, "pattern": "\\S"},
+			},
+		},
+	}, map[string]any{
+		"if": map[string]any{
+			"properties": map[string]any{"action": map[string]any{"const": "checkpoint"}},
+			"required":   []string{"action"},
+		},
+		"then": map[string]any{
+			"allOf": []any{
+				map[string]any{
+					"if": map[string]any{"anyOf": []any{map[string]any{"required": []string{"step_id"}}, map[string]any{"required": []string{"status"}}}},
+					"then": map[string]any{
+						"required": []string{"step_id", "status"},
+						"properties": map[string]any{
+							"status": map[string]any{"enum": []string{"pending", "in_progress", "completed"}},
+						},
+						"not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"completed_step_ids"}}, map[string]any{"required": []string{"current_step_id"}}}},
+					},
+				},
+				map[string]any{
+					"if":   map[string]any{"anyOf": []any{map[string]any{"required": []string{"completed_step_ids"}}, map[string]any{"required": []string{"current_step_id"}}}},
+					"then": map[string]any{"not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"step_id"}}, map[string]any{"required": []string{"status"}}}}},
+				},
+			},
+		},
 	}}
 	return schema
 }
@@ -92,13 +126,15 @@ func ManageOutputSchema(cfg config.Config) map[string]any {
 		"state_dir":     stringProp("Local AgentDock task state directory."),
 		"checkpoint_policy": map[string]any{
 			"type": "object", "additionalProperties": false,
-			"description": "Current built-in checkpoint rules returned by create, get and resume; independent of project instructions. Caller-driven, not a server timer or frequency guarantee.",
-			"required":    []string{"source", "version", "enforcement", "rules"},
+			"description": "Current checkpoint prompt and fixed rules returned by create, get and resume; configured by Nexus or built in when standalone. Independent of project instructions. Caller-driven, not a server timer.",
+			"required":    []string{"source", "version", "enforcement", "rules", "prompt"},
 			"properties": map[string]any{
 				"source":      stringProp("Source of the checkpoint rules."),
 				"version":     stringProp("Version of the delivered checkpoint rules."),
 				"enforcement": map[string]any{"type": "string", "enum": []string{"caller_driven"}},
 				"rules":       map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}},
+				"prompt":      stringProp("Checkpoint timing and content instructions. Read before saving progress."),
+				"warning":     stringProp("Explicit warning when configured Nexus guidance could not be loaded and built-in guidance is being used."),
 			},
 		},
 	}

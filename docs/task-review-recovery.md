@@ -1,6 +1,8 @@
 # 任务复核、返工与证据关联
 
-`task_manage` 在 `create`、`get`、`resume` 成功返回中交付当前 `checkpoint_policy`，包含来源 `agentdock/task_manage`、版本、规则和 `enforcement=caller_driven`。这些规则独立于 Project Prompt：形成可恢复断点、长步骤中有实质进展、暂停或交接前应主动 checkpoint；摘要应包含已完成工作、证据或产物引用、风险和下一步。工具描述也提供保存时机提醒。规则不读取旧 Global/Node Instructions，不依赖旧节点兼容路径。
+`task_manage` 在 `create`、`get`、`resume` 成功返回中交付当前 `checkpoint_policy`。`prompt` 是 checkpoint 的保存时机、摘要内容与交接提示词；`rules` 是不可由提示词修改的参数及状态约束。来源和版本在 `source` / `version` 中提供，`enforcement=caller_driven` 表示调用方主动保存。MCP 及 Nexus 转发均保留该策略。
+
+NexusDock 控制台的“任务 → Checkpoint 提示词”支持编辑与恢复默认，配置统一适用于已连接节点。AgentDock 任务服务通过 Device Token 只读获取 `/v1/settings/checkpoint`，下一次创建、读取或恢复任务时交付最新版，不依赖项目 AGENTS.md 或 MCP 设置。独立运行使用内置提示词；Nexus 不可用时显式返回 `warning` 并交付内置提示词，仍允许恢复本地任务。管理端写入必须携带 `expected_revision`，过期编辑会被拒绝。配置修改不改变 `task_id`、`summary` 必填项或单步/批量字段互斥约束。
 
 未预先拆步骤或无需改变步骤状态时，可以记录任务级 checkpoint：
 

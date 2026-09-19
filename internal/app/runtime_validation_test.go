@@ -87,6 +87,49 @@ func TestRuntimeCallEnforcesTaskCreateRequiredFields(t *testing.T) {
 	}
 }
 
+func TestRuntimeCallEnforcesTaskCheckpointShape(t *testing.T) {
+	runtime := newRuntimeValidationTestRuntime(t)
+	invalid := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "checkpoint missing task id", args: map[string]any{"action": "checkpoint", "summary": "progress"}},
+		{name: "checkpoint missing summary", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing"}},
+		{name: "checkpoint blank summary", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing", "summary": " \n "}},
+		{name: "checkpoint step missing status", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing", "step_id": "step-1", "summary": "progress"}},
+		{name: "checkpoint status missing step", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing", "status": "pending", "summary": "progress"}},
+		{name: "checkpoint wrong step status", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing", "step_id": "step-1", "status": "active", "summary": "progress"}},
+		{name: "checkpoint batch with single field", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing", "completed_step_ids": []any{"step-1"}, "step_id": "step-1", "summary": "progress"}},
+		{name: "checkpoint batch with status", args: map[string]any{"action": "checkpoint", "task_id": "tsk_missing", "current_step_id": "step-1", "status": "in_progress", "summary": "progress"}},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			assertInvalidToolArguments(t, runtime, "task_manage", test.args)
+		})
+	}
+}
+
+func TestRuntimeCallAllowsTaskCheckpointModes(t *testing.T) {
+	runtime := newRuntimeValidationTestRuntime(t)
+	call := func(args map[string]any) {
+		t.Helper()
+		if _, err := runtime.Call(context.Background(), "task_manage", args); err != nil {
+			t.Fatalf("task_manage call failed: %v", err)
+		}
+	}
+	created, err := runtime.Call(context.Background(), "task_manage", map[string]any{
+		"action": "create", "title": "schema modes", "goal": "exercise task schema", "completion_conditions": []any{"done"},
+		"steps": []any{map[string]any{"id": "step-1", "title": "first"}, map[string]any{"id": "step-2", "title": "second"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created["task_id"]
+	call(map[string]any{"action": "checkpoint", "task_id": id, "summary": "summary-only progress"})
+	call(map[string]any{"action": "checkpoint", "task_id": id, "step_id": "step-1", "status": "in_progress", "summary": "single-step progress"})
+	call(map[string]any{"action": "checkpoint", "task_id": id, "completed_step_ids": []any{"step-1"}, "current_step_id": "step-2", "summary": "batch progress"})
+}
+
 func TestRuntimeCallRejectsNestedUnknownFields(t *testing.T) {
 	runtime := newRuntimeValidationTestRuntime(t)
 	assertInvalidToolArguments(t, runtime, "task_manage", map[string]any{

@@ -12,7 +12,7 @@ import (
 var removed = map[string][]string{
 	"read_file":                {"encoding", "size_bytes"},
 	"search_text":              {"query", "engine", "total_matches", "files_scanned", "bytes_scanned"},
-	"task_manage":              {"action", "count", "state_dir", "checkpoint_policy"},
+	"task_manage":              {"action", "count", "state_dir"},
 	"skill_package":            {"action", "count"},
 	"mcp_manage":               {"action", "count"},
 	"mcp_tool_search":          {"query", "server", "count"},
