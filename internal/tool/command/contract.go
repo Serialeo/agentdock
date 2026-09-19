@@ -51,24 +51,28 @@ func OutputSchema(name string) (map[string]any, bool) {
 	boolProp := toolcontract.Boolean
 	arrayProp := toolcontract.ObjectArray
 	props := map[string]any{
-		"sessions":      arrayProp("Command session summaries returned by list or bulk session actions."),
-		"count":         intProp("Command session count when a list or bulk action returns multiple sessions."),
-		"session_id":    stringProp("Command session id."),
-		"status":        stringProp("Session status."),
-		"workdir":       stringProp("Logical command working directory in the selected runtime."),
-		"stdout":        stringProp("Captured stdout segment."),
-		"stderr":        stringProp("Captured stderr segment."),
-		"command_ok":    boolProp("Whether a completed command exited successfully. Omitted while the command is still running."),
-		"command_error": stringProp("Command process error when execution did not succeed."),
-		"exit_code":     intProp("Process exit code, when available."),
-		"elapsed_ms":    intProp("Session elapsed milliseconds."),
-		"timed_out":     boolProp("Whether the command timed out."),
+		"stdout":             stringProp("Captured stdout. Omitted when empty."),
+		"stderr":             stringProp("Captured stderr. Omitted when empty."),
+		"command_error":      stringProp("Command process error when it adds information beyond stdout/stderr."),
+		"exit_code":          intProp("Process exit code, when available."),
+		"timed_out":          boolProp("Present only when the command timed out."),
+		"stdout_truncated":   boolProp("Present only when stdout was truncated."),
+		"stderr_truncated":   boolProp("Present only when stderr was truncated."),
+		"stdout_total_bytes": intProp("Total stdout bytes, present only when stdout was truncated."),
+		"stderr_total_bytes": intProp("Total stderr bytes, present only when stderr was truncated."),
+		"persistence_error":  stringProp("Durable output persistence warning, when one occurred."),
 	}
 	switch name {
 	case ToolExecCommand:
-		props["session_reason"] = stringProp("Why exec_command returned a session instead of a completed result.")
-		props["observe_after_ms"] = intProp("Suggested delay before inspecting the returned session.")
+		props["session_id"] = stringProp("Session id, present only when the command is still running.")
+		props["status"] = stringProp("Exceptional or running status. Normal completed commands omit it.")
+		props["replayed"] = boolProp("Present only when request_id recovered an earlier command instead of starting a new one.")
 	case ToolSessionObserve, ToolSessionAct:
+		props["status"] = stringProp("Session status for status/write/kill responses.")
+		// Keep the historical open item schema so old/new AgentDock providers can
+		// coexist during a rolling upgrade. Runtime projection still emits only
+		// session_id and status.
+		props["sessions"] = arrayProp("Compact session summaries returned by list or kill_all.")
 	default:
 		return nil, false
 	}

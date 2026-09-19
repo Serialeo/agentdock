@@ -128,17 +128,17 @@ func (l *Loader) Write(deployment protocol.Deployment, request protocol.ProjectP
 	}
 	if request.Create {
 		if exists {
-			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "Project Prompt source already exists", "conflict", map[string]any{"path": current.Path, "current_sha256": current.SHA256})
+			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "Project Prompt source already exists", "conflict", map[string]any{"path": current.Path})
 		}
 		if strings.TrimSpace(request.ExpectedSHA256) != "" {
-			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "create request must not provide an existing source hash", "conflict", map[string]any{"expected_sha256": request.ExpectedSHA256})
+			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "create request must not provide existing-source concurrency metadata", "conflict", nil)
 		}
 	} else {
 		if !exists {
 			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "Project Prompt source no longer exists", "conflict", map[string]any{"scope": normalizedScope})
 		}
 		if strings.TrimSpace(request.ExpectedSHA256) == "" || request.ExpectedSHA256 != current.SHA256 {
-			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "Project Prompt source changed since it was loaded", "conflict", map[string]any{"path": current.Path, "expected_sha256": request.ExpectedSHA256, "current_sha256": current.SHA256})
+			return protocol.ProjectPromptWriteResult{}, promptError(protocol.ErrorRevisionConflict, "Project Prompt source changed since it was loaded", "conflict", map[string]any{"path": current.Path})
 		}
 	}
 

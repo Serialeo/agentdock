@@ -18,6 +18,7 @@ import (
 	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/buildinfo"
 	"github.com/uvwt/agentdock/internal/config"
+	"github.com/uvwt/agentdock/internal/mcpresult"
 )
 
 type Server struct {
@@ -253,9 +254,9 @@ func (s *Server) registerTool(def ToolDefinition) {
 	tool := &mcpsdk.Tool{
 		Name:         def.Name,
 		Title:        def.Title,
-		Description:  def.Description,
+		Description:  mcpresult.Description(def.Name, def.Description),
 		InputSchema:  def.InputSchema,
-		OutputSchema: def.OutputSchema,
+		OutputSchema: mcpresult.Schema(def.Name, def.OutputSchema),
 	}
 	if def.Annotations != nil {
 		tool.Annotations = &mcpsdk.ToolAnnotations{
@@ -281,32 +282,80 @@ func (s *Server) callTool(ctx context.Context, name string, request *mcpsdk.Call
 	arguments := map[string]any{}
 	if request != nil && request.Params != nil && len(request.Params.Arguments) > 0 && string(request.Params.Arguments) != "null" {
 		if err := json.Unmarshal(request.Params.Arguments, &arguments); err != nil {
-			slog.Warn("tool params invalid", "tool", name, "duration_ms", time.Since(started).Milliseconds())
-			return nil, &sdkjsonrpc.Error{Code: sdkjsonrpc.CodeInvalidParams, Message: "tool arguments must be a JSON object"}
+			offset := jsonDecodeErrorOffset(err)
+			slog.Warn(
+				"tool params invalid",
+				"tool", name,
+				"argument_bytes", len(request.Params.Arguments),
+				"error_offset", offset,
+				"duration_ms", time.Since(started).Milliseconds(),
+				"error", err,
+			)
+			return nil, &sdkjsonrpc.Error{
+				Code:    sdkjsonrpc.CodeInvalidParams,
+				Message: toolArgumentDecodeErrorMessage(len(request.Params.Arguments), offset, err),
+			}
 		}
 	}
 	slog.Info("tool started", "tool", name)
-	result, err := s.runtime.Call(ctx, name, arguments)
-	finishedAttrs := []any{"tool", name, "duration_ms", time.Since(started).Milliseconds(), "ok", err == nil}
-	if err != nil {
-		finishedAttrs = append(finishedAttrs, "error", err)
-	}
-	slog.Info("tool finished", finishedAttrs...)
-
-	encoded, encodeErr := json.Marshal(toolEnvelope(name, result, err))
-	if encodeErr != nil {
-		return nil, fmt.Errorf("encode MCP tool result: %w", encodeErr)
-	}
-	var response mcpsdk.CallToolResult
-	if decodeErr := json.Unmarshal(encoded, &response); decodeErr != nil {
-		return nil, fmt.Errorf("decode MCP tool result: %w", decodeErr)
+	result, callErr := s.runtime.Call(ctx, name, arguments)
+	response, resultErr := toolCallResult(name, result, callErr)
+	if resultErr != nil {
+		slog.Error(
+			"tool result build failed",
+			"tool", name,
+			"duration_ms", time.Since(started).Milliseconds(),
+			"error", resultErr,
+		)
+		return nil, fmt.Errorf("build MCP tool result: %w", resultErr)
 	}
 	if def, ok := s.runtime.ToolDefinition(name); ok {
 		if meta := toolResultMetadata(def, arguments, s.cfg.MCPAppsEnabled); len(meta) > 0 {
-			response.Meta = meta
+			if response.Meta == nil {
+				response.Meta = mcpsdk.Meta{}
+			}
+			for key, value := range meta {
+				response.Meta[key] = value
+			}
 		}
 	}
-	return &response, nil
+	encoded, encodeErr := json.Marshal(response)
+	finishedAttrs := []any{
+		"tool", name,
+		"duration_ms", time.Since(started).Milliseconds(),
+		"ok", callErr == nil,
+	}
+	if encodeErr != nil {
+		// 这里的编码只用于日志计量，不能在 mutating tool 已成功提交之后
+		// 再制造一个新的失败点。真正的协议编码仍由 MCP SDK 负责。
+		finishedAttrs = append(finishedAttrs, "result_encode_error", encodeErr)
+	} else {
+		finishedAttrs = append(finishedAttrs, "result_bytes", len(encoded))
+	}
+	if callErr != nil {
+		finishedAttrs = append(finishedAttrs, "error", callErr)
+	}
+	slog.Info("tool finished", finishedAttrs...)
+	return response, nil
+}
+
+func jsonDecodeErrorOffset(err error) int64 {
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return syntaxErr.Offset
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		return typeErr.Offset
+	}
+	return 0
+}
+
+func toolArgumentDecodeErrorMessage(argumentBytes int, offset int64, err error) string {
+	if offset > 0 {
+		return fmt.Sprintf("tool arguments must be a JSON object (%d bytes, offset %d): %v", argumentBytes, offset, err)
+	}
+	return fmt.Sprintf("tool arguments must be a JSON object (%d bytes): %v", argumentBytes, err)
 }
 
 func toolMetadata(def ToolDefinition, mcpAppsEnabled bool) map[string]any {
@@ -363,9 +412,9 @@ func toolDescriptors(definitions []ToolDefinition, mcpAppsEnabled bool) []map[st
 		descriptor := map[string]any{
 			"name":         def.Name,
 			"title":        def.Title,
-			"description":  def.Description,
+			"description":  mcpresult.Description(def.Name, def.Description),
 			"inputSchema":  def.InputSchema,
-			"outputSchema": def.OutputSchema,
+			"outputSchema": mcpresult.Schema(def.Name, def.OutputSchema),
 		}
 		if def.Annotations != nil {
 			descriptor["annotations"] = map[string]any{
@@ -389,63 +438,55 @@ func toolDescriptors(definitions []ToolDefinition, mcpAppsEnabled bool) []map[st
 	return descriptors
 }
 
-func toolEnvelope(name string, structured any, err error) map[string]any {
+func toolCallResult(name string, structured any, err error) (*mcpsdk.CallToolResult, error) {
 	if err != nil {
-		payload := map[string]any{"tool": name, "error": err.Error()}
-		var toolErr *app.ToolError
-		if errors.As(err, &toolErr) {
-			payload["code"] = toolErr.Code
-			payload["category"] = toolErr.Category
-			payload["retryable"] = toolErr.Retryable
-			payload["details"] = toolErr.Details
-			if toolErr.Code == "PERMISSION_REQUIRED" {
-				payload["permission_request"] = map[string]any{
-					"tool_name":  name,
-					"permission": toolErr.Details["permission"],
-					"status":     "required",
-				}
+		return mcpresult.Build(name, toolErrorPayload(name, err), true)
+	}
+	return mcpresult.Build(name, structured, false)
+}
+
+func toolErrorPayload(name string, err error) map[string]any {
+	payload := map[string]any{"tool": name, "error": err.Error()}
+	var toolErr *app.ToolError
+	if errors.As(err, &toolErr) {
+		payload["code"] = toolErr.Code
+		payload["category"] = toolErr.Category
+		payload["retryable"] = toolErr.Retryable
+		payload["details"] = toolErr.Details
+		if toolErr.Code == "PERMISSION_REQUIRED" {
+			payload["permission_request"] = map[string]any{
+				"tool_name":  name,
+				"permission": toolErr.Details["permission"],
+				"status":     "required",
 			}
 		}
-		return map[string]any{"isError": true, "structuredContent": payload, "content": []map[string]any{{"type": "text", "text": pretty(payload)}}}
 	}
-	if name == "view_image" {
-		payload := asMap(structured)
-		if data, _ := payload["_mcp_image_base64"].(string); data != "" {
-			mimeType, _ := payload["_mcp_image_mime_type"].(string)
-			clean := cloneWithoutInternalImage(payload)
-			return map[string]any{"isError": false, "structuredContent": clean, "content": []map[string]any{{"type": "image", "data": data, "mimeType": mimeType}}}
-		}
-	}
-	if name == "mcp_tool_call" {
-		return dynamicMCPToolEnvelope(structured)
-	}
-	return map[string]any{"isError": false, "structuredContent": structured, "content": []map[string]any{{"type": "text", "text": pretty(structured)}}}
+	return payload
 }
 
-func dynamicMCPToolEnvelope(structured any) map[string]any {
-	payload := asMap(structured)
-	remote, _ := payload["result"].(map[string]any)
-	isError, _ := remote["isError"].(bool)
-	content, ok := remote["content"]
-	if !ok {
-		content = []map[string]any{{"type": "text", "text": pretty(payload)}}
+func toolEnvelope(name string, structured any, err error) map[string]any {
+	response, buildErr := toolCallResult(name, structured, err)
+	if buildErr != nil {
+		payload := toolErrorPayload(name, buildErr)
+		return map[string]any{"isError": true, "structuredContent": payload, "content": []map[string]any{{"type": "text", "text": mcpresult.Summary(name, payload, true)}}}
 	}
-	return map[string]any{
-		"isError":           isError,
-		"structuredContent": payload,
-		"content":           content,
+	envelope, encodeErr := mcpresult.Normalize(response)
+	if encodeErr != nil {
+		payload := toolErrorPayload(name, encodeErr)
+		return map[string]any{"isError": true, "structuredContent": payload, "content": []map[string]any{{"type": "text", "text": mcpresult.Summary(name, payload, true)}}}
 	}
-}
-
-func cloneWithoutInternalImage(value map[string]any) map[string]any {
-	clean := make(map[string]any, len(value))
-	for key, item := range value {
-		if key == "_mcp_image_base64" || key == "_mcp_image_mime_type" {
-			continue
+	// Bridge v4 以显式 isError 识别 envelope，包括成功调用。
+	envelope["isError"] = response.IsError
+	if items, ok := envelope["content"].([]any); ok && name != "mcp_tool_call" {
+		blocks := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if block, ok := item.(map[string]any); ok {
+				blocks = append(blocks, block)
+			}
 		}
-		clean[key] = item
+		envelope["content"] = blocks
 	}
-	return clean
+	return envelope
 }
 
 func asMap(value any) map[string]any {
@@ -457,14 +498,6 @@ func asMap(value any) map[string]any {
 	default:
 		return map[string]any{}
 	}
-}
-
-func pretty(value any) string {
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return string(data)
 }
 
 func (s *Server) syncTools() {

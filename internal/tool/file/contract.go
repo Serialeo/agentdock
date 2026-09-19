@@ -60,7 +60,7 @@ func InputSchema(name string) (map[string]any, bool) {
 		props["patch"] = stringProp("Patch text for action=patch.")
 		props["workdir"] = stringProp("Host patch working directory. Relative paths resolve from ~/AgentDock.")
 		props["dry_run"] = boolProp("Preview or validate without writing.")
-		props["max_diff_bytes"] = boundedIntProp("Maximum diff preview bytes. Defaults to 65536 and is capped at 4194304.", 1, MaxTextOutputBytes)
+		props["max_diff_bytes"] = boundedIntProp("Maximum diff preview bytes. dry_run returns a preview by default; on an applied edit, provide this field explicitly to request a preview. Defaults to 65536 when previewing and is capped at 4194304.", 1, MaxTextOutputBytes)
 		required = []string{"action"}
 	default:
 		return nil, false
@@ -131,8 +131,8 @@ func OutputSchema(name string) (map[string]any, bool) {
 		props["matches"] = intProp("Match count for replace.")
 		props["changed"] = boolProp("Whether content changed.")
 		props["recursive"] = boolProp("Whether delete was allowed to remove a directory recursively.")
-		props["diff_preview"] = stringProp("Diff preview.")
-		props["truncated"] = boolProp("Whether the diff preview was truncated.")
+		props["diff_preview"] = stringProp("Optional diff preview. Returned by default for dry_run; applied edits include it only when max_diff_bytes is explicitly requested.")
+		props["truncated"] = boolProp("Whether the optional diff preview was truncated.")
 		props["files_changed"] = intProp("Changed file count.")
 		props["insertions"] = intProp("Inserted line count.")
 		props["deletions"] = intProp("Deleted line count.")

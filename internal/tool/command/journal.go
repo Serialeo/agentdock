@@ -388,7 +388,7 @@ func (j *Journal) Close() error {
 func (r commandRecord) outcome() protocol.CommandOutcome {
 	stdout := outputTail(r.Stdout, protocol.MaxCommandOutcomeOutputBytes/2)
 	stderr := outputTail(r.Stderr, protocol.MaxCommandOutcomeOutputBytes/2)
-	out := protocol.CommandOutcome{EventID: r.EventID, CommandSessionID: r.ID, State: r.State, ExitCode: r.ExitCode, Stdout: stdout, Stderr: stderr, StdoutDroppedBytes: max(0, r.StdoutTotal-int64(len(stdout))), StderrDroppedBytes: max(0, r.StderrTotal-int64(len(stderr))), Workdir: r.Execution.Workdir, CommandError: r.CommandError, TimedOut: r.TimedOut, StartedAt: r.StartedAt.Format(time.RFC3339Nano), UpdatedAt: r.UpdatedAt.Format(time.RFC3339Nano), PendingReport: r.PendingReport, ClientRequestID: r.RequestID, ArgumentsDigest: r.Digest}
+	out := protocol.CommandOutcome{EventID: r.EventID, CommandSessionID: r.ID, State: r.State, ExitCode: r.ExitCode, Stdout: stdout, Stderr: stderr, StdoutDroppedBytes: max(0, r.StdoutTotal-int64(len(stdout))), StderrDroppedBytes: max(0, r.StderrTotal-int64(len(stderr))), Workdir: r.Execution.Workdir, CommandError: r.CommandError, TimedOut: r.TimedOut, StartedAt: r.StartedAt.Format(time.RFC3339Nano), UpdatedAt: r.UpdatedAt.Format(time.RFC3339Nano), PendingReport: r.PendingReport, ClientRequestID: r.RequestID}
 	out.ExecutionContext = protocol.ExecutionContext{WorkSessionID: r.Execution.WorkSessionID, TargetID: r.Execution.TargetID, ProjectID: r.Execution.ProjectID, DeploymentID: r.Execution.DeploymentID, DeploymentRevision: r.Execution.DeploymentRevision, ContextRevision: r.Execution.ContextRevision}
 	if !r.FinishedAt.IsZero() {
 		out.FinishedAt = r.FinishedAt.Format(time.RFC3339Nano)

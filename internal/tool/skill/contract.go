@@ -13,7 +13,6 @@ func PackageInputSchema() map[string]any {
 		"key":       stringProp("Environment variable name for env_set/env_unset."),
 		"value":     stringProp("Environment variable value for env_set. Secret values are never returned."),
 		"source":    stringProp("Host path or HTTP(S) URL for validate/install."),
-		"digest":    stringProp("Optional expected SHA-256 digest for validate/install."),
 		"activate":  toolcontract.Boolean("Activate the installed version. Defaults to true."),
 		"max_bytes": toolcontract.Integer("Maximum validate/install package bytes."),
 	}, "action")
@@ -36,7 +35,6 @@ func PackageOutputSchema() map[string]any {
 		"count":      intProp("Returned environment variable count."),
 		"valid":      boolProp("Whether a Skill source passed validation."),
 		"source":     stringProp("Resolved Skill source label."),
-		"digest":     stringProp("Computed Skill package digest."),
 		"issues":     arrayProp("Structured validation issues."),
 		"document":   objectProp("Parsed SKILL.md frontmatter and body metadata."),
 		"result":     objectProp("Install, uninstall, activate, or rollback result."),

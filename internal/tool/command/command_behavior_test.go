@@ -24,7 +24,7 @@ func TestExecCommandDoesNotFilterCommandContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec_command should not reject command content: %v", err)
 	}
-	if result["status"] != "exited" || !strings.Contains(result["stdout"].(string), "shell=expansion network=https://example.test") {
+	if result["exit_code"] != 0 || !strings.Contains(result["stdout"].(string), "shell=expansion network=https://example.test") {
 		t.Fatalf("unexpected command result: %#v", result)
 	}
 }
@@ -49,7 +49,7 @@ func TestExecCommandForwardsConfiguredHostEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec_command should forward configured host env: %v", err)
 	}
-	if result["status"] != "exited" || result["stdout"].(string) != "host-forwarded" {
+	if result["exit_code"] != 0 || result["stdout"].(string) != "host-forwarded" {
 		t.Fatalf("configured host env was not forwarded: %#v", result)
 	}
 }
@@ -70,7 +70,7 @@ func TestExecCommandForwardsExplicitEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec_command should accept explicit env: %v", err)
 	}
-	if result["status"] != "exited" || result["stdout"].(string) != "forwarded" {
+	if result["exit_code"] != 0 || result["stdout"].(string) != "forwarded" {
 		t.Fatalf("explicit env was not forwarded: %#v", result)
 	}
 }
@@ -103,7 +103,7 @@ func TestExecCommandForwardsStdinAndClosesPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execCommand() error = %v", err)
 	}
-	if result["status"] != "exited" || result["stdout"] != "input-line\n" {
+	if result["exit_code"] != 0 || result["stdout"] != "input-line\n" {
 		t.Fatalf("result = %#v", result)
 	}
 }

@@ -92,6 +92,9 @@ func (svc *Service) fileEditAdd(ctx context.Context, request EditRequest) (Resul
 	if dryRun || !changed {
 		return result, nil
 	}
+	if err := validateMutationResult(result); err != nil {
+		return nil, err
+	}
 	updated := content
 	staged := map[string]stagedPatchFile{
 		p.Abs: {
@@ -130,6 +133,9 @@ func (svc *Service) fileEditDelete(ctx context.Context, request EditRequest) (Re
 	result := Result{"action": "delete", "path": p.Display, "dry_run": dryRun, "changed": true, "recursive": recursive, "summary": "deleted " + p.Display}
 	if dryRun {
 		return result, nil
+	}
+	if err := validateMutationResult(result); err != nil {
+		return nil, err
 	}
 	return result, deletePathSafely(p.Abs, snapshot, recursive, os.Rename, renameNoReplace)
 }
@@ -221,6 +227,9 @@ func (svc *Service) fileEditMove(ctx context.Context, request EditRequest) (Resu
 	result := Result{"action": "move", "path": src.Display, "new_path": dest.Display, "dry_run": dryRun, "changed": changed, "summary": "moved " + src.Display + " to " + dest.Display}
 	if dryRun || !changed {
 		return result, nil
+	}
+	if err := validateMutationResult(result); err != nil {
+		return nil, err
 	}
 	if err := movePathWithRollback(src.Abs, dest.Abs, dest.Exists && overwrite, os.Rename, renameNoReplace); err != nil {
 		return nil, err

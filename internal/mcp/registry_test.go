@@ -208,10 +208,13 @@ func TestRecallBootstrapIsNotModelFacing(t *testing.T) {
 func TestSkillPackageSchemaAndRemovedRuntimeTools(t *testing.T) {
 	packageProps := schemaProperties(t, "skill_package")
 	assertSameStrings(t, enumStrings(t, packageProps["action"]), []string{"validate", "install", "uninstall", "activate", "rollback", "env_set", "env_unset", "env_list"})
-	for _, name := range []string{"source", "digest", "activate", "max_bytes", "skill", "version", "key", "value"} {
+	for _, name := range []string{"source", "activate", "max_bytes", "skill", "version", "key", "value"} {
 		if _, ok := packageProps[name]; !ok {
 			t.Fatalf("skill_package input schema missing %q", name)
 		}
+	}
+	if _, ok := packageProps["digest"]; ok {
+		t.Fatal("skill_package input schema exposed internal package digest")
 	}
 
 	for _, removed := range []string{"skill_read", "skill_run", "skill_env_manage"} {
@@ -224,10 +227,13 @@ func TestSkillPackageSchemaAndRemovedRuntimeTools(t *testing.T) {
 	if !ok {
 		t.Fatal("skill_package output schema properties missing")
 	}
-	for _, name := range []string{"valid", "source", "digest", "document", "issues"} {
+	for _, name := range []string{"valid", "source", "document", "issues"} {
 		if _, ok := packageOutputProps[name]; !ok {
 			t.Fatalf("skill_package output schema missing %q", name)
 		}
+	}
+	if _, ok := packageOutputProps["digest"]; ok {
+		t.Fatal("skill_package output schema exposed internal package digest")
 	}
 }
 

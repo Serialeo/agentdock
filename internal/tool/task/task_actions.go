@@ -237,7 +237,7 @@ func (s *Service) Manage(ctx context.Context, request ManageRequest) (Result, er
 		if err != nil {
 			return nil, taskToolError(err)
 		}
-		return Result{"action": input.Action, "task": task, "state_dir": s.tasks.Root(), "checkpoint_policy": defaultCheckpointPolicy()}, nil
+		return Result{"action": input.Action, "task": publicTask(task), "state_dir": s.tasks.Root(), "checkpoint_policy": defaultCheckpointPolicy()}, nil
 	case "checkpoint":
 		singleStepMode := strings.TrimSpace(input.StepID) != "" || input.Status != ""
 		batchMode := input.CompletedStepIDsSet || strings.TrimSpace(input.CurrentStepID) != ""

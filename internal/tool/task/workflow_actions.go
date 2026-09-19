@@ -39,6 +39,7 @@ func (s *Service) WorkflowManage(ctx context.Context, request WorkflowRequest) (
 		}
 		var template taskstate.Template
 		if err := remarshal(result["template"], &template); err == nil {
+			template.Hash = ""
 			result["template"] = template
 		}
 		return result, nil
@@ -46,6 +47,9 @@ func (s *Service) WorkflowManage(ctx context.Context, request WorkflowRequest) (
 		templates, err := s.nexusActiveWorkflowTemplates(ctx, input.TemplateIDs)
 		if err != nil {
 			return nil, err
+		}
+		for index := range templates {
+			templates[index].Hash = ""
 		}
 		return Result{
 			"action": input.Action, "templates": templates, "count": len(templates), "composition_required": true,
@@ -63,6 +67,7 @@ func (s *Service) WorkflowManage(ctx context.Context, request WorkflowRequest) (
 			var summaries []map[string]any
 			if err := remarshal(items, &summaries); err == nil {
 				for i := range summaries {
+					delete(summaries[i], "hash")
 					for key, value := range summaries[i] {
 						summaries[i][key] = normalizeJSONToolValue(value)
 					}
@@ -81,6 +86,7 @@ func (s *Service) WorkflowManage(ctx context.Context, request WorkflowRequest) (
 			return nil, err
 		}
 		result["action"] = input.Action
+		delete(result, "content")
 		if available, exists := result["available"]; exists {
 			result["vector_index_available"] = available
 			delete(result, "available")
@@ -168,6 +174,7 @@ func (s *Service) nexusWorkflowTemplate(ctx context.Context, id, version string)
 	if template.Status != taskstate.TemplateActive {
 		return taskstate.Template{}, taskToolError(fmt.Errorf("workflow template %s is not active", id))
 	}
+	template.Hash = ""
 	return template, nil
 }
 

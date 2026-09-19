@@ -49,7 +49,7 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 		if exists {
 			result := record.result(commandOutputLimit(request.MaxOutputBytes))
 			result["replayed"] = true
-			return result, nil
+			return compactExecResult(result), nil
 		}
 	}
 	invocation, err := svc.prepareCommandInvocation(ctx, request)
@@ -105,7 +105,7 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 			svc.sessions.FinishStart()
 			result := durableRecord.result(maxBytes)
 			result["replayed"] = true
-			return result, nil
+			return compactExecResult(result), nil
 		}
 		options.ID = durableRecord.ID
 		options.StartedAt = durableRecord.StartedAt
@@ -117,7 +117,7 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 	// 背景：exec_command 可能先返回 running，让模型后续通过 session_observe action=status 继续取结果；
 	// 如果子进程绑定到单次 MCP 请求 ctx，请求结束时 git push / npm install 等长任务会被杀掉。
 	// 因此长任务只受 timeout_ms 和 session_act action=kill/kill_all 控制。
-	s, sandboxStatus, err := invocation.start(commandCtx, timeout, tty, func(command *exec.Cmd) (func(), session.PreparationStatus) {
+	s, _, err := invocation.start(commandCtx, timeout, tty, func(command *exec.Cmd) (func(), session.PreparationStatus) {
 		// AgentDock 不额外过滤命令，实际权限边界由 Host OS 用户决定。
 		return func() {}, session.PreparationStatus{Enabled: false, Mode: "none", Policy: "no_command_content_filtering", Warnings: []string{"exec_command runs with the AgentDock process OS user privileges", "use Docker volumes, service users, file permissions, and network policy as the security boundary"}}
 	}, options)
@@ -152,30 +152,21 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 		}
 	}
 
-	storeSession := func(reason string) Result {
+	storeSession := func() Result {
 		svc.storeReservedSession(s)
 		reservationActive = false
 		result := snapshotResult(s.Snapshot("running", maxBytes))
-		result["sandbox"] = preparationStatusResult(sandboxStatus)
-		if svc.journal != nil {
-			result["event_id"] = durableRecord.EventID
-			if request.RequestID != "" {
-				result["request_id"] = request.RequestID
-			}
-		}
-		result["session_reason"] = reason
-		result["observe_after_ms"] = 1000
-		return result
+		return compactExecResult(result)
 	}
 
 	switch executionMode {
 	case commandExecutionModeAsync:
-		return storeSession("explicit_async"), nil
+		return storeSession(), nil
 	case commandExecutionModeSync:
 		select {
 		case <-s.Done:
 		case <-ctx.Done():
-			return storeSession("request_cancelled"), nil
+			return storeSession(), nil
 		}
 	case commandExecutionModeAuto:
 		timer := time.NewTimer(yield)
@@ -183,31 +174,29 @@ func (svc *Service) Exec(ctx context.Context, request ExecRequest) (Result, erro
 		select {
 		case <-s.Done:
 		case <-timer.C:
-			return storeSession("foreground_threshold_exceeded"), nil
+			return storeSession(), nil
 		case <-ctx.Done():
-			return storeSession("request_cancelled"), nil
+			return storeSession(), nil
 		}
 	}
 
 	err = s.WaitError()
 	s.Cancel()
 	if svc.journal != nil {
-		result, durableErr := svc.durableSessionResult(ctx, s.ID, maxBytes)
+		result, durableErr := svc.durableResultWithLiveOutput(ctx, s, maxBytes)
 		if durableErr != nil {
 			return nil, durableErr
 		}
-		result["sandbox"] = preparationStatusResult(sandboxStatus)
-		return result, nil
+		return compactExecResult(result), nil
 	}
 	result := snapshotResult(s.Snapshot("exited", maxBytes))
-	result["sandbox"] = preparationStatusResult(sandboxStatus)
 	if s.TimedOut {
 		result["status"] = "timeout"
 	}
 	if err != nil {
 		result["command_error"] = err.Error()
 	}
-	return result, nil
+	return compactExecResult(result), nil
 }
 
 func commandExecutionModeArg(raw string) (commandExecutionMode, error) {
@@ -282,20 +271,6 @@ func snapshotResult(snapshot session.Snapshot) Result {
 	return result
 }
 
-func preparationStatusResult(status session.PreparationStatus) map[string]any {
-	result := map[string]any{"enabled": status.Enabled}
-	if status.Mode != "" {
-		result["mode"] = status.Mode
-	}
-	if status.Policy != "" {
-		result["policy"] = status.Policy
-	}
-	if len(status.Warnings) > 0 {
-		result["warnings"] = append([]string(nil), status.Warnings...)
-	}
-	return result
-}
-
 func (svc *Service) writeStdin(ctx context.Context, request SessionActRequest) (Result, error) {
 	s, ok := svc.sessions.Get(request.SessionID)
 	if !ok {
@@ -312,7 +287,7 @@ func (svc *Service) writeStdin(ctx context.Context, request SessionActRequest) (
 	select {
 	case <-s.Done:
 		if svc.journal != nil {
-			return svc.durableSessionResult(ctx, s.ID, maxBytes)
+			return svc.durableResultWithLiveOutput(ctx, s, maxBytes)
 		}
 		return svc.consumeCompletedSession(s, maxBytes), nil
 	default:
@@ -489,7 +464,7 @@ func (svc *Service) sessionStatus(ctx context.Context, request SessionObserveReq
 	select {
 	case <-s.Done:
 		if svc.journal != nil {
-			return svc.durableSessionResult(ctx, s.ID, maxBytes)
+			return svc.durableResultWithLiveOutput(ctx, s, maxBytes)
 		}
 		return svc.consumeCompletedSession(s, maxBytes), nil
 	default:

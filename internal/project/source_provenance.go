@@ -128,7 +128,21 @@ func gitMarkerExists(start string) (bool, error) {
 		_, err := os.Lstat(filepath.Join(current, ".git"))
 		switch {
 		case err == nil:
-			return true, nil
+			info, statErr := os.Stat(filepath.Join(current, ".git"))
+			if statErr != nil {
+				return false, statErr
+			}
+			if !info.IsDir() {
+				return true, nil
+			}
+			// 宿主可能留下空 .git 占位目录；Git 本身不会将其识别成仓库。
+			entries, readErr := os.ReadDir(filepath.Join(current, ".git"))
+			if readErr != nil {
+				return false, readErr
+			}
+			if len(entries) != 0 {
+				return true, nil
+			}
 		case errors.Is(err, os.ErrNotExist):
 			// Keep walking to support a Deployment rooted at a repository subdirectory.
 		default:

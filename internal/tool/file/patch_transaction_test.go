@@ -36,8 +36,12 @@ func TestEnvelopePatchAbsolutePathWritesTheResolvedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	patch := "*** Begin Patch\n*** Update File: " + target + "\n@@\n-before\n+after\n*** End Patch"
-	if _, err := rt.applyPatchTest(t.Context(), EditRequest{Patch: patch}); err != nil {
+	result, err := rt.applyPatchTest(t.Context(), EditRequest{Patch: patch})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, exists := result["diff_preview"]; exists {
+		t.Fatalf("applied envelope patch returned an unsolicited diff preview: %#v", result)
 	}
 	content, err := os.ReadFile(target)
 	if err != nil {

@@ -111,14 +111,21 @@ func TestProjectNodeFullAccessIsIndependentFromConfiguredFolder(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Full Access did not allow absolute file edit outside Project Folder: %v", err)
 	}
+	command := `printf %s "$PWD"`
+	if goruntime.GOOS == "windows" {
+		command = `[Console]::Write((Get-Location).Path)`
+	}
 	result, err := runtime.Call(ctx, "exec_command", map[string]any{
-		"cmd": commandNoopForTest(), "workdir": outside, "execution_mode": "sync",
+		"cmd": command, "workdir": outside, "execution_mode": "sync",
 	})
 	if err != nil {
 		t.Fatalf("Full Access did not allow command workdir outside Project Folder: %v", err)
 	}
-	if got, _ := result["workdir"].(string); got == "" {
-		t.Fatalf("Full Access command did not report workdir: %#v", result)
+	if got, _ := result["stdout"].(string); filepath.Clean(got) != filepath.Clean(outside) {
+		t.Fatalf("Full Access command ran in %q, want %q: %#v", got, outside, result)
+	}
+	if _, exists := result["workdir"]; exists {
+		t.Fatalf("exec_command leaked redundant workdir: %#v", result)
 	}
 }
 
@@ -208,7 +215,7 @@ func TestProjectCommandSessionOwnershipAndPermissionTightening(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionID, _ := started["session_id"].(string)
-	if sessionID == "" || started["target_id"] != execution.Target.TargetID || started["node_id"] != execution.Deployment.NodeID {
+	if sessionID == "" || started["status"] != "running" || len(started) != 2 {
 		t.Fatalf("command session identity = %#v", started)
 	}
 

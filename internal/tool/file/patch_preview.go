@@ -5,6 +5,26 @@ import (
 	"strings"
 )
 
+func stagedChangeStats(staged map[string]stagedPatchFile) diffStats {
+	total := diffStats{}
+	for _, file := range staged {
+		oldContent := string(file.Original)
+		newContent := ""
+		if file.Content != nil {
+			newContent = *file.Content
+		}
+		stats := contentDiffStats(oldContent, newContent)
+		existsAfter := file.Content != nil
+		if file.OriginalExists != existsAfter && stats.FilesChanged == 0 {
+			stats.FilesChanged = 1
+		}
+		total.FilesChanged += stats.FilesChanged
+		total.Insertions += stats.Insertions
+		total.Deletions += stats.Deletions
+	}
+	return total
+}
+
 func stagedDiffPreview(staged map[string]stagedPatchFile, maxBytes int) (string, bool, diffStats, error) {
 	paths := make([]string, 0, len(staged))
 	for path := range staged {

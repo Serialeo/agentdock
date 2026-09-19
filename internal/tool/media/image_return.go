@@ -39,7 +39,6 @@ func artifactResult(published publicartifacts.PublishResult) map[string]any {
 		"filename":    published.Filename,
 		"mime_type":   published.MimeType,
 		"size_bytes":  published.Size,
-		"sha256":      published.SHA256,
 		"archive":     published.Archive,
 	}
 	if published.URL != "" {

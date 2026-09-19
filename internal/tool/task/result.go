@@ -68,7 +68,7 @@ func compactTaskSummary(task taskstate.Task) map[string]any {
 		summary["summary"] = truncateString(task.Summary, 240)
 	}
 	if len(task.SourceTemplates) > 0 {
-		summary["source_templates"] = task.SourceTemplates
+		summary["source_templates"] = publicTemplateReferences(task.SourceTemplates)
 	}
 	if task.Blocker != "" {
 		summary["blocker"] = truncateString(task.Blocker, 240)
@@ -156,10 +156,27 @@ func compactTemplateSummary(template taskstate.Template) map[string]any {
 		"step_count":           len(template.Steps),
 		"allow_long_template":  template.AllowLongTemplate,
 		"long_template_reason": truncateString(template.LongTemplateReason, 160),
-		"hash":                 template.Hash,
 		"published_at":         template.PublishedAt,
 		"retired_at":           template.RetiredAt,
 	}
+}
+
+func publicTemplateReferences(input []taskstate.TemplateReference) []taskstate.TemplateReference {
+	out := append([]taskstate.TemplateReference(nil), input...)
+	for index := range out {
+		out[index].Hash = ""
+	}
+	return out
+}
+
+func publicTask(task taskstate.Task) taskstate.Task {
+	task.SourceTemplates = publicTemplateReferences(task.SourceTemplates)
+	if task.Template != nil {
+		selection := *task.Template
+		selection.Hash = ""
+		task.Template = &selection
+	}
+	return task
 }
 
 func taskToolError(err error) error {

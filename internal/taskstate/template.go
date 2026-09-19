@@ -48,7 +48,7 @@ type TemplateCandidate struct {
 type TemplateSelection struct {
 	ID             string              `json:"id"`
 	Version        string              `json:"version"`
-	Hash           string              `json:"hash"`
+	Hash           string              `json:"hash,omitempty"`
 	SelectedReason string              `json:"selected_reason"`
 	Candidates     []TemplateCandidate `json:"candidates,omitempty"`
 }

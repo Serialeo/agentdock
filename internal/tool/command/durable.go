@@ -68,6 +68,48 @@ func (s *Service) durableSessionResult(ctx context.Context, id string, maxBytes 
 	return record.result(maxBytes), nil
 }
 
+func (s *Service) durableResultWithLiveOutput(ctx context.Context, live *session.Session, maxBytes int) (Result, error) {
+	result, err := s.durableSessionResult(ctx, live.ID, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	status, _ := result["status"].(string)
+	if status == "" {
+		status = "exited"
+	}
+	snapshot := snapshotResult(live.Peek(status, maxBytes))
+	// The journal is the durable authority for identity/outcome and intentionally
+	// retains only a small output tail. While the live Session still exists, use
+	// its larger in-memory buffer for the public max_output_bytes contract without
+	// advancing the observation cursor. After restart/pruning, callers naturally
+	// fall back to durableSessionResult and the bounded replay documented there.
+	mergeStream := func(prefix string) {
+		liveBytes, _ := snapshot[prefix+"_output_bytes"].(int)
+		durableBytes, _ := result[prefix+"_output_bytes"].(int)
+		// Snapshot cursors may already have been advanced by an earlier observation.
+		// In that case the durable tail is strictly more informative and must remain
+		// readable independently of the live cursor.
+		if liveBytes == 0 && durableBytes > 0 || liveBytes < durableBytes {
+			return
+		}
+		for _, suffix := range []string{"", "_output_bytes", "_total_bytes", "_dropped_bytes", "_omitted_bytes", "_output_lines", "_truncated"} {
+			key := prefix + suffix
+			if value, ok := snapshot[key]; ok {
+				result[key] = value
+			}
+		}
+	}
+	mergeStream("stdout")
+	mergeStream("stderr")
+	if terminal, ok := snapshot["terminal"]; ok {
+		result["terminal"] = terminal
+	}
+	if persistenceError, ok := snapshot["persistence_error"]; ok {
+		result["persistence_error"] = persistenceError
+	}
+	return result, nil
+}
+
 func (r commandRecord) result(maxBytes int) Result {
 	stdout := outputTail(r.Stdout, maxBytes)
 	stderr := outputTail(r.Stderr, maxBytes)

@@ -105,7 +105,7 @@ func (r *Runtime) validateProjectPromptScopes(deployment protocol.Deployment, cw
 		if currentRevision != revision {
 			return nil, &protocol.RemoteError{
 				Code: protocol.ErrorContextRefreshRequired, Message: "delivered Project Prompt scope is stale", Category: "conflict",
-				Details: map[string]any{"scope": loaded.CWDRel, "provided_prompt_revision": revision, "current_prompt_revision": currentRevision},
+				Details: map[string]any{"scope": loaded.CWDRel},
 			}
 		}
 		if existing, exists := byScope[loaded.CWDRel]; exists {
@@ -121,7 +121,7 @@ func (r *Runtime) validateProjectPromptScopes(deployment protocol.Deployment, cw
 			if previous, exists := sourceHashes[source.Path]; exists && previous != source.SHA256 {
 				return nil, &protocol.RemoteError{
 					Code: protocol.ErrorContextRefreshRequired, Message: "Project Prompt source changed while validating delivered scopes", Category: "conflict",
-					Details: map[string]any{"path": source.Path, "previous_sha256": previous, "current_sha256": source.SHA256},
+					Details: map[string]any{"path": source.Path},
 				}
 			}
 			sourceHashes[source.Path] = source.SHA256
@@ -147,7 +147,7 @@ func (r *Runtime) validateProjectPromptScopes(deployment protocol.Deployment, cw
 	if _, delivered := deliveredRevisions[current.Prompt.PromptRevision]; !delivered {
 		return nil, &protocol.RemoteError{
 			Code: protocol.ErrorContextRefreshRequired, Message: "Target cwd Project Prompt has not been delivered", Category: "conflict",
-			Details: map[string]any{"required_scope": current.CWDRel, "required_prompt_revision": current.Prompt.PromptRevision},
+			Details: map[string]any{"required_scope": current.CWDRel},
 		}
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Scope < normalized[j].Scope })

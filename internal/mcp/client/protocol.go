@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	sdkjsonrpc "github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,6 +24,13 @@ import (
 
 // go-sdk 公开 jsonrpc 包未导出 ErrRejected，只能通过稳定的 wire code 识别。
 const sdkTransportRejectedCode int64 = -32005
+
+const streamableHTTPDeleteCloseTimeout = 5 * time.Second
+
+var (
+	errStreamableHTTPSessionDeleteRedirect = errors.New("MCP session DELETE redirect rejected")
+	errStreamableHTTPTooManyRedirects      = errors.New("stopped after 10 redirects")
+)
 
 type protocolClient interface {
 	initialize(context.Context) error
@@ -81,9 +90,14 @@ func (c *sdkProtocolClient) transport() (mcpsdk.Transport, error) {
 		if err != nil {
 			return nil, err
 		}
+		requestTimeout := time.Duration(c.cfg.TimeoutMS) * time.Millisecond
 		return &mcpsdk.StreamableClientTransport{
-			Endpoint:             c.cfg.URL,
-			HTTPClient:           &http.Client{Transport: headerRoundTripper{headers: headers}},
+			Endpoint: c.cfg.URL,
+			HTTPClient: &http.Client{
+				Transport:     headerRoundTripper{headers: headers, deleteTimeout: min(requestTimeout, streamableHTTPDeleteCloseTimeout)},
+				Timeout:       requestTimeout,
+				CheckRedirect: stopStreamableHTTPSessionDeleteRedirects,
+			},
 			MaxRetries:           -1,
 			DisableStandaloneSSE: true,
 		}, nil
@@ -317,12 +331,31 @@ type httpRequestError struct{ error }
 
 func (e *httpRequestError) Unwrap() error { return e.error }
 
+func stopStreamableHTTPSessionDeleteRedirects(_ *http.Request, via []*http.Request) error {
+	// A redirect would either turn DELETE into an unbounded GET (301/302/303) or
+	// restart the per-request close budget on every hop (307/308).
+	if len(via) > 0 && via[0].Method == http.MethodDelete {
+		return errStreamableHTTPSessionDeleteRedirect
+	}
+	if len(via) >= 10 {
+		return errStreamableHTTPTooManyRedirects
+	}
+	return nil
+}
+
 type headerRoundTripper struct {
-	headers http.Header
+	headers       http.Header
+	deleteTimeout time.Duration
 }
 
 func (t headerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	clone := request.Clone(request.Context())
+	var cancel context.CancelFunc
+	if request.Method == http.MethodDelete && t.deleteTimeout > 0 {
+		ctx, timeoutCancel := context.WithTimeout(clone.Context(), t.deleteTimeout)
+		cancel = timeoutCancel
+		clone = clone.WithContext(ctx)
+	}
 	clone.Header = request.Header.Clone()
 	for name, values := range t.headers {
 		clone.Header.Del(name)
@@ -332,9 +365,29 @@ func (t headerRoundTripper) RoundTrip(request *http.Request) (*http.Response, er
 	}
 	response, err := http.DefaultTransport.RoundTrip(clone)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return response, &httpRequestError{err}
 	}
+	if cancel != nil {
+		if response.Body == nil {
+			cancel()
+		} else {
+			response.Body = &cancelOnCloseBody{ReadCloser: response.Body, cancel: cancel}
+		}
+	}
 	return response, nil
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	defer b.cancel()
+	return b.ReadCloser.Close()
 }
 
 type tailBuffer struct {

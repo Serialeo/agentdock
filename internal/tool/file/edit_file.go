@@ -46,6 +46,9 @@ func (svc *Service) editFile(ctx context.Context, request EditRequest) (Result, 
 	if request.DryRun || updated == content {
 		return result, nil
 	}
+	if err := validateMutationResult(result); err != nil {
+		return nil, err
+	}
 	staged := map[string]stagedPatchFile{
 		p.Abs: {
 			Abs:            p.Abs,

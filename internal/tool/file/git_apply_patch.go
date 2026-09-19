@@ -22,12 +22,29 @@ func (svc *Service) applyPatch(ctx context.Context, request EditRequest) (Result
 		return nil, err
 	}
 	if strings.HasPrefix(strings.TrimSpace(patch), "*** Begin Patch") {
-		return svc.applyEnvelopePatch(ctx, patch, request.DryRun, workdir)
+		return svc.applyEnvelopePatch(ctx, request, workdir)
 	}
-	maxDiffBytes := boundedInt(intValue(request.MaxDiffBytes, 65536), 65536, 1, maxTextOutputBytes)
-	preview := textutil.SafeTruncateString(patch, maxDiffBytes)
 	stats := countDiffStats(patch)
 	affected := parseDiffFiles(patch)
+	summary := "patch applied"
+	if request.DryRun {
+		summary = "patch validated"
+	}
+	result := Result{
+		"summary": summary, "dry_run": request.DryRun, "workdir": workdir.Display,
+		"affected_files": affected, "files_changed": stats.FilesChanged,
+		"insertions": stats.Insertions, "deletions": stats.Deletions,
+	}
+	if maxDiffBytes, includePreview := diffPreviewOptions(request); includePreview {
+		preview := textutil.SafeTruncateString(patch, maxDiffBytes)
+		result["diff_preview"] = preview.Text
+		result["truncated"] = preview.Truncated
+	}
+	if !request.DryRun {
+		if err := validateMutationResult(result); err != nil {
+			return nil, err
+		}
+	}
 	cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, "git", "apply", "--whitespace=nowarn", "-")
@@ -46,10 +63,7 @@ func (svc *Service) applyPatch(ctx context.Context, request EditRequest) (Result
 			"output_total_bytes": outputTotal, "output_truncated": outputTruncated,
 		})
 	}
-	if request.DryRun {
-		return Result{"summary": "patch validated", "dry_run": true, "workdir": workdir.Display, "affected_files": affected, "diff_preview": preview.Text, "truncated": preview.Truncated, "files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions}, nil
-	}
-	return Result{"summary": "patch applied", "dry_run": false, "workdir": workdir.Display, "affected_files": affected, "diff_preview": preview.Text, "truncated": preview.Truncated, "files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions}, nil
+	return result, nil
 }
 
 func patchDiagnostic(code, path, message, output, reason string) map[string]any {

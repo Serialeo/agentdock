@@ -45,6 +45,9 @@ Read references and call existing tools.
 	if validated["valid"] != true {
 		t.Fatalf("validation failed: %#v", validated)
 	}
+	if _, exposed := validated["digest"]; exposed {
+		t.Fatalf("validation result exposed internal digest: %#v", validated)
+	}
 	issues, ok := validated["issues"].([]skills.ValidateIssue)
 	if !ok || len(issues) != 0 {
 		t.Fatalf("successful validation issues = %#v, want []", validated["issues"])
@@ -62,9 +65,12 @@ Read references and call existing tools.
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, ok := installed["result"].(skills.InstallResult)
-	if !ok || result.Skill != "demo-skill" || !result.Activated {
+	result, ok := installed["result"].(map[string]any)
+	if !ok || result["skill"] != "demo-skill" || result["activated"] != true {
 		t.Fatalf("unexpected install result: %#v", installed["result"])
+	}
+	if _, exposed := result["digest"]; exposed {
+		t.Fatalf("install result exposed internal digest: %#v", result)
 	}
 
 	environment, err := rt.packageTest(context.Background(), map[string]any{

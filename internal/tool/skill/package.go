@@ -21,7 +21,6 @@ type skillToolInput struct {
 	Skill    string
 	Version  string
 	Source   string
-	Digest   string
 	MaxBytes int64
 	Activate bool
 }
@@ -32,7 +31,6 @@ func normalizePackageRequest(request PackageRequest) skillToolInput {
 		Skill:    strings.TrimSpace(request.Skill),
 		Version:  strings.TrimSpace(request.Version),
 		Source:   strings.TrimSpace(request.Source),
-		Digest:   strings.TrimSpace(request.Digest),
 		MaxBytes: int64(intValue(request.MaxBytes, 0)),
 		Activate: boolValue(request.Activate, true),
 	}
@@ -161,9 +159,8 @@ func (s *Service) skillValidate(ctx context.Context, input skillToolInput) (Resu
 		return nil, err
 	}
 	result, err := s.manager.Validate(ctx, skills.ValidateRequest{
-		Source:       resolved,
-		DigestSHA256: input.Digest,
-		MaxBytes:     input.MaxBytes,
+		Source:   resolved,
+		MaxBytes: input.MaxBytes,
 	})
 	if err != nil {
 		return nil, skillToolError(err)
@@ -172,7 +169,6 @@ func (s *Service) skillValidate(ctx context.Context, input skillToolInput) (Resu
 		"action":   "validate",
 		"valid":    result.Valid,
 		"source":   result.Source,
-		"digest":   result.Digest,
 		"document": result.Document,
 		"issues":   result.Issues,
 	}
@@ -188,15 +184,17 @@ func (s *Service) skillInstall(ctx context.Context, input skillToolInput) (Resul
 		return nil, err
 	}
 	result, err := s.manager.Install(ctx, skills.InstallRequest{
-		Source:       resolved,
-		DigestSHA256: input.Digest,
-		Activate:     input.Activate,
-		MaxBytes:     input.MaxBytes,
+		Source:   resolved,
+		Activate: input.Activate,
+		MaxBytes: input.MaxBytes,
 	})
 	if err != nil {
 		return nil, skillToolError(err)
 	}
-	return Result{"action": "install", "result": result}, nil
+	return Result{"action": "install", "result": map[string]any{
+		"skill": result.Skill, "version": result.Version, "installed_at": result.InstalledAt,
+		"activated": result.Activated, "path": result.Path,
+	}}, nil
 }
 
 func (s *Service) skillUninstall(ctx context.Context, input skillToolInput) (Result, error) {

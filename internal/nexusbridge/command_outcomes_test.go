@@ -60,10 +60,17 @@ func TestBridgeCommandOutcomesSurviveLostAckAndRuntimeRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := runtime.Call(ctx, "exec_command", map[string]any{"cmd": "echo bridge-result", "execution_mode": "sync", "request_id": "bridge-once"})
-	if err != nil || result["command_ok"] != true {
+	if err != nil || result["exit_code"] != 0 || !strings.Contains(result["stdout"].(string), "bridge-result") {
 		t.Fatalf("exec=%+v %v", result, err)
 	}
-	sessionID := result["session_id"].(string)
+	if _, exists := result["session_id"]; exists {
+		t.Fatalf("completed exec_command leaked internal session_id: %+v", result)
+	}
+	initialOutcomes, err := runtime.ReadCommandOutcomes(context.Background(), protocol.CommandOutcomesReadRequest{PendingOnly: true})
+	if err != nil || len(initialOutcomes.Outcomes) != 1 {
+		t.Fatalf("initial durable outcome=%+v %v", initialOutcomes, err)
+	}
+	sessionID := initialOutcomes.Outcomes[0].CommandSessionID
 	if _, err := runtime.Call(context.Background(), "exec_command", map[string]any{"cmd": "echo standalone-result", "execution_mode": "sync"}); err != nil {
 		t.Fatal(err)
 	}

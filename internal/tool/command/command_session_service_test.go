@@ -69,8 +69,11 @@ func TestExecCommandDefaultsToAutoAndWaitsForShortCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execCommand() error = %v", err)
 	}
-	if result["status"] != "exited" || result["stdout"] != "completed" {
+	if result["exit_code"] != 0 || result["stdout"] != "completed" {
 		t.Fatalf("default auto result = %#v", result)
+	}
+	if _, exists := result["status"]; exists {
+		t.Fatalf("completed exec_command should omit redundant status: %#v", result)
 	}
 }
 
@@ -88,7 +91,7 @@ func TestExecCommandSyncWaitsPastForegroundThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execCommand() error = %v", err)
 	}
-	if result["status"] != "exited" || result["stdout"] != "completed" {
+	if result["exit_code"] != 0 || result["stdout"] != "completed" {
 		t.Fatalf("sync result = %#v", result)
 	}
 }
@@ -107,7 +110,7 @@ func TestExecCommandAsyncReturnsSessionImmediately(t *testing.T) {
 		t.Fatalf("execCommand() error = %v", err)
 	}
 	sessionID, _ := result["session_id"].(string)
-	if result["status"] != "running" || sessionID == "" || result["session_reason"] != "explicit_async" {
+	if result["status"] != "running" || sessionID == "" || len(result) != 2 {
 		t.Fatalf("async result = %#v", result)
 	}
 	if _, err := runtime.killSessionArgs(map[string]any{"session_id": sessionID}); err != nil {
@@ -132,11 +135,14 @@ func TestExecCommandReportsCommandStatusWithoutGenericOK(t *testing.T) {
 	if _, exists := result["ok"]; exists {
 		t.Fatalf("command result must not expose generic ok: %#v", result)
 	}
-	if result["command_ok"] != false || result["exit_code"] != 7 {
-		t.Fatalf("command status = command_ok:%#v exit_code:%#v", result["command_ok"], result["exit_code"])
+	if _, exists := result["command_ok"]; exists {
+		t.Fatalf("command result must not expose redundant command_ok: %#v", result)
 	}
-	if result["command_error"] == "" {
-		t.Fatalf("failed command missing command_error: %#v", result)
+	if result["exit_code"] != 7 {
+		t.Fatalf("command exit_code = %#v", result["exit_code"])
+	}
+	if _, exists := result["command_error"]; exists {
+		t.Fatalf("failed command duplicated exit status in command_error: %#v", result)
 	}
 	if result["stdout"] != "before-fail" || result["stderr"] != "failed" {
 		t.Fatalf("command output = stdout:%#v stderr:%#v", result["stdout"], result["stderr"])
@@ -157,11 +163,20 @@ func TestExecCommandTimeoutReportsCommandError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execCommand() tool error = %v", err)
 	}
-	if result["status"] != "timeout" || result["command_ok"] != false {
-		t.Fatalf("timeout status = status:%#v command_ok:%#v", result["status"], result["command_ok"])
+	if result["timed_out"] != true {
+		t.Fatalf("timeout result = %#v", result)
 	}
-	if result["command_error"] == "" {
-		t.Fatalf("timed out command missing command_error: %#v", result)
+	if _, exists := result["status"]; exists {
+		t.Fatalf("timed out exec_command should not duplicate timeout in status: %#v", result)
+	}
+	if _, exists := result["command_ok"]; exists {
+		t.Fatalf("timed out exec_command should omit command_ok: %#v", result)
+	}
+	if _, exists := result["command_error"]; exists {
+		t.Fatalf("timed out command duplicated kill signal in command_error: %#v", result)
+	}
+	if _, exists := result["exit_code"]; exists {
+		t.Fatalf("timed out command exposed synthetic exit code: %#v", result)
 	}
 }
 
@@ -180,9 +195,6 @@ func TestListSessionsKeepsCompletedResultAvailable(t *testing.T) {
 	}
 	if started["status"] != "running" {
 		t.Fatalf("initial status = %#v, want running", started["status"])
-	}
-	if started["session_reason"] != "foreground_threshold_exceeded" || started["observe_after_ms"] != 1000 {
-		t.Fatalf("auto session metadata = %#v", started)
 	}
 	sessionID, _ := started["session_id"].(string)
 	if sessionID == "" {

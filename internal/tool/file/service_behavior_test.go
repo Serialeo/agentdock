@@ -43,8 +43,12 @@ func TestEditFileReplacesSingleMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["changed"] != true || result["matches"] != 1 {
+	if result["changed"] != true || result["matches"] != 1 || result["files_changed"] != 1 ||
+		result["insertions"] != 1 || result["deletions"] != 1 {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+	if _, exists := result["diff_preview"]; exists {
+		t.Fatalf("applied edit returned an unsolicited diff preview: %#v", result)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -81,6 +85,24 @@ func TestEditFileDryRunDoesNotWrite(t *testing.T) {
 	}
 	if string(data) != "alpha\n" {
 		t.Fatalf("dry-run wrote file: %q", data)
+	}
+}
+
+func TestEditFileAppliedEditReturnsDiffOnlyWhenExplicitlyRequested(t *testing.T) {
+	rt, root := newFileTestService(t)
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("alpha\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := rt.editFileTest(map[string]any{
+		"path": "main.go", "old": "alpha", "new": "beta", "max_diff_bytes": 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, ok := result["diff_preview"].(string)
+	if !ok || !strings.Contains(preview, "beta") {
+		t.Fatalf("explicit diff preview missing: %#v", result)
 	}
 }
 

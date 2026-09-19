@@ -123,3 +123,20 @@ func runGitForProvenanceTest(t *testing.T, repo string, args ...string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
+
+func TestEmptyGitPlaceholderIsNotARepository(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InspectSourceProvenance(t.Context(), root)
+	if err != nil || result.Kind != protocol.SourceProvenanceNone {
+		t.Fatalf("empty placeholder: %+v %v", result, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("corrupted"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectSourceProvenance(t.Context(), root); err == nil {
+		t.Fatal("nonempty broken repository was silently treated as non-Git")
+	}
+}

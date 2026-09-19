@@ -457,7 +457,7 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		t.Fatalf("task_manage create result=%#v err=%v", createdTask, err)
 	}
 	createdTaskStructured, ok := createdTask.StructuredContent.(map[string]any)
-	if !ok || createdTaskStructured["action"] != "create" || createdTaskStructured["view"] != nil || createdTaskStructured["task_summary"] == nil {
+	if !ok || createdTaskStructured["action"] != nil || createdTaskStructured["view"] != nil || createdTaskStructured["task_summary"] == nil {
 		t.Fatalf("task_manage create structuredContent = %#v", createdTask.StructuredContent)
 	}
 	listedTasks, err := harness.session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "task_manage", Arguments: map[string]any{"action": "list"}})
@@ -465,7 +465,7 @@ func TestMCPAppsBindResourcesDirectlyToBusinessTools(t *testing.T) {
 		t.Fatalf("task_manage list result=%#v err=%v", listedTasks, err)
 	}
 	listedStructured, ok := listedTasks.StructuredContent.(map[string]any)
-	if !ok || listedStructured["action"] != "list" || listedStructured["tasks"] == nil {
+	if !ok || listedStructured["action"] != nil || listedStructured["tasks"] == nil {
 		t.Fatalf("task_manage list structuredContent = %#v", listedTasks.StructuredContent)
 	}
 
@@ -646,7 +646,7 @@ func TestMCPAppsExposeACPViewOnlyWhenACPEnabled(t *testing.T) {
 		t.Fatalf("standalone direct acp_session result=%#v err=%v", sessionList, err)
 	}
 	sessionStructured, ok := sessionList.StructuredContent.(map[string]any)
-	if !ok || sessionStructured["action"] != "list" || sessionStructured["count"] != float64(0) {
+	if !ok || sessionStructured["action"] != nil || sessionStructured["count"] != nil || len(sessionStructured["sessions"].([]any)) != 0 {
 		t.Fatalf("standalone direct acp_session result = %#v", sessionList.StructuredContent)
 	}
 

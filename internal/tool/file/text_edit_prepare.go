@@ -34,35 +34,46 @@ func prepareTextReplacement(path, content string, request EditRequest) (Result, 
 	} else {
 		updated = strings.Replace(content, oldText, newText, 1)
 	}
-	maxDiffBytes := boundedInt(intValue(request.MaxDiffBytes, 65536), 65536, 1, maxTextOutputBytes)
-	diffPreview, diffTruncated, stats, err := unifiedDiffPreview(path, content, updated, maxDiffBytes)
-	if err != nil {
-		return nil, "", err
-	}
+	changed := updated != content
+	stats := contentDiffStats(content, updated)
 	result := Result{
 		"path": path, "dry_run": request.DryRun,
-		"matches": len(indexes), "changed": updated != content,
-		"diff_preview": diffPreview, "truncated": diffTruncated,
-		"files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions,
-		"summary": editSummary(path, updated != content),
+		"matches": len(indexes), "changed": changed,
+		"files_changed": stats.FilesChanged,
+		"insertions":    stats.Insertions,
+		"deletions":     stats.Deletions,
+		"summary":       editSummary(path, changed),
+	}
+	if maxDiffBytes, includePreview := diffPreviewOptions(request); includePreview {
+		diffPreview, diffTruncated, _, err := unifiedDiffPreview(path, content, updated, maxDiffBytes)
+		if err != nil {
+			return nil, "", err
+		}
+		addDiffPreviewFields(result, diffPreview, diffTruncated, stats)
 	}
 	return result, updated, nil
 }
 
 func prepareTextAddition(path, oldContent, content string, existed bool, request EditRequest) (Result, bool, error) {
-	maxDiffBytes := boundedInt(intValue(request.MaxDiffBytes, 65536), 65536, 1, maxTextOutputBytes)
-	diffPreview, diffTruncated, stats, err := unifiedDiffPreview(path, oldContent, content, maxDiffBytes)
-	if err != nil {
-		return nil, false, err
-	}
 	changed := !existed || oldContent != content
-	if !existed && stats.FilesChanged == 0 {
+	stats := contentDiffStats(oldContent, content)
+	if changed && !existed && stats.FilesChanged == 0 {
 		stats.FilesChanged = 1
 	}
-	return Result{
+	result := Result{
 		"action": "add", "path": path, "dry_run": request.DryRun,
-		"changed": changed, "diff_preview": diffPreview, "truncated": diffTruncated,
-		"files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions,
-		"summary": editSummary(path, changed),
-	}, changed, nil
+		"changed":       changed,
+		"files_changed": stats.FilesChanged,
+		"insertions":    stats.Insertions,
+		"deletions":     stats.Deletions,
+		"summary":       editSummary(path, changed),
+	}
+	if maxDiffBytes, includePreview := diffPreviewOptions(request); includePreview {
+		diffPreview, diffTruncated, _, err := unifiedDiffPreview(path, oldContent, content, maxDiffBytes)
+		if err != nil {
+			return nil, false, err
+		}
+		addDiffPreviewFields(result, diffPreview, diffTruncated, stats)
+	}
+	return result, changed, nil
 }

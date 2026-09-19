@@ -129,10 +129,20 @@ func TestExecCommandInputSchemaPublishesExecutionModes(t *testing.T) {
 }
 
 func TestExecCommandOutputSchemaPublishesSessionGuidance(t *testing.T) {
-	properties := testOutputSchema("exec_command")["properties"].(map[string]any)
-	for _, property := range []string{"session_reason", "observe_after_ms"} {
-		if _, exists := properties[property]; !exists {
-			t.Fatalf("exec_command output schema missing %s", property)
+	schema := testOutputSchema("exec_command")
+	if schema["additionalProperties"] != true {
+		t.Fatalf("exec_command output schema additionalProperties = %#v, want true for rolling provider compatibility", schema["additionalProperties"])
+	}
+	properties := schema["properties"].(map[string]any)
+	for _, property := range []string{
+		"command_ok", "workdir", "elapsed_ms", "count",
+		"event_id", "outcome_state", "sandbox",
+		"session_reason", "observe_after_ms",
+		"stdout_output_bytes", "stdout_dropped_bytes", "stdout_omitted_bytes",
+		"stderr_output_bytes", "stderr_dropped_bytes", "stderr_omitted_bytes",
+	} {
+		if _, exists := properties[property]; exists {
+			t.Fatalf("exec_command output schema still exposes %s", property)
 		}
 	}
 	sessionProperties := testOutputSchema("session_observe")["properties"].(map[string]any)

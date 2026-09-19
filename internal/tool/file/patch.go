@@ -28,7 +28,8 @@ func patchPathInBase(basePath, rawPath string) (string, error) {
 	return filepath.ToSlash(filepath.Join(filepath.FromSlash(cleanBase), filepath.FromSlash(cleanRaw))), nil
 }
 
-func (svc *Service) applyEnvelopePatch(ctx context.Context, patch string, dryRun bool, basePath workspacepkg.Path) (Result, error) {
+func (svc *Service) applyEnvelopePatch(ctx context.Context, request EditRequest, basePath workspacepkg.Path) (Result, error) {
+	patch := request.Patch
 	operations, err := parseEnvelopePatch(patch)
 	if err != nil {
 		return nil, err
@@ -140,16 +141,30 @@ func (svc *Service) applyEnvelopePatch(ctx context.Context, patch string, dryRun
 	if len(affected) == 0 {
 		return nil, toolError("PATCH_FAILED", "no files were modified", "validation")
 	}
-	diffPreview, diffTruncated, stats, err := stagedDiffPreview(staged, 65536)
-	if err != nil {
-		return nil, err
+	stats := stagedChangeStats(staged)
+	result := Result{
+		"dry_run": request.DryRun, "workdir": basePath.Display,
+		"affected_files": affected, "summary": strings.Join(summaries, "\n"),
+		"files_changed": stats.FilesChanged,
+		"insertions":    stats.Insertions,
+		"deletions":     stats.Deletions,
 	}
-	if !dryRun {
+	if maxDiffBytes, includePreview := diffPreviewOptions(request); includePreview {
+		diffPreview, diffTruncated, _, err := stagedDiffPreview(staged, maxDiffBytes)
+		if err != nil {
+			return nil, err
+		}
+		addDiffPreviewFields(result, diffPreview, diffTruncated, stats)
+	}
+	if !request.DryRun {
+		if err := validateMutationResult(result); err != nil {
+			return nil, err
+		}
 		if err := commitStagedPatch(staged); err != nil {
 			return nil, err
 		}
 	}
-	return Result{"dry_run": dryRun, "workdir": basePath.Display, "affected_files": affected, "summary": strings.Join(summaries, "\n"), "diff_preview": diffPreview, "truncated": diffTruncated, "files_changed": stats.FilesChanged, "insertions": stats.Insertions, "deletions": stats.Deletions}, nil
+	return result, nil
 }
 
 func ensurePatchPathUnused(staged map[string]stagedPatchFile, absPath, displayPath string) error {

@@ -7,10 +7,14 @@ and `starting` state. It never journals raw command arguments or environment
 values. Command output itself may contain sensitive data; directory/file access
 is restricted to the AgentDock OS user.
 
-Output is retained as an independent tail of at most 64 KiB per stream. Each
-output write updates the record independently of the live MCP observation cursor.
-The terminal state, output tail and `pending_report` flag are committed together
-using a synced atomic replacement. A failed persistence operation is surfaced and
+The durable journal retains an independent tail of at most 64 KiB per stream.
+While a live command Session still exists, normal command/status responses use the
+larger in-memory output window and continue to honor the public `max_output_bytes`
+contract; the 64 KiB bound applies when replay falls back to durable state after a
+live Session is unavailable. Journal writes remain independent of the live MCP
+observation cursor, so consuming that cursor never destroys the durable tail. The
+terminal state, output tail and `pending_report` flag are committed together using
+a synced atomic replacement. A failed persistence operation is surfaced and
 retried by later reads; an uncommitted outcome is never reported as durable.
 
 Restart recovery preserves completed outcomes. Records still marked `starting`

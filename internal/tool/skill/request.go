@@ -8,7 +8,6 @@ type PackageRequest struct {
 	Key      string  `json:"key,omitempty"`
 	Value    *string `json:"value,omitempty"`
 	Source   string  `json:"source,omitempty"`
-	Digest   string  `json:"digest,omitempty"`
 	Activate *bool   `json:"activate,omitempty"`
 	MaxBytes *int    `json:"max_bytes,omitempty"`
 }

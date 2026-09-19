@@ -66,7 +66,6 @@ func (s *Service) loadImageSource(ctx context.Context, request ViewImageRequest)
 				"filename":    meta.Filename,
 				"mime_type":   meta.MimeType,
 				"size_bytes":  meta.Size,
-				"sha256":      meta.SHA256,
 				"expires_at":  meta.ExpiresAt.Format(time.RFC3339),
 			},
 		}, nil

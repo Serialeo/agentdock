@@ -20,10 +20,10 @@ func (s *Service) RuntimeTasks(options taskstate.ListOptions) (Result, error) {
 			item["completed_at"] = *task.CompletedAt
 		}
 		if len(task.SourceTemplates) > 0 {
-			item["source_templates"] = task.SourceTemplates
+			item["source_templates"] = publicTemplateReferences(task.SourceTemplates)
 		} else if task.Template != nil {
 			// 旧任务仍可通过 Runtime API 查看原模板来源。
-			item["source_templates"] = []taskstate.TemplateReference{{ID: task.Template.ID, Version: task.Template.Version, Hash: task.Template.Hash}}
+			item["source_templates"] = []taskstate.TemplateReference{{ID: task.Template.ID, Version: task.Template.Version}}
 		}
 		items = append(items, item)
 	}
@@ -38,7 +38,7 @@ func (s *Service) RuntimeTask(id string) (Result, error) {
 	if err != nil {
 		return nil, taskToolError(err)
 	}
-	return Result{"ok": true, "source": "agentdock-api", "action": "get", "task": task}, nil
+	return Result{"ok": true, "source": "agentdock-api", "action": "get", "task": publicTask(task)}, nil
 }
 
 func (s *Service) RuntimeTaskDelete(id string) (Result, error) {

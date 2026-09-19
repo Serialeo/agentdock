@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type regressionClient struct{ calls atomic.Int32 }
@@ -177,6 +179,131 @@ func TestHTTPDisconnectAfterExecutionIsUnknownWithoutReplay(t *testing.T) {
 	var result *Error
 	if !errors.As(err, &result) || result.Code != "MCP_EXECUTION_UNKNOWN" || result.Retryable || calls.Load() != 1 {
 		t.Fatalf("unsafe disconnect result: %#v, calls %d", err, calls.Load())
+	}
+}
+
+func TestStreamableHTTPTimeoutsBoundDetachedSessionDelete(t *testing.T) {
+	configured := ServerConfig{
+		Name: "timeout", Description: "timeout", Transport: TransportStreamableHTTP,
+		URL: "https://example.invalid/mcp", Enabled: true, TimeoutMS: maxTimeoutMS,
+	}
+	client := newStreamableHTTPClient(configured)
+	transportValue, err := client.transport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, ok := transportValue.(*mcpsdk.StreamableClientTransport)
+	if !ok {
+		t.Fatalf("transport = %T", transportValue)
+	}
+	httpClient := transport.HTTPClient
+	if got, want := httpClient.Timeout, time.Duration(maxTimeoutMS)*time.Millisecond; got != want {
+		t.Fatalf("HTTP client timeout = %s, want %s", got, want)
+	}
+	roundTripper, ok := httpClient.Transport.(headerRoundTripper)
+	if !ok {
+		t.Fatalf("HTTP transport = %T", httpClient.Transport)
+	}
+	if roundTripper.deleteTimeout != streamableHTTPDeleteCloseTimeout {
+		t.Fatalf("DELETE close timeout = %s, want %s", roundTripper.deleteTimeout, streamableHTTPDeleteCloseTimeout)
+	}
+	originalDelete, err := http.NewRequest(http.MethodDelete, configured.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redirectedGet, err := http.NewRequest(http.MethodGet, configured.URL+"/redirected", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := httpClient.CheckRedirect(redirectedGet, []*http.Request{originalDelete}); !errors.Is(err, errStreamableHTTPSessionDeleteRedirect) {
+		t.Fatalf("DELETE redirect policy = %v, want rejection", err)
+	}
+	originalPost, err := http.NewRequest(http.MethodPost, configured.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := httpClient.CheckRedirect(redirectedGet, []*http.Request{originalPost}); err != nil {
+		t.Fatalf("ordinary redirect unexpectedly rejected: %v", err)
+	}
+	redirectChain := make([]*http.Request, 10)
+	for i := range redirectChain {
+		redirectChain[i] = originalPost
+	}
+	if err := httpClient.CheckRedirect(redirectedGet, redirectChain); !errors.Is(err, errStreamableHTTPTooManyRedirects) {
+		t.Fatalf("redirect limit policy = %v, want rejection", err)
+	}
+}
+
+func TestManagerRemoveReturnsWhenStreamableHTTPSessionDeleteHangs(t *testing.T) {
+	deleteStarted := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteStarted <- struct{}{}
+			<-r.Context().Done()
+			return
+		}
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		switch request.Method {
+		case "server/discover":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": request.ID,
+				"error": map[string]any{"code": -32601, "message": "Method not found"},
+			})
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "hung-delete-session")
+			writeRPCResult(t, w, request.ID, map[string]any{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "hung-delete", "version": "1"},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeRPCResult(t, w, request.ID, map[string]any{"tools": []map[string]any{}})
+		default:
+			t.Errorf("unexpected method %q", request.Method)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	manager, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Add(ServerConfig{
+		Name: "hung-delete", Description: "hung delete", Transport: TransportStreamableHTTP,
+		URL: server.URL, Enabled: true, TimeoutMS: 200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.Refresh(t.Context(), "hung-delete"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	err = manager.Remove("hung-delete")
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("remove error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("remove waited %s for hung DELETE", elapsed)
+	}
+	select {
+	case <-deleteStarted:
+	default:
+		t.Fatal("session close did not issue DELETE")
+	}
+	if listed := manager.List(); len(listed) != 0 {
+		t.Fatalf("removed server remained in registry: %#v", listed)
 	}
 }
 

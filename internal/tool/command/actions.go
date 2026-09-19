@@ -10,26 +10,44 @@ func (s *Service) Observe(ctx context.Context, request SessionObserveRequest) (R
 	if action == "" {
 		action = "list"
 	}
+	var result Result
+	var err error
 	switch action {
 	case "list":
-		return s.listSessions(ctx)
+		result, err = s.listSessions(ctx)
 	case "status":
-		return s.sessionStatus(ctx, request)
+		result, err = s.sessionStatus(ctx, request)
 	default:
 		return nil, toolErrorDetails("INVALID_ACTION", "unsupported session_observe action", "validation", map[string]any{"action": request.Action, "allowed": []string{"list", "status"}})
 	}
+	if err != nil {
+		return nil, err
+	}
+	if action == "list" {
+		return compactSessionCollection(result), nil
+	}
+	return compactSessionResult(result), nil
 }
 
 func (s *Service) Act(ctx context.Context, request SessionActRequest) (Result, error) {
 	action := strings.ToLower(strings.TrimSpace(request.Action))
+	var result Result
+	var err error
 	switch action {
 	case "write":
-		return s.writeStdin(ctx, request)
+		result, err = s.writeStdin(ctx, request)
 	case "kill":
-		return s.killSession(ctx, request)
+		result, err = s.killSession(ctx, request)
 	case "kill_all":
-		return s.killAll(ctx)
+		result, err = s.killAll(ctx)
 	default:
 		return nil, toolErrorDetails("INVALID_ACTION", "unsupported session_act action", "validation", map[string]any{"action": request.Action, "allowed": []string{"write", "kill", "kill_all"}})
 	}
+	if err != nil {
+		return nil, err
+	}
+	if action == "kill_all" {
+		return compactSessionCollection(result), nil
+	}
+	return compactSessionResult(result), nil
 }

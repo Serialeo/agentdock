@@ -30,6 +30,21 @@ func durableOwnerContext() context.Context {
 	return projectstate.WithExecution(context.Background(), commandProjectExecutionForTest("target-a", true))
 }
 
+func durableRecordForRequestID(t *testing.T, service *Service, requestID string) commandRecord {
+	t.Helper()
+	records, err := service.journal.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.RequestID == requestID {
+			return record
+		}
+	}
+	t.Fatalf("durable record for request_id %q not found", requestID)
+	return commandRecord{}
+}
+
 func TestDurableCommandFastExitConcurrentRetryAndCursorIndependentReplay(t *testing.T) {
 	service := newDurableService(t)
 	ctx := durableOwnerContext()
@@ -111,7 +126,7 @@ func TestDurableCommandFastExitConcurrentRetryAndCursorIndependentReplay(t *test
 	small := 1024
 	request.MaxOutputBytes = &small
 	replay, err := service.Exec(ctx, request)
-	if err != nil || replay["session_id"] != id || replay["replayed"] != true {
+	if err != nil || replay["replayed"] != true {
 		t.Fatalf("replay=%+v %v", replay, err)
 	}
 	after, _ := os.ReadFile(counter)
@@ -124,7 +139,7 @@ func TestDurableCommandFastExitConcurrentRetryAndCursorIndependentReplay(t *test
 	otherCtx := projectstate.WithExecution(context.Background(), commandProjectExecutionForTest("target-b", true))
 	_, err = service.Observe(otherCtx, SessionObserveRequest{Action: "status", SessionID: id})
 	requireCommandToolErrorCode(t, err, protocol.ErrorSessionTargetDenied)
-	eventID := first["event_id"].(string)
+	eventID := durableRecordForRequestID(t, service, "once").EventID
 	if _, err := service.AckCommandOutcomes(context.Background(), protocol.CommandOutcomesAckRequest{EventIDs: []string{eventID}}); err != nil {
 		t.Fatal(err)
 	}
@@ -137,11 +152,12 @@ func TestDurableCommandFastExitConcurrentRetryAndCursorIndependentReplay(t *test
 		t.Fatal(err)
 	}
 	recovered, err := service.Observe(ctx, SessionObserveRequest{Action: "status", SessionID: id})
-	if err != nil || recovered["stdout"] != first["stdout"] || recovered["event_id"] != eventID {
+	if err != nil || recovered["stdout"] != first["stdout"] {
 		t.Fatalf("restart/ACK result=%+v %v", recovered, err)
 	}
 	listed, err := service.Observe(ctx, SessionObserveRequest{Action: "list"})
-	if err != nil || listed["count"] != 1 {
+	sessions, _ := listed["sessions"].([]map[string]any)
+	if err != nil || len(sessions) != 1 {
 		t.Fatalf("recovered session absent from listing: %+v %v", listed, err)
 	}
 }
@@ -163,8 +179,11 @@ func TestDurableCommandDoesNotSpawnWhenStartingCommitFails(t *testing.T) {
 	// The failed/ambiguous starting write retains its identity. Retrying must not
 	// automatically spawn, even if storage becomes available again.
 	result, err := service.Exec(context.Background(), request)
-	if err != nil || result["replayed"] != true || result["outcome_state"] != string(protocol.CommandOutcomeFailed) || result["command_ok"] != false {
+	if err != nil || result["replayed"] != true || result["command_error"] == "" {
 		t.Fatalf("starting retry=%+v %v", result, err)
+	}
+	if record := durableRecordForRequestID(t, service, "no-spawn"); record.State != protocol.CommandOutcomeFailed {
+		t.Fatalf("starting retry durable state = %s", record.State)
 	}
 	if _, err := os.Stat(filepath.Join(service.ws.DefaultCWD(), "must-not-exist.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("retry of ambiguous starting write spawned a process")
@@ -190,8 +209,11 @@ func TestDurableCommandOutlivesRequestButNodeShutdownRecordsInterruption(t *test
 		t.Fatal("command did not finish")
 	}
 	outcome, err := service.Observe(durableOwnerContext(), SessionObserveRequest{Action: "status", SessionID: id})
-	if err != nil || outcome["stdout"] != "completed" || outcome["command_ok"] != true {
+	if err != nil || outcome["stdout"] != "completed" || outcome["exit_code"] != 0 {
 		t.Fatalf("MCP cancel killed command: %+v %v", outcome, err)
+	}
+	if _, exists := outcome["status"]; exists {
+		t.Fatalf("completed session observation exposed redundant status: %+v", outcome)
 	}
 	next, err := service.Exec(durableOwnerContext(), ExecRequest{RequestID: "shutdown", Cmd: "sleep 30", ExecutionMode: "async"})
 	if err != nil {
@@ -214,8 +236,11 @@ func TestDurableCommandTimeoutRemainsFailureAfterRestart(t *testing.T) {
 	service := newDurableService(t)
 	timeout := 80
 	result, err := service.Exec(durableOwnerContext(), ExecRequest{RequestID: "timeout", Cmd: "sleep 30", TimeoutMS: &timeout, ExecutionMode: "sync"})
-	if err != nil || result["timed_out"] != true || result["command_ok"] != false || result["status"] != "timeout" {
+	if err != nil || result["timed_out"] != true {
 		t.Fatalf("timeout=%+v %v", result, err)
+	}
+	if _, exists := result["status"]; exists {
+		t.Fatalf("timeout result duplicated status: %+v", result)
 	}
 	if err := service.Close(); err != nil {
 		t.Fatal(err)
@@ -224,5 +249,88 @@ func TestDurableCommandTimeoutRemainsFailureAfterRestart(t *testing.T) {
 	read, err := journal.ReadOutcomes(context.Background(), protocol.CommandOutcomesReadRequest{PendingOnly: true})
 	if err != nil || len(read.Outcomes) != 1 || read.Outcomes[0].State != protocol.CommandOutcomeFailed || !read.Outcomes[0].TimedOut || !read.Outcomes[0].PendingReport {
 		t.Fatalf("recovered timeout=%+v %v", read, err)
+	}
+}
+
+func TestDurableCommandUsesLiveOutputBeforeBoundedJournalReplay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX head/tr fixture")
+	}
+	service := newDurableService(t)
+	ctx := durableOwnerContext()
+	limit := 256 << 10
+	result, err := service.Exec(ctx, ExecRequest{
+		RequestID:      "wide-live-output",
+		Cmd:            "head -c 131072 /dev/zero | tr '\\000' x",
+		ExecutionMode:  "sync",
+		MaxOutputBytes: &limit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(result["stdout"].(string)); got != 131072 {
+		t.Fatalf("live result lost output: bytes=%d", got)
+	}
+	if _, exists := result["stdout_truncated"]; exists {
+		t.Fatalf("untruncated live result exposed stdout_truncated=false: %+v", result)
+	}
+
+	// Sync sessions are not retained in the live store. A later read therefore
+	// exercises the crash/restart-compatible bounded journal replay path.
+	record := durableRecordForRequestID(t, service, "wide-live-output")
+	replayed, err := service.Observe(ctx, SessionObserveRequest{Action: "status", SessionID: record.ID, MaxOutputBytes: &limit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(replayed["stdout"].(string)); got != journalOutputLimit || replayed["stdout_truncated"] != true {
+		t.Fatalf("durable replay must remain bounded: bytes=%d truncated=%v", got, replayed["stdout_truncated"])
+	}
+}
+
+func TestDurableAsyncStatusKeepsLargeLiveOutputRepeatable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX sleep/head/tr fixture")
+	}
+	service := newDurableService(t)
+	ctx := durableOwnerContext()
+	limit := 256 << 10
+	started, err := service.Exec(ctx, ExecRequest{
+		RequestID:      "wide-async-output",
+		Cmd:            "sleep 0.05; head -c 131072 /dev/zero | tr '\\000' y",
+		ExecutionMode:  "async",
+		MaxOutputBytes: &limit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := started["session_id"].(string)
+	live, ok := service.sessions.Get(id)
+	if !ok {
+		t.Fatal("async session was not retained")
+	}
+	select {
+	case <-live.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("async command did not finish")
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		result, err := service.Observe(ctx, SessionObserveRequest{Action: "status", SessionID: id, MaxOutputBytes: &limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(result["stdout"].(string)); got != 131072 {
+			t.Fatalf("status read %d lost live output: bytes=%d", attempt+1, got)
+		}
+		if _, exists := result["stdout_truncated"]; exists {
+			t.Fatalf("status read %d exposed stdout_truncated=false: %+v", attempt+1, result)
+		}
+	}
+	service.sessions.Delete(id)
+	replayed, err := service.Observe(ctx, SessionObserveRequest{Action: "status", SessionID: id, MaxOutputBytes: &limit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(replayed["stdout"].(string)); got != journalOutputLimit || replayed["stdout_truncated"] != true {
+		t.Fatalf("post-live replay must use bounded journal: bytes=%d truncated=%v", got, replayed["stdout_truncated"])
 	}
 }

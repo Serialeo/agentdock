@@ -8,7 +8,15 @@ import (
 func TestRecallSearchOutputSchemaDeclaresCitationIdentityWithoutDroppingNativeFields(t *testing.T) {
 	schema := testOutputSchema("recall_search")
 	props := schema["properties"].(map[string]any)
-	for _, field := range []string{"count", "query", "recall_endpoint", "recall_kind", "recall_store", "results"} {
+	if _, ok := props["results"]; !ok {
+		t.Fatal("recall_search output schema missing results")
+	}
+	for _, field := range []string{"count", "query", "recall_endpoint", "recall_kind", "recall_store"} {
+		if _, ok := props[field]; ok {
+			t.Fatalf("recall_search output schema exposed redundant field %q", field)
+		}
+	}
+	for _, field := range []string{"results"} {
 		if _, ok := props[field]; !ok {
 			t.Fatalf("recall_search output schema missing %q", field)
 		}

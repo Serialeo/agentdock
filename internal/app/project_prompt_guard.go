@@ -112,7 +112,7 @@ func (r *Runtime) ensureProjectPromptPaths(execution projectstate.Execution, pat
 			continue
 		}
 		seen[key] = struct{}{}
-		missing = append(missing, map[string]any{"scope": loaded.CWDRel, "prompt_revision": loaded.Prompt.PromptRevision})
+		missing = append(missing, map[string]any{"scope": loaded.CWDRel})
 	}
 	if len(missing) == 0 {
 		return nil

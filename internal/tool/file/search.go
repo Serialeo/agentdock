@@ -114,6 +114,9 @@ func (svc *Service) searchTextRG(ctx context.Context, p workspace.Path, opts Sea
 	defer cancel()
 	cmd := exec.CommandContext(ctx, rg, args...)
 	cmd.Dir = p.Abs
+	if info, statErr := os.Stat(p.Abs); statErr == nil && !info.IsDir() {
+		cmd.Dir = filepath.Dir(p.Abs)
+	}
 	processcontrol.Configure(cmd)
 	output, err := cmd.Output()
 	if err != nil {
@@ -131,9 +134,14 @@ func (svc *Service) searchTextRG(ctx context.Context, p workspace.Path, opts Sea
 
 func (svc *Service) parseRGJSON(output []byte, searchRoot string, opts SearchOptions) ([]map[string]any, bool, bool) {
 	matches := make([]map[string]any, 0)
-	before := map[string][]string{}
-	var lastMatch map[string]any
-	var lastPath string
+	type contextLine struct {
+		number int
+		text   string
+	}
+	recent := make([]contextLine, 0, opts.ContextLines)
+	pending := make([]map[string]any, 0, opts.ContextLines)
+	currentPath := ""
+	truncated := false
 	scanner := bufio.NewScanner(bytes.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 	for scanner.Scan() {
@@ -158,24 +166,21 @@ func (svc *Service) parseRGJSON(output []byte, searchRoot string, opts SearchOpt
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 			return nil, false, false
 		}
-		if event.Type != "context" && event.Type != "match" {
+		if event.Type != "match" && event.Type != "context" {
 			continue
 		}
 		eventPath := event.Data.Path.Text
 		if !filepath.IsAbs(eventPath) {
 			eventPath = filepath.Join(searchRoot, eventPath)
 		}
-		requestRel, err := relativePathFromRoot(searchRoot, eventPath)
+		rel, err := relativePathFromRoot(searchRoot, eventPath)
 		if err != nil {
 			return nil, false, false
 		}
-		if requestRel == "." {
-			requestRel = filepath.Base(eventPath)
+		if rel == "." {
+			rel = filepath.Base(eventPath)
 		}
-		if len(opts.IncludeGlobs) > 0 && !matchesAny(requestRel, opts.IncludeGlobs) {
-			continue
-		}
-		if matchesAny(requestRel, opts.ExcludeGlobs) {
+		if len(opts.IncludeGlobs) > 0 && !matchesAny(rel, opts.IncludeGlobs) || matchesAny(rel, opts.ExcludeGlobs) {
 			continue
 		}
 		path, err := svc.ws.Relative(eventPath)
@@ -183,40 +188,70 @@ func (svc *Service) parseRGJSON(output []byte, searchRoot string, opts SearchOpt
 			path = filepath.ToSlash(eventPath)
 		}
 		line := strings.TrimSuffix(event.Data.Lines.Text, "\n")
-		switch event.Type {
-		case "context":
-			if lastMatch != nil && lastPath == path {
-				after, _ := lastMatch["after"].([]string)
-				lastMatch["after"] = append(after, line)
-				lastMatch["context_end_line"] = event.Data.LineNumber
-			} else {
-				before[path] = append(before[path], line)
-				if opts.ContextLines > 0 && len(before[path]) > opts.ContextLines {
-					before[path] = before[path][len(before[path])-opts.ContextLines:]
+		number := event.Data.LineNumber
+		if path != currentPath {
+			recent = recent[:0]
+			pending = pending[:0]
+			currentPath = path
+		}
+		if len(recent) > 0 && recent[len(recent)-1].number+1 != number {
+			recent = recent[:0]
+		}
+		nextPending := pending[:0]
+		for _, previous := range pending {
+			matchLine := previous["line"].(int)
+			if number <= matchLine || number > matchLine+opts.ContextLines {
+				continue
+			}
+			after := previous["after"].([]string)
+			if number == matchLine+len(after)+1 {
+				after = append(after, line)
+				previous["after"] = after
+				previous["context_end_line"] = number
+				if len(after) < opts.ContextLines {
+					nextPending = append(nextPending, previous)
 				}
 			}
-		case "match":
-			column := 1
-			matchText := ""
-			if len(event.Data.Submatches) > 0 {
-				column = event.Data.Submatches[0].Start + 1
-				matchText = event.Data.Submatches[0].Match.Text
-			}
-			beforeLines := append([]string(nil), before[path]...)
-			before[path] = nil
-			entry := map[string]any{"path": path, "line": event.Data.LineNumber, "column": column, "preview": truncateString(line, 500), "match_text": truncateString(matchText, 500), "before": beforeLines, "after": []string{}, "context_start_line": event.Data.LineNumber - len(beforeLines), "context_end_line": event.Data.LineNumber}
-			matches = append(matches, entry)
-			lastMatch = entry
-			lastPath = path
+		}
+		pending = nextPending
+		if event.Type == "match" {
 			if opts.MaxResults > 0 && len(matches) >= opts.MaxResults {
-				return matches, true, true
+				truncated = true
+			} else {
+				column := 1
+				matchText := ""
+				if len(event.Data.Submatches) > 0 {
+					column = event.Data.Submatches[0].Start + 1
+					matchText = event.Data.Submatches[0].Match.Text
+				}
+				before := make([]string, 0, len(recent))
+				for _, item := range recent {
+					if item.number >= number-opts.ContextLines {
+						before = append(before, item.text)
+					}
+				}
+				preview := truncateString(line, 500)
+				entry := map[string]any{"path": path, "line": number, "column": column, "preview": preview, "match_text": truncateString(matchText, 500), "before": before, "after": []string{}, "context_start_line": number - len(before), "context_end_line": number}
+				if preview != line {
+					entry["preview_truncated"] = true
+				}
+				matches = append(matches, entry)
+				if opts.ContextLines > 0 {
+					pending = append(pending, entry)
+				}
+			}
+		}
+		if opts.ContextLines > 0 {
+			recent = append(recent, contextLine{number: number, text: line})
+			if len(recent) > opts.ContextLines {
+				recent = recent[len(recent)-opts.ContextLines:]
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, false, false
 	}
-	return matches, false, true
+	return matches, truncated, true
 }
 
 func (svc *Service) searchTextGo(ctx context.Context, p workspace.Path, opts SearchOptions) (Result, error) {
@@ -245,6 +280,7 @@ func (svc *Service) searchTextGoWithLimits(ctx context.Context, p workspace.Path
 		re = compiled
 	}
 	matches := make([]map[string]any, 0)
+	truncated := false
 	ignore := loadIgnoreMatcher(svc.ws.Root())
 	entriesVisited := 0
 	filesScanned := 0
@@ -361,11 +397,12 @@ func (svc *Service) searchTextGoWithLimits(ctx context.Context, p workspace.Path
 			if !ok {
 				continue
 			}
-			before, after := contextAround(lines, i, opts.ContextLines)
-			matches = append(matches, map[string]any{"path": displayPath, "line": i + 1, "column": column, "preview": truncateString(line, 500), "match_text": truncateString(matchText, 500), "before": before, "after": after, "context_start_line": i + 1 - len(before), "context_end_line": i + 1 + len(after)})
 			if opts.MaxResults > 0 && len(matches) >= opts.MaxResults {
+				truncated = true
 				return filepath.SkipAll
 			}
+			before, after := contextAround(lines, i, opts.ContextLines)
+			matches = append(matches, map[string]any{"path": displayPath, "line": i + 1, "column": column, "preview": truncateString(line, 500), "match_text": truncateString(matchText, 500), "before": before, "after": after, "context_start_line": i + 1 - len(before), "context_end_line": i + 1 + len(after)})
 		}
 		return nil
 	})
@@ -379,7 +416,7 @@ func (svc *Service) searchTextGoWithLimits(ctx context.Context, p workspace.Path
 	}
 	return Result{
 		"query": opts.Query, "engine": "go_fallback", "matches": matches, "total_matches": len(matches),
-		"truncated": opts.MaxResults > 0 && len(matches) >= opts.MaxResults,
+		"truncated": truncated,
 		"partial":   skippedLargeFiles > 0, "files_scanned": filesScanned, "bytes_scanned": bytesScanned, "skipped_large_files": skippedLargeFiles,
 	}, nil
 }

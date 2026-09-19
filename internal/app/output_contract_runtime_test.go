@@ -18,6 +18,7 @@ import (
 	acpruntime "github.com/uvwt/agentdock/internal/acp"
 	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
+	"github.com/uvwt/agentdock/internal/mcpresult"
 )
 
 func assertToolResultMatchestestOutputSchema(t *testing.T, name string, result Result) map[string]any {
@@ -53,6 +54,28 @@ func assertToolResultMatchestestOutputSchema(t *testing.T, name string, result R
 	}
 	if err := compiled.Validate(normalized); err != nil {
 		t.Fatalf("%s result violates output schema: %v\nresult: %s", name, err, encoded)
+	}
+
+	modelSchemaJSON, err := json.Marshal(mcpresult.Schema(name, testOutputSchema(name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var modelSchema any
+	if err := json.Unmarshal(modelSchemaJSON, &modelSchema); err != nil {
+		t.Fatal(err)
+	}
+	modelCompiler := jsonschema.NewCompiler()
+	modelCompiler.DefaultDraft(jsonschema.Draft2020)
+	modelResource := "urn:agentdock:test:model-output:" + name
+	if err := modelCompiler.AddResource(modelResource, modelSchema); err != nil {
+		t.Fatal(err)
+	}
+	modelContract, err := modelCompiler.Compile(modelResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelContract.Validate(mcpresult.Project(name, normalized)); err != nil {
+		t.Fatalf("%s compact model output violates published schema: %v", name, err)
 	}
 	return normalized
 }
