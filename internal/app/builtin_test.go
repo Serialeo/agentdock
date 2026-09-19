@@ -264,7 +264,9 @@ func TestBuiltinDeadlineLeavesCleanupTransitioningAndShutdownFenced(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	// Windows CI may need more than one second to schedule the timed-out update
+	// goroutine, release the serialized update fence, and resume Close.
+	case <-time.After(3 * time.Second):
 		t.Fatal("shutdown failed to drain")
 	}
 }
