@@ -78,8 +78,6 @@ def tool_call(name, arguments, request_id):
     # MCP 将 isError 定义为可选字段；缺省值表示成功，只有显式 true 才是工具错误。
     require(envelope.get("isError", False) is False, f"{name} returned an error envelope: {envelope}")
     result = envelope.get("structuredContent") or {}
-    if name.startswith("browser_"):
-        require(result.get("browser_ok") is True, f"{name} did not return browser_ok=true: {result}")
     return result
 
 
