@@ -160,11 +160,7 @@ func run(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
-	if !inspection.Result.UpdateAvailable {
-		fmt.Fprintln(opts.Output, inspection.Result.Message)
-		return nil
-	}
-	if opts.DesktopOnly || (inspection.Result.DesktopUpdateAvailable && normalizeVersion(inspection.Result.CurrentVersion) == normalizeVersion(inspection.Result.LatestVersion)) {
+	if opts.DesktopOnly {
 		return runDesktopOnlyUpdate(ctx, opts, inspection)
 	}
 
@@ -319,30 +315,17 @@ func inspectUpdate(ctx context.Context, opts options) (updateInspection, error) 
 
 	currentVersion := normalizeVersion(opts.CurrentVersion)
 	targetVersion := normalizeVersion(latest.TagName)
-	if currentVersion == "vdev" || currentVersion == "" {
-		return updateInspection{}, errors.New("当前是开发构建，无法通过 agentdock update 判断可升级版本")
-	}
-
 	desktopVersion := normalizeVersion(opts.DesktopCurrentVersion)
-	desktopNeedsUpdate := false
-	if strings.TrimSpace(opts.DesktopTargetPath) != "" {
-		comparison, comparable := compareVersions(desktopVersion, targetVersion)
-		desktopNeedsUpdate = desktopVersion == "" || !comparable || comparison < 0
-	}
+	updateDesktop := strings.TrimSpace(opts.DesktopTargetPath) != ""
 
+	// 同一版本号可以重新发布；每次更新都安装远端 latest 的完整载荷，不能按本地版本号跳过。
 	result := CheckResult{
 		CurrentVersion:         currentVersion,
 		LatestVersion:          targetVersion,
 		DesktopCurrentVersion:  desktopVersion,
-		DesktopUpdateAvailable: desktopNeedsUpdate,
-	}
-	if comparison, comparable := compareVersions(currentVersion, targetVersion); comparable && comparison > 0 {
-		result.Message = fmt.Sprintf("当前版本 %s 高于最新 Release %s，不执行降级。", currentVersion, targetVersion)
-		return updateInspection{Result: result}, nil
-	}
-	if currentVersion == targetVersion && !desktopNeedsUpdate {
-		result.Message = fmt.Sprintf("当前已是最新版本：%s", targetVersion)
-		return updateInspection{Result: result}, nil
+		UpdateAvailable:        true,
+		DesktopUpdateAvailable: updateDesktop,
+		Message:                fmt.Sprintf("将从远端下载并安装最新发布：%s → %s", currentVersion, targetVersion),
 	}
 
 	if opts.DesktopOnly {
@@ -354,9 +337,7 @@ func inspectUpdate(ctx context.Context, opts options) (updateInspection, error) 
 		if !ok {
 			return updateInspection{}, fmt.Errorf("Release %s 缺少校验文件 %s.sha256", targetVersion, macOSDesktopArchiveName)
 		}
-		result.UpdateAvailable = true
 		result.DesktopUpdateAvailable = true
-		result.Message = fmt.Sprintf("发现 AgentDock App 更新：%s → %s", currentVersion, targetVersion)
 		return updateInspection{
 			Result:               result,
 			DesktopArchiveAsset:  desktopArchiveAsset,
@@ -379,7 +360,7 @@ func inspectUpdate(ctx context.Context, opts options) (updateInspection, error) 
 
 	desktopArchiveAsset := releaseAsset{}
 	desktopChecksumAsset := releaseAsset{}
-	if desktopNeedsUpdate {
+	if updateDesktop {
 		switch opts.GOOS {
 		case "darwin":
 			desktopArchiveAsset, ok = findAsset(latest.Assets, macOSDesktopArchiveName)
@@ -398,12 +379,6 @@ func inspectUpdate(ctx context.Context, opts options) (updateInspection, error) 
 		}
 	}
 
-	result.UpdateAvailable = true
-	if currentVersion == targetVersion && desktopNeedsUpdate {
-		result.Message = fmt.Sprintf("发现控制面板更新：%s → %s", desktopVersion, targetVersion)
-	} else {
-		result.Message = fmt.Sprintf("发现新版本：%s → %s", currentVersion, targetVersion)
-	}
 	return updateInspection{
 		Result:               result,
 		ArchiveName:          archiveName,

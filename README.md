@@ -72,6 +72,8 @@ Regular users can install AgentDock from the official package for their operatin
 
 This fork intentionally supports only **Linux amd64**, **macOS arm64 (Apple Silicon)**, and **Windows amd64/x86-64**. Release assets, installers, containers, and built-in self-update follow the same support boundary.
 
+The official installer downloads the latest release on every run. `agentdock update` also downloads, verifies, and installs the latest release every time, including when the version number is unchanged. This applies republished fixes to both the core and installed desktop components. `agentdock update --check` only resolves the remote release and its assets; it does not install them.
+
 See [Install AgentDock](https://uvwt.github.io/agentdock-docs/docs/getting-started/install) for the complete instructions.
 
 | Platform | Documentation |

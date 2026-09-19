@@ -73,6 +73,8 @@ AgentDock 不提供聊天界面，也不负责模型推理。它专注于解决�
 
 这个二次开发版本有意只支持 **Linux amd64**、**macOS arm64（Apple Silicon）**、**Windows amd64/x86-64**；Release 资产、安装器、容器和内置自更新都遵循同一支持边界。
 
+正式安装脚本每次运行都从远端获取最新发布。`agentdock update` 也始终重新下载、校验并安装远端最新版，即使版本号相同，也会更新核心和已安装的桌面组件，以取得重新发布的修复。`agentdock update --check` 只查询远端发布及其资源，不执行安装。
+
 完整步骤见 [安装 AgentDock](https://uvwt.github.io/agentdock-docs/zh-CN/docs/getting-started/install)。
 
 

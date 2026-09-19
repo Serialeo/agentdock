@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -120,7 +121,7 @@ func TestInspectUpdateRepairsOlderDesktopWhenCoreIsCurrent(t *testing.T) {
 	if !inspection.Result.UpdateAvailable || !inspection.Result.DesktopUpdateAvailable {
 		t.Fatalf("desktop repair was not reported: %#v", inspection.Result)
 	}
-	if inspection.Result.Message != "发现控制面板更新：v0.6.1 → v0.7.1" {
+	if inspection.Result.Message != "将从远端下载并安装最新发布：v0.7.1 → v0.7.1" {
 		t.Fatalf("unexpected desktop repair message: %s", inspection.Result.Message)
 	}
 }
@@ -213,9 +214,15 @@ func TestInspectUpdateRejectsMacOSReleaseWithoutDesktopAsset(t *testing.T) {
 	}
 }
 
-func TestInspectUpdateReportsCurrentVersion(t *testing.T) {
+func TestInspectUpdateResolvesAssetsForSameVersion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(release{TagName: "v0.6.1"})
+		_ = json.NewEncoder(w).Encode(release{
+			TagName: "v0.6.1",
+			Assets: []releaseAsset{
+				{Name: "agentdock_windows_amd64.zip", URL: "https://example.invalid/windows"},
+				{Name: "agentdock_windows_amd64.zip.sha256", URL: "https://example.invalid/windows.sha256"},
+			},
+		})
 	}))
 	defer server.Close()
 
@@ -229,7 +236,7 @@ func TestInspectUpdateReportsCurrentVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspection.Result.UpdateAvailable || inspection.Result.Message != "当前已是最新版本：v0.6.1" {
+	if !inspection.Result.UpdateAvailable || inspection.ArchiveAsset.URL != "https://example.invalid/windows" {
 		t.Fatalf("unexpected current-version result: %#v", inspection.Result)
 	}
 }
@@ -261,7 +268,7 @@ func TestRunDownloadsVerifiesAndAppliesRelease(t *testing.T) {
 	var output strings.Builder
 	applied := false
 	err := run(context.Background(), options{
-		CurrentVersion: "0.4.4",
+		CurrentVersion: "0.4.5",
 		ExecutablePath: "/tmp/agentdock",
 		GOOS:           "darwin",
 		GOARCH:         "arm64",
@@ -296,7 +303,7 @@ func TestRunDownloadsVerifiesAndAppliesRelease(t *testing.T) {
 	if !applied {
 		t.Fatal("release was not applied")
 	}
-	if !strings.Contains(output.String(), "更新完成并已重启：v0.4.4 → v0.4.5") {
+	if !strings.Contains(output.String(), "更新完成并已重启：v0.4.5 → v0.4.5") {
 		t.Fatalf("unexpected output: %s", output.String())
 	}
 }
@@ -436,8 +443,26 @@ func TestRunDesktopOnlyDoesNotRequireCoreAsset(t *testing.T) {
 	}
 }
 
-func TestRunRepairsWindowsDesktopOnlyWhenCoreIsCurrent(t *testing.T) {
-	desktopArchive := []byte("windows-release-bundle")
+func TestRunRefreshesWindowsCoreAndDesktopAtSameVersion(t *testing.T) {
+	var bundle bytes.Buffer
+	writer := zip.NewWriter(&bundle)
+	for name, content := range map[string]string{
+		"bin/agentdock.exe":                     "new-core",
+		"AgentDock.ControlPanel.exe":            "new-desktop",
+		coreSkillBundlePrefix + "manifest.json": `{"skills":[]}`,
+	} {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(entry, content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	desktopArchive := bundle.Bytes()
 	desktopDigest := sha256.Sum256(desktopArchive)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -466,7 +491,7 @@ func TestRunRepairsWindowsDesktopOnlyWhenCoreIsCurrent(t *testing.T) {
 		CurrentVersion:        "0.7.5",
 		ExecutablePath:        `C:\Users\test\AppData\Local\AgentDock\bin\agentdock.exe`,
 		DesktopTargetPath:     `C:\Users\test\AppData\Local\AgentDock`,
-		DesktopCurrentVersion: "0.7.4",
+		DesktopCurrentVersion: "0.7.5",
 		GOOS:                  "windows",
 		GOARCH:                "amd64",
 		ReleaseAPI:            server.URL + "/release",
@@ -486,8 +511,8 @@ func TestRunRepairsWindowsDesktopOnlyWhenCoreIsCurrent(t *testing.T) {
 		},
 		Apply: func(_ context.Context, request applyRequest) (applyResult, error) {
 			applied = true
-			if !request.DesktopOnly || request.StagedPath != "" || request.BundlePath != "" || request.TargetVersion != "v0.7.5" {
-				t.Fatalf("unexpected Windows desktop-only request: %#v", request)
+			if request.DesktopOnly || request.StagedPath == "" || request.BundlePath == "" || request.DesktopStagedPath == "" || request.TargetVersion != "v0.7.5" {
+				t.Fatalf("unexpected Windows update request: %#v", request)
 			}
 			return applyResult{}, nil
 		},
@@ -541,35 +566,6 @@ func TestRunRejectsChecksumBeforeApplying(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "SHA-256 不匹配") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunSkipsCurrentAndNewerVersions(t *testing.T) {
-	for _, current := range []string{"0.4.5", "0.4.6"} {
-		t.Run(current, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_ = json.NewEncoder(w).Encode(release{TagName: "v0.4.5"})
-			}))
-			defer server.Close()
-			var output strings.Builder
-			err := run(context.Background(), options{
-				CurrentVersion: current,
-				ExecutablePath: "/tmp/agentdock",
-				GOOS:           "darwin",
-				GOARCH:         "arm64",
-				ReleaseAPI:     server.URL,
-				HTTPClient:     server.Client(),
-				Output:         &output,
-				VerifyBinary:   func(context.Context, string, string) error { return nil },
-				Apply: func(context.Context, applyRequest) (applyResult, error) {
-					t.Fatal("apply must not run")
-					return applyResult{}, nil
-				},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-		})
 	}
 }
 

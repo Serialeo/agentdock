@@ -3,6 +3,7 @@ set -eu
 
 umask 077
 
+# 此入口可重复运行；发布打包不得把 latest 改为生成时的版本地址。
 DEFAULT_BASE_URL="https://github.com/Serialeo/agentdock/releases/latest/download"
 BASE_URL="${AGENTDOCK_INSTALLER_BASE_URL:-$DEFAULT_BASE_URL}"
 TMP_ROOT=""
@@ -553,7 +554,7 @@ linux_existing_menu() {
   cat >>"$TTY_OUT" <<'MENU'
 
 检测到已安装 AgentDock：
-1) 更新或修复（保留当前配置）
+1) 从远端重新安装最新版（保留当前配置）
 2) 修改公网访问
 3) 卸载
 4) 高级安装

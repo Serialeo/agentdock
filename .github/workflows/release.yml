@@ -476,7 +476,6 @@ jobs:
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RELEASE_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           cp scripts/install/install.sh dist/install.sh
@@ -492,7 +491,6 @@ jobs:
           from pathlib import Path
 
           tag = os.environ["RELEASE_TAG"]
-          repository = os.environ["RELEASE_REPOSITORY"].lower()
           expected_version = tag.removeprefix("v")
           buildinfo_source = Path("internal/buildinfo/buildinfo.go").read_text()
           version_match = re.search(r'^\s*const\s+Version\s*=\s*"([^"]+)"', buildinfo_source, re.MULTILINE)
@@ -502,15 +500,7 @@ jobs:
           if actual_version != expected_version:
               raise SystemExit(f"release tag {tag} does not match buildinfo.Version {actual_version}")
 
-          # Docker Compose / .env.example 不作为 Release 资产发布；
-          # 文档直接引用仓库 main 或对应 git tag 上的源文件。
-          installer_entry = Path("dist/install.sh")
-          installer_text = installer_entry.read_text()
-          default_base = "https://github.com/Serialeo/agentdock/releases/latest/download"
-          release_base = f"https://github.com/{repository}/releases/download/{tag}"
-          if default_base not in installer_text:
-              raise SystemExit("install.sh default release base was not found")
-          installer_entry.write_text(installer_text.replace(default_base, release_base, 1))
+          # 安装入口保留源码中的 latest 地址，保存到本地后再次运行也必须获取最新平台安装器。
           PY
           (
             cd dist
