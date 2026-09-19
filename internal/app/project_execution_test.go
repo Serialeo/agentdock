@@ -121,8 +121,11 @@ func TestProjectNodeFullAccessIsIndependentFromConfiguredFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Full Access did not allow command workdir outside Project Folder: %v", err)
 	}
-	if got, _ := result["stdout"].(string); filepath.Clean(got) != filepath.Clean(outside) {
-		t.Fatalf("Full Access command ran in %q, want %q: %#v", got, outside, result)
+	got, _ := result["stdout"].(string)
+	gotInfo, gotErr := os.Stat(filepath.Clean(got))
+	wantInfo, wantErr := os.Stat(filepath.Clean(outside))
+	if gotErr != nil || wantErr != nil || !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("Full Access command ran in %q, want filesystem-equivalent %q (stat errors: %v, %v): %#v", got, outside, gotErr, wantErr, result)
 	}
 	if _, exists := result["workdir"]; exists {
 		t.Fatalf("exec_command leaked redundant workdir: %#v", result)
