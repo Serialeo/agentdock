@@ -303,7 +303,13 @@ func TestWindowsTaskAdminUsesNativeAgentDockHelper(t *testing.T) {
 		"set-enabled",
 		"StopInstalledCore",
 		"Process.GetProcessesByName(\"agentdock\")",
+		"ProcessQueryLimitedInformation",
+		"QueryFullProcessImageName",
+		"inspectionFailures.Count > 0",
 		"process.Kill(entireProcessTree: true)",
+		"var quietDeadline = DateTime.UtcNow.AddSeconds(1)",
+		"quietDeadline = now.AddSeconds(1)",
+		"else if (now >= quietDeadline)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("TaskAdminService.cs missing %q", want)
@@ -312,6 +318,7 @@ func TestWindowsTaskAdminUsesNativeAgentDockHelper(t *testing.T) {
 	for _, forbidden := range []string{
 		"powershell.exe",
 		"File.Exists(request.LauncherPath)",
+		"process.MainModule",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("TaskAdminService.cs must not depend on %q", forbidden)

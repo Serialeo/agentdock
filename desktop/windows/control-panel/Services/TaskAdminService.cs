@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 
 namespace AgentDock.ControlPanel;
@@ -16,6 +18,22 @@ internal static class TaskAdminService
     private const int TaskRunLevelHighest = 1;
     private const int TaskInstancesIgnoreNew = 2;
     private const int DaclSecurityInformation = 0x4;
+    private const uint ProcessQueryLimitedInformation = 0x1000;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(
+        IntPtr process,
+        uint flags,
+        StringBuilder executablePath,
+        ref uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     internal static int Run(string[] arguments)
     {
@@ -195,27 +213,41 @@ internal static class TaskAdminService
     {
         var expectedBinary = Path.GetFullPath(Path.Combine(runtimeRoot, "bin", "agentdock.exe"));
         var deadline = DateTime.UtcNow.AddSeconds(15);
+        var quietDeadline = DateTime.UtcNow.AddSeconds(1);
 
         // 升级 helper 已处于 High Integrity；这里按完整路径只终止当前安装的 Core，
-        // 兜底清理旧任务实现或异常退出 host 遗留的 elevated 孤儿进程。
+        // 兜底清理旧任务实现或异常退出 host 遗留的 elevated 孤儿进程。任务计划程序
+        // 可能先报告任务已停止，再让旧 PowerShell action 的 Core 子进程短暂出现，因此
+        // 必须观察到一个连续静默窗口，不能在第一次未找到进程时立即返回。
         while (true)
         {
             var foundTarget = false;
+            var inspectionFailures = new List<string>();
             foreach (var process in Process.GetProcessesByName("agentdock"))
             {
                 using (process)
                 {
-                    string? processPath;
+                    int processId;
                     try
                     {
-                        processPath = process.MainModule?.FileName;
-                    }
-                    catch (System.ComponentModel.Win32Exception)
-                    {
-                        continue;
+                        processId = process.Id;
                     }
                     catch (InvalidOperationException)
                     {
+                        // 进程可能在枚举后自行退出，下一轮会重新确认。
+                        continue;
+                    }
+
+                    string? processPath;
+                    try
+                    {
+                        processPath = QueryProcessPath((uint)processId);
+                    }
+                    catch (Win32Exception ex)
+                    {
+                        // 提权 helper 无法验证同名进程的完整路径时不能把它当作已停止；
+                        // 保持静默窗口打开并在超时后返回可诊断的 PID。
+                        inspectionFailures.Add($"PID {processId}: {ex.Message}");
                         continue;
                     }
 
@@ -237,15 +269,48 @@ internal static class TaskAdminService
                 }
             }
 
-            if (!foundTarget)
+            var now = DateTime.UtcNow;
+            if (foundTarget || inspectionFailures.Count > 0)
+            {
+                quietDeadline = now.AddSeconds(1);
+            }
+            else if (now >= quietDeadline)
             {
                 return;
             }
-            if (DateTime.UtcNow >= deadline)
+            if (now >= deadline)
             {
+                if (inspectionFailures.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"无法确认 AgentDock Core 已停止：{expectedBinary}。{string.Join("; ", inspectionFailures)}");
+                }
                 throw new InvalidOperationException($"无法停止正在运行的 AgentDock Core：{expectedBinary}");
             }
             Thread.Sleep(250);
+        }
+    }
+
+    private static string QueryProcessPath(uint processId)
+    {
+        var process = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (process == IntPtr.Zero)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try
+        {
+            var executablePath = new StringBuilder(32768);
+            var size = (uint)executablePath.Capacity;
+            if (!QueryFullProcessImageName(process, 0, executablePath, ref size))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return executablePath.ToString();
+        }
+        finally
+        {
+            _ = CloseHandle(process);
         }
     }
 
