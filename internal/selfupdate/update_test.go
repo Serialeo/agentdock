@@ -447,7 +447,7 @@ func TestRunRefreshesWindowsCoreAndDesktopAtSameVersion(t *testing.T) {
 	var bundle bytes.Buffer
 	writer := zip.NewWriter(&bundle)
 	for name, content := range map[string]string{
-		"bin/agentdock.exe":                     "new-core",
+		"agentdock.exe":                         "new-core",
 		"AgentDock.ControlPanel.exe":            "new-desktop",
 		coreSkillBundlePrefix + "manifest.json": `{"skills":[]}`,
 	} {
