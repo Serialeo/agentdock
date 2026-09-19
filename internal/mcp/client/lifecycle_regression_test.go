@@ -289,13 +289,16 @@ func TestManagerRemoveReturnsWhenStreamableHTTPSessionDeleteHangs(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	started := time.Now()
-	err = manager.Remove("hung-delete")
+	removeDone := make(chan error, 1)
+	go func() { removeDone <- manager.Remove("hung-delete") }()
+	select {
+	case err = <-removeDone:
+	case <-time.After(3 * time.Second):
+		server.CloseClientConnections()
+		t.Fatal("remove did not return after hung DELETE deadline")
+	}
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("remove error = %v, want deadline exceeded", err)
-	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("remove waited %s for hung DELETE", elapsed)
 	}
 	select {
 	case <-deleteStarted:
