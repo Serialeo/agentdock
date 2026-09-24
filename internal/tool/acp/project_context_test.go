@@ -118,3 +118,29 @@ func TestACPRelativeDirectoryUsesTargetScopedCWD(t *testing.T) {
 		t.Fatal("ACP scoped cwd mutated Workspace default")
 	}
 }
+
+func TestACPFullAccessKeepsRevocationChecks(t *testing.T) {
+	service := &Service{}
+	for _, state := range []string{"current", "disabled", "stale", "revoked"} {
+		t.Run(state, func(t *testing.T) {
+			execution := acpProjectExecutionForTest("target-a", false)
+			execution.Permissions.FullAccess = true
+			switch state {
+			case "disabled":
+				execution.Permissions.FullAccess = false
+			case "stale":
+				execution.Deployment.AppliedRevision = "rev-2"
+			case "revoked":
+				execution.Target.Revoked = true
+			}
+			_, err := service.requireCurrentACP(projectstate.WithExecution(t.Context(), execution))
+			if state == "current" {
+				if err != nil {
+					t.Fatalf("Full Access ACP rejected: %v", err)
+				}
+			} else {
+				requireACPToolErrorCode(t, err, protocol.ErrorCapabilityDenied)
+			}
+		})
+	}
+}

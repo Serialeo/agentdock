@@ -43,8 +43,9 @@ func requireSessionStdinPermission(execution projectstate.Execution) error {
 	if execution.Target.TargetID == "" {
 		return nil
 	}
+	// Full Access 覆盖细粒度回退值，但不覆盖 Target 撤销或版本失效。
 	currentRevision := execution.Deployment.AppliedRevision
-	if execution.Target.Revoked || currentRevision == "" || currentRevision != execution.Target.DeploymentRevision || !execution.Permissions.Shell {
+	if execution.Target.Revoked || currentRevision == "" || currentRevision != execution.Target.DeploymentRevision || !(execution.Permissions.FullAccess || execution.Permissions.Shell) {
 		return toolErrorDetails(
 			protocol.ErrorCapabilityDenied,
 			"current Project Deployment no longer allows command stdin",

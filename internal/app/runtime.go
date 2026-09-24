@@ -334,7 +334,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 		return nil, err
 	}
 	var err error
-	ctx, err = r.refreshPreparedProjectExecution(ctx, name)
+	ctx, err = r.refreshPreparedProjectExecution(ctx, name, args)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func (r *Runtime) Call(ctx context.Context, name string, args map[string]any) (R
 	return spec.Handler(ctx, r, args)
 }
 
-func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string) (context.Context, error) {
+func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName string, args map[string]any) (context.Context, error) {
 	execution, ok := projectstate.ExecutionFromContext(ctx)
 	if !ok || r == nil || r.projects == nil || r.ws == nil {
 		return ctx, nil
@@ -358,10 +358,9 @@ func (r *Runtime) refreshPreparedProjectExecution(ctx context.Context, toolName 
 	executionContext := execution.Context
 	var refreshed projectstate.Execution
 	var err error
-	switch {
-	case toolName == "session_observe" || toolName == "session_act" || toolName == "acp_session" || toolName == "acp_prompt" || toolName == "acp_interaction":
+	if projectstate.UsesSessionControlExecution(toolName, args) {
 		refreshed, err = r.projects.ResolveSessionControlExecution(&executionContext)
-	default:
+	} else {
 		refreshed, err = r.projects.ResolveExecution(&executionContext)
 	}
 	if err != nil {

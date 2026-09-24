@@ -19,8 +19,9 @@ func (s *Service) requireCurrentACP(ctx context.Context) (projectstate.Execution
 	if !scoped {
 		return projectstate.Execution{}, nil
 	}
+	// Full Access 覆盖细粒度回退值，但不覆盖 Target 撤销或版本失效。
 	currentRevision := execution.Deployment.AppliedRevision
-	if execution.Target.Revoked || currentRevision == "" || currentRevision != execution.Target.DeploymentRevision || !execution.Permissions.ACP {
+	if execution.Target.Revoked || currentRevision == "" || currentRevision != execution.Target.DeploymentRevision || !(execution.Permissions.FullAccess || execution.Permissions.ACP) {
 		return projectstate.Execution{}, &ToolError{
 			Code: protocol.ErrorCapabilityDenied, Message: "current Project Deployment does not allow ACP execution", Category: "authorization",
 			Details: map[string]any{"target_id": execution.Target.TargetID, "deployment_id": execution.Target.DeploymentID},

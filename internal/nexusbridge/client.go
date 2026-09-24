@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/uvwt/agentdock/internal/app"
 	"github.com/uvwt/agentdock/internal/buildinfo"
+	projectstate "github.com/uvwt/agentdock/internal/project"
 	"github.com/uvwt/agentdock/internal/publicartifacts"
 	"github.com/uvwt/agentdock/internal/runtimeapi"
 )
@@ -263,14 +264,8 @@ func (c *Client) invoke(parent context.Context, socket *websocket.Conn, incoming
 			err = fmt.Errorf("解析工具请求: %w", decodeErr)
 		} else {
 			prepare := c.node.PrepareProjectExecution
-			switch request.Tool {
-			case "session_observe", "session_act", "acp_session", "acp_prompt", "acp_interaction":
+			if projectstate.UsesSessionControlExecution(request.Tool, request.Arguments) {
 				prepare = c.node.PrepareProjectSessionControlExecution
-			case "browser_session":
-				action, _ := request.Arguments["action"].(string)
-				if strings.EqualFold(strings.TrimSpace(action), "close") {
-					prepare = c.node.PrepareProjectSessionControlExecution
-				}
 			}
 			preparedCtx, prepareErr := prepare(ctx, incoming.ExecutionContext)
 			if prepareErr != nil {

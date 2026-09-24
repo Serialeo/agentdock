@@ -83,3 +83,28 @@ func TestCommandStdinRequiresCurrentShellButCleanupCanKeepOwnership(t *testing.T
 		requireCommandToolErrorCode(t, err, protocol.ErrorCapabilityDenied)
 	}
 }
+
+func TestCommandFullAccessStdinKeepsRevocationChecks(t *testing.T) {
+	for _, state := range []string{"current", "disabled", "stale", "revoked"} {
+		t.Run(state, func(t *testing.T) {
+			execution := commandProjectExecutionForTest("target-a", false)
+			execution.Permissions.FullAccess = true
+			switch state {
+			case "disabled":
+				execution.Permissions.FullAccess = false
+			case "stale":
+				execution.Deployment.AppliedRevision = "rev-2"
+			case "revoked":
+				execution.Target.Revoked = true
+			}
+			err := requireSessionStdinPermission(execution)
+			if state == "current" {
+				if err != nil {
+					t.Fatalf("Full Access stdin rejected: %v", err)
+				}
+			} else {
+				requireCommandToolErrorCode(t, err, protocol.ErrorCapabilityDenied)
+			}
+		})
+	}
+}

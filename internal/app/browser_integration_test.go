@@ -14,9 +14,11 @@ import (
 	"testing"
 	"time"
 
+	protocol "github.com/Serialeo/agentdock-protocol"
 	"github.com/gorilla/websocket"
 	"github.com/uvwt/agentdock/internal/builtin"
 	"github.com/uvwt/agentdock/internal/config"
+	projectstate "github.com/uvwt/agentdock/internal/project"
 )
 
 func appBrowserIntegrationRuntime(t *testing.T) (*Runtime, string) {
@@ -228,5 +230,50 @@ func TestPerCallCDPWorksWithoutHealthyDefaultBackend(t *testing.T) {
 			_, err = r.Call(t.Context(), "browser_session", map[string]any{"action": "start", "cdp_url": endpoint})
 			requireAppToolErrorCode(t, err, "CAPABILITY_UNAVAILABLE")
 		})
+	}
+}
+
+func TestBrowserIntegrationRevokedOwnerCanCloseWithoutRestoringExecution(t *testing.T) {
+	runtime, _ := appBrowserIntegrationRuntime(t)
+	ctx := projectContextForTest(t, runtime, runtime.cfg.AgentDockDefaultDir, protocol.DeploymentPermissions{FullAccess: true, Files: protocol.FileCapabilityNone})
+	execution, _ := projectstate.ExecutionFromContext(ctx)
+	started, err := runtime.Call(ctx, "browser_session", map[string]any{"action": "start", "url": "about:blank", "headless": true, "timeout_ms": 60000})
+	if err != nil || started["browser_ok"] != true {
+		t.Fatalf("start owned browser: %#v %v", started, err)
+	}
+	id, _ := started["session_id"].(string)
+	if id == "" {
+		t.Fatalf("missing browser identity: %#v", started)
+	}
+	otherBinding := protocol.ProjectTargetBindRequest{
+		WorkSessionID: "other-ws", TargetID: "other-target", ProjectID: execution.Target.ProjectID, DeploymentID: execution.Target.DeploymentID,
+		CWDRel: ".", DeploymentRevision: execution.Target.DeploymentRevision, ContextRevision: "other-context",
+		PromptScopes: execution.Target.PromptScopes, SourceProvenance: execution.Target.SourceProvenance,
+	}
+	if _, err := runtime.BindProjectTarget(otherBinding); err != nil {
+		t.Fatal(err)
+	}
+	other, err := runtime.PrepareProjectExecution(t.Context(), executionContextForBinding(otherBinding))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.RevokeProjectTarget(execution.Target.TargetID)
+	runtime.RevokeProjectTarget(otherBinding.TargetID)
+	_, err = runtime.Call(other, "browser_session", map[string]any{"action": "close", "session_id": id})
+	assertProjectErrorCode(t, err, protocol.ErrorSessionTargetDenied)
+	for _, call := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"browser_session", map[string]any{"action": "start", "url": "about:blank"}},
+		{"browser_snapshot", map[string]any{"session_id": id}},
+		{"browser_act", map[string]any{"session_id": id, "actions": []any{map[string]any{"action": "goto", "url": "about:blank"}}, "close_after": true}},
+	} {
+		_, err := runtime.Call(ctx, call.name, call.args)
+		assertProjectErrorCode(t, err, protocol.ErrorSessionTargetDenied)
+	}
+	closed, err := runtime.Call(ctx, "browser_session", map[string]any{"action": "close", "session_id": id})
+	if err != nil || closed["browser_ok"] != true || closed["closed"] != true {
+		t.Fatalf("owner could not close revoked browser: %#v %v", closed, err)
 	}
 }
