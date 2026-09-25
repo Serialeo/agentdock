@@ -13,9 +13,16 @@ import (
 	"time"
 
 	protocol "github.com/Serialeo/agentdock-protocol"
+	processcontrol "github.com/uvwt/agentdock/internal/process"
 )
 
 const sourceProvenanceTimeout = 5 * time.Second
+
+func sourceProvenanceGitCommand(ctx context.Context, gitPath string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, gitPath, args...)
+	processcontrol.Configure(cmd)
+	return cmd
+}
 
 // InspectSourceProvenance captures source-control identity without using the
 // model-visible Shell capability. It is part of trusted Project context loading,
@@ -43,7 +50,7 @@ func InspectSourceProvenance(ctx context.Context, workingFolder string) (protoco
 
 	run := func(args ...string) (string, error) {
 		commandArgs := append([]string{"-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-C", workingFolder}, args...)
-		cmd := exec.CommandContext(inspectCtx, gitPath, commandArgs...)
+		cmd := sourceProvenanceGitCommand(inspectCtx, gitPath, commandArgs...)
 		cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -166,7 +173,7 @@ func (w *anyOutputWriter) Write(p []byte) (int, error) {
 }
 
 func gitDirty(ctx context.Context, gitPath, workingFolder string) (bool, error) {
-	cmd := exec.CommandContext(ctx, gitPath,
+	cmd := sourceProvenanceGitCommand(ctx, gitPath,
 		"-c", "core.fsmonitor=false",
 		"-c", "core.untrackedCache=false",
 		"-C", workingFolder,
